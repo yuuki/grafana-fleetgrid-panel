@@ -11,7 +11,7 @@ The panel draws every cell on a single `<canvas>` and overlays the tooltip, dril
 - **Auto-fitted cells** — Cell size is computed from the panel dimensions. Numbers are drawn only when the formatted text fits; the exact value is always available on hover.
 - **Natural sort** — Numeric segments inside labels are compared as numbers (`node-a2 < node-a10`), ascending by default (descending and "data order" are also selectable).
 - **Multiple metrics** — Show one metric at a time with an in-panel selector (default), or opt in to split each cell into sub-regions to compare its metrics side by side. The tooltip and popover list every metric that returned data.
-- **Drilldown** — Click a cell to open a popover with a per-metric sparkline and current value. If the field has Data Links, navigation takes priority over the popover.
+- **Drilldown** — Click a cell to open a popover with the current value per metric, plus a sparkline whenever time-series data is available for that metric. If the field has Data Links, navigation takes priority over the popover.
 
 ## Compatibility
 
@@ -103,13 +103,13 @@ The tooltip (on hover) and the drilldown popover list every metric that returned
 Clicking a cell resolves in this order:
 
 1. **Data Links** — If the field has Grafana Data Links configured, the click navigates. A single link is followed immediately; multiple links open a small link-selection menu the panel renders itself. Data Links always take priority.
-2. **Popover** — Otherwise a card-style popover opens next to the cell, showing the hierarchy path and, per metric, a sparkline plus the current value. It auto-flips to stay inside the panel and closes on outside-click or `Esc`.
+2. **Popover** — Otherwise a card-style popover opens next to the cell, showing the hierarchy path and, per metric, the current value plus a sparkline when time-series data is available (see the instant-query note below); metrics without a time series show "時系列なし" instead. It auto-flips and clamps to stay inside the visible area and closes on outside-click or `Esc`.
 
-**Instant query note** — When the panel's queries are instant (no time series in the received frames), clicking re-runs the panel's queries as range over the dashboard time range via the data source, capped at ~100 data points, then extracts the series matching the clicked cell. The result is cached per panel until the next data update, so opening additional cells does not trigger another fetch. When the panel already runs range queries, no re-query happens. If re-querying feels slow at your scale, switch to range queries to remove it entirely.
+**Instant query note** — When **any** of the panel's queries is instant (no time series in the received frames), clicking re-runs **all** of the panel's queries as range over the dashboard time range via the data source — a query configured as `format: table` is re-issued as `time_series` so a sparkline series comes back — capped at ~100 data points, then extracts the series matching the clicked cell. The result is cached per panel until the next data update, so opening additional cells does not trigger another fetch; a failed re-query shows a short message in the popover and retries on the next data update. When the panel already runs range queries, no re-query happens. If re-querying feels slow at your scale, switch to range queries to remove it entirely. This instant-query drilldown path has not yet been verified against a live Prometheus / VictoriaMetrics data source.
 
 ## Layout notes
 
-Cell size is auto-fitted between **6 px** and **40 px** by scanning candidate sizes from large to small and taking the largest that fits the panel. If cells would fall below 6 px, the size is pinned to 6 px and the panel scrolls vertically; while scrolling, the current top-most level's group label stays pinned to the top. If the content is still wider than the panel, it scrolls horizontally as well.
+Cell size is auto-fitted between **6 px** and **40 px** by scanning candidate sizes from large to small and taking the largest that fits the panel. If even 6 px cells do not fit, the size is pinned to 6 px. The panel then scrolls **vertically** when the content is taller than the panel and **horizontally** when it is wider. While scrolling vertically, the current top-most level's group label stays pinned to the top — but only when that top level has its **Group label** enabled, since otherwise there is no label to pin.
 
 ## Development
 
