@@ -52,4 +52,35 @@ describe('DrilldownPopover', () => {
     );
     expect(screen.getByText('power (3系列中の先頭を表示)')).toBeInTheDocument();
   });
+  it('clamps a flipped popover within a scrolled (non-zero) visible range', () => {
+    const infos = buildMetricInfos([rangeFrame], theme, 'browser');
+    // スクロール後の狭い可視範囲。右下端付近クリックで左上へ反転し、素朴なx-W-8はminXを下回る。
+    const minX = 200;
+    const minY = 150;
+    const maxX = 500; // 幅は内部W(300)と同じ → クランプ必須
+    const maxY = 400;
+    render(
+      <DrilldownPopover
+        cell={cell}
+        metricInfos={infos}
+        seriesFor={() => ({ frame: rangeFrame, seriesCount: 1, aggregated: false })}
+        loading={false}
+        x={480}
+        y={380}
+        minX={minX}
+        minY={minY}
+        maxX={maxX}
+        maxY={maxY}
+        onClose={() => {}}
+      />
+    );
+    const popover = screen.getByText('zone-a').parentElement!.parentElement as HTMLElement;
+    const left = parseFloat(popover.style.left);
+    const top = parseFloat(popover.style.top);
+    // 可視範囲(min..max)内に収まる。0固定クランプなら left=172 < minX でこのassertは落ちる。
+    expect(left).toBeGreaterThanOrEqual(minX);
+    expect(left).toBeLessThanOrEqual(maxX);
+    expect(top).toBeGreaterThanOrEqual(minY);
+    expect(top).toBeLessThanOrEqual(maxY);
+  });
 });

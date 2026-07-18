@@ -133,6 +133,43 @@ describe('getCellLinks', () => {
     const links = getCellLinks([wide], 'A', { zone: 'zone-a' });
     expect(links.map((l) => l.href)).toEqual(['https://a', 'https://b']);
   });
+  it('collapses one Data Link applied to every aggregated series to a single link', () => {
+    // 同一Data Link設定が各系列に適用され、系列数分の同一(href/title/target)リンクが返る典型ケース
+    const frames = [
+      frame('A', { zone: 'zone-a', gpu: '0' }, [1, 2]),
+      frame('A', { zone: 'zone-a', gpu: '1' }, [3, 4]),
+      frame('A', { zone: 'zone-a', gpu: '2' }, [5, 6]),
+    ];
+    const link = () => [{ href: 'https://example.com/d/dash', title: 'Dashboard', target: '_blank', origin: {} }];
+    frames.forEach((f) => (f.fields[1].getLinks = link as any));
+    const links = getCellLinks(frames, 'A', { zone: 'zone-a' });
+    expect(links).toHaveLength(1); // 単一リンクとして即実行できる
+    expect(links[0].href).toBe('https://example.com/d/dash');
+  });
+  it('keeps links that share an href but differ in title', () => {
+    const wide = wideFrame('A', [
+      { labels: { zone: 'zone-a', gpu: '0' }, values: [1, 2] },
+      { labels: { zone: 'zone-a', gpu: '1' }, values: [3, 4] },
+    ]);
+    wide.fields[1].getLinks = (() => [{ href: 'https://x', title: 'Logs', target: '_blank', origin: {} }]) as any;
+    wide.fields[2].getLinks = (() => [{ href: 'https://x', title: 'Traces', target: '_blank', origin: {} }]) as any;
+    const links = getCellLinks([wide], 'A', { zone: 'zone-a' });
+    expect(links.map((l) => l.title)).toEqual(['Logs', 'Traces']);
+  });
+  it('keeps onClick links from different series conservatively (behavior may differ)', () => {
+    const frames = [
+      frame('A', { zone: 'zone-a', gpu: '0' }, [1, 2]),
+      frame('A', { zone: 'zone-a', gpu: '1' }, [3, 4]),
+    ];
+    // href/title/targetは同一だが別々のonClick・別origin → 保守的に両方残す
+    frames[0].fields[1].getLinks = (() => [
+      { href: 'https://x', title: 'D', target: '_self', origin: {}, onClick: () => undefined },
+    ]) as any;
+    frames[1].fields[1].getLinks = (() => [
+      { href: 'https://x', title: 'D', target: '_self', origin: {}, onClick: () => undefined },
+    ]) as any;
+    expect(getCellLinks(frames, 'A', { zone: 'zone-a' })).toHaveLength(2);
+  });
   it('resolves table rows by matching string columns', () => {
     const table = toDataFrame({
       refId: 'A',

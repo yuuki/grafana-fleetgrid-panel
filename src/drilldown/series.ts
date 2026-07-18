@@ -114,6 +114,38 @@ export function drilldownSeries(
   return { frame, seriesCount: series.length, aggregated: true };
 }
 
+/**
+ * 意味上同一のリンクだけを畳む。典型的には同じData Link設定が各系列に適用され、
+ * href/title/targetが一致する同一リンクが系列数分返るケースを1件にする。
+ * onClickは動作が異なり得るため保守的に扱い、同一関数参照または同一originのときのみ同一視する
+ * (判断に迷えば残す)。
+ */
+function sameLink(a: LinkModel<Field>, b: LinkModel<Field>): boolean {
+  if (a.href !== b.href || a.title !== b.title || (a.target ?? '') !== (b.target ?? '')) {
+    return false;
+  }
+  if (!a.onClick && !b.onClick) {
+    // 純粋なhrefリンク同士: href/title/targetが一致すれば同一とみなす
+    return true;
+  }
+  if (a.onClick && b.onClick) {
+    // onClickあり同士: 動作が異なり得るので、同一関数参照 or 同一origin のときだけ同一視
+    return a.onClick === b.onClick || (a.origin != null && a.origin === b.origin);
+  }
+  // 片方だけonClick: 動作が異なるため別物として残す
+  return false;
+}
+
+function dedupeLinks(links: Array<LinkModel<Field>>): Array<LinkModel<Field>> {
+  const out: Array<LinkModel<Field>> = [];
+  for (const link of links) {
+    if (!out.some((kept) => sameLink(kept, link))) {
+      out.push(link);
+    }
+  }
+  return out;
+}
+
 export function getCellLinks(
   frames: DataFrame[],
   refId: string,
@@ -155,5 +187,6 @@ export function getCellLinks(
       }
     }
   }
-  return out;
+  // 意味上単一のリンクが系列数分重複して即実行されない/メニューが重複キーで溢れるのを防ぐ
+  return dedupeLinks(out);
 }
