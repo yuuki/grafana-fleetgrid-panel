@@ -36,15 +36,26 @@
 
 ```bash
 cd /Users/y-tsubouchi/src/github.com/yuuki/grafana-clusterview-panel
-npx @grafana/create-plugin@latest --pluginName=clusterview --orgName=yuuk1 --pluginType=panel --no-backend
+npx @grafana/create-plugin@7.0.5 --plugin-type panel --plugin-name clusterview --org-name yuuk1
 ```
 
-注: フラグ名はバージョンにより異なることがある。失敗したら `npx @grafana/create-plugin@latest --help` で非対話フラグを確認して読み替える。生成先ディレクトリ名は `yuuk1-clusterview-panel/` になる。
+注: 再現性のためバージョンを7.0.5に固定する(公式ドキュメント表記のkebab-caseフラグ)。panelタイプではbackend有無の質問は発生しない。生成先ディレクトリ名は `yuuk1-clusterview-panel/` になる。
 
 ```bash
 rsync -a yuuk1-clusterview-panel/ ./ --exclude LICENSE   # 既存LICENSEを保持
 rm -rf yuuk1-clusterview-panel
 npm install
+npm install --save-dev jest-canvas-mock
+```
+
+`jest.config.js`(scaffoldの `.config/` 継承を保ったまま)に canvas モックを追加する。後続タスクのコンポーネントテストがcanvas 2D contextに依存するため:
+
+```js
+// jest.config.js
+module.exports = {
+  ...require('./.config/jest.config'),
+  setupFiles: ['jest-canvas-mock'],
+};
 ```
 
 - [ ] **Step 2: plugin.jsonを編集**
@@ -173,10 +184,12 @@ git commit -m "feat: add option and cell model types"
 
 **Interfaces:**
 - Consumes: `NormalizedRow`(Task 2)
-- Produces: `normalizeFrames(frames: DataFrame[], reduceCalc: string): NormalizedRow[]`
-  - time series形式: 数値フィールドごとに1行。`field.labels` をlabelsに、値は `reduceCalc`(ReducerID)で時間方向に畳む
-  - table形式(時間フィールドなし+文字列フィールドあり): データ行ごとに1行。文字列列をlabelsに、最初の数値列を値に
-  - refIdは `frame.refId ?? 'A'`
+- Produces:
+  - `normalizeFrames(frames: DataFrame[], reduceCalc: string): NormalizedRow[]`
+    - time series形式: 数値フィールドごとに1行。`field.labels` をlabelsに、値は `reduceCalc`(ReducerID)で時間方向に畳む
+    - table形式: データ行ごとに1行。文字列列をlabelsに、最初の数値列を値に
+    - refIdは `frame.refId ?? 'A'`
+  - `isTableFrame(frame: DataFrame): boolean` — 「文字列列があり、かつ数値フィールドがlabelsを持たない」ときtable。PrometheusのtableはTime列を含むため、Time列の有無では判定しない(Task 9のエディタも同じ判定を使う)
 
 - [ ] **Step 1: 失敗するテストを書く**
 
@@ -226,6 +239,21 @@ describe('normalizeFrames', () => {
     ]);
   });
 
+  it('treats frames with string columns and unlabeled values as table even with a time column', () => {
+    // Prometheusのinstant+format=tableはTime列を持つ
+    const frame = toDataFrame({
+      refId: 'B',
+      fields: [
+        { name: 'Time', type: FieldType.time, values: [1000, 1000] },
+        { name: 'zone', type: FieldType.string, values: ['zone-a', 'zone-b'] },
+        { name: 'Value', type: FieldType.number, values: [61, 55] },
+      ],
+    });
+    const rows = normalizeFrames([frame], 'lastNotNull');
+    expect(rows).toHaveLength(2);
+    expect(rows[0].labels).toEqual({ zone: 'zone-a' });
+  });
+
   it('returns null value when a series is all null', () => {
     const frame = toDataFrame({
       refId: 'A',
@@ -255,15 +283,27 @@ Expected: FAIL(`./normalize` が存在しない)
 import { DataFrame, Field, FieldType, reduceField } from '@grafana/data';
 import { NormalizedRow } from '../types';
 
+/**
+ * ラベルが列として展開されたtable形式か。
+ * Prometheus/VictoriaMetricsのinstant+format=tableはTime列を含むため、Time列の有無では判定しない。
+ * 「文字列列があり、かつ数値フィールドがlabelsを持たない」ことをtableの根拠にする。
+ */
+export function isTableFrame(frame: DataFrame): boolean {
+  const hasLabeledNumber = frame.fields.some(
+    (f) => f.type === FieldType.number && f.labels && Object.keys(f.labels).length > 0
+  );
+  const hasStringColumn = frame.fields.some((f) => f.type === FieldType.string);
+  return hasStringColumn && !hasLabeledNumber;
+}
+
 export function normalizeFrames(frames: DataFrame[], reduceCalc: string): NormalizedRow[] {
   const rows: NormalizedRow[] = [];
   for (const frame of frames) {
     const refId = frame.refId ?? 'A';
-    const timeField = frame.fields.find((f) => f.type === FieldType.time);
     const stringFields = frame.fields.filter((f) => f.type === FieldType.string);
     const numberFields = frame.fields.filter((f) => f.type === FieldType.number);
 
-    if (!timeField && stringFields.length > 0) {
+    if (isTableFrame(frame)) {
       // table形式: 行ごとに1レコード
       const valueField = numberFields[0];
       if (!valueField) {
@@ -295,7 +335,8 @@ export function normalizeFrames(frames: DataFrame[], reduceCalc: string): Normal
 function reduceToValue(field: Field, reduceCalc: string): number | null {
   const stats = reduceField({ field, reducers: [reduceCalc] });
   const v = stats[reduceCalc];
-  return v == null || Number.isNaN(v) ? null : v;
+  // allValues等の非数値reducerが指定されても契約(number|null)を守る
+  return typeof v !== 'number' || Number.isNaN(v) ? null : v;
 }
 ```
 
@@ -332,7 +373,7 @@ git commit -m "feat: normalize time series and table frames into label rows"
     - rootは仮想ルート(`key: ''`)。葉のcellはまだ持たない(Task 5で付与)
     - warnings: ラベル不在(全行にラベルキーがない)、抽出全アンマッチを文言つきで返す
     - leafPaths: `pathKey(path)` → path。Task 5がセル生成に使う
-  - `pathKey(path: string[]): string` — パスの安定文字列化(区切りは `' '`)
+  - `pathKey(path: string[]): string` — パスの構造化文字列化(`JSON.stringify`。キーにどんな文字が来ても衝突しない)
 
 - [ ] **Step 1: 失敗するテストを書く**
 
@@ -355,6 +396,9 @@ describe('extractKey', () => {
   it('extracts first capture group of custom regex', () => {
     expect(extractKey('node-a004', level({ label: 'h', extract: 'regex', regex: 'node-.+?(\\d\\d\\d)' }))).toBe('004');
     expect(extractKey('other', level({ label: 'h', extract: 'regex', regex: 'node-(\\d+)' }))).toBeNull();
+  });
+  it('returns null for regex without capture group', () => {
+    expect(extractKey('node-a004', level({ label: 'h', extract: 'regex', regex: 'node-a\\d+' }))).toBeNull();
   });
 });
 
@@ -407,6 +451,15 @@ describe('buildHierarchy', () => {
   it('round-trips pathKey', () => {
     expect(pathKey(['a', 'b'])).not.toBe(pathKey(['a', 'c']));
   });
+
+  it('warns when only some rows match the hierarchy', () => {
+    const mixed: NormalizedRow[] = [
+      { labels: { zone: 'zone-a', gpu: '0' }, value: 1, refId: 'A' },
+      { labels: { zone: 'zone-b' }, value: 2, refId: 'A' }, // gpuラベルなし
+    ];
+    const { warnings } = buildHierarchy(mixed, levels);
+    expect(warnings.some((w) => w.includes('1/2'))).toBe(true);
+  });
 });
 ```
 
@@ -425,10 +478,8 @@ Expected: FAIL(`./hierarchy` が存在しない)
 ```ts
 import { HierarchyNode, LevelDef, NormalizedRow } from '../types';
 
-const SEP = ' ';
-
 export function pathKey(path: string[]): string {
-  return path.join(SEP);
+  return JSON.stringify(path);
 }
 
 export function extractKey(value: string, level: LevelDef): string | null {
@@ -450,7 +501,8 @@ export function extractKey(value: string, level: LevelDef): string | null {
         return null;
       }
       const m = re.exec(value);
-      return m ? (m[1] ?? m[0]) : null;
+      // 仕様どおり第1キャプチャグループを必須とする(グループなしregexは全行アンマッチ扱いで警告に乗る)
+      return m && m[1] !== undefined ? m[1] : null;
     }
   }
 }
@@ -476,6 +528,7 @@ export function buildHierarchy(rows: NormalizedRow[], levels: LevelDef[]): Build
   const labelHit = new Array(levels.length).fill(0);
   const extractHit = new Array(levels.length).fill(0);
   const leafPaths = new Map<string, string[]>();
+  let matched = 0;
 
   for (const row of rows) {
     const path: string[] = [];
@@ -497,7 +550,12 @@ export function buildHierarchy(rows: NormalizedRow[], levels: LevelDef[]): Build
     }
     if (ok && path.length === levels.length) {
       leafPaths.set(pathKey(path), path);
+      matched++;
     }
+  }
+
+  if (rows.length > 0 && matched > 0 && matched < rows.length) {
+    warnings.push(`${rows.length - matched}/${rows.length} 行が階層にマッチせず除外されました`);
   }
 
   for (let i = 0; i < levels.length; i++) {
@@ -569,7 +627,7 @@ git commit -m "feat: build sorted hierarchy tree from label rows"
 **Interfaces:**
 - Consumes: `buildHierarchy` の結果(Task 4)、`NormalizedRow`、`SpatialAggregation`
 - Produces:
-  - `attachCells(root: HierarchyNode, rows: NormalizedRow[], levels: LevelDef[], agg: SpatialAggregation): void` — 各葉に `cell: CellModel` を付与する(in-place)。`cell.values` は出現した全refIdをキーに持ち、系列がないrefIdは `null`。`cell.labels` には階層に使ったラベルキーの代表原値(最初に該当した行のもの)を入れる
+  - `attachCells(root: HierarchyNode, rows: NormalizedRow[], levels: LevelDef[], agg: SpatialAggregation, refIds?: string[]): void` — 各葉に `cell: CellModel` を付与する(in-place)。`cell.values` は `refIds`(省略時は行から収集)の全キーを持ち、系列がないrefIdは `null`。0系列のクエリ(結果が空)もrefIdsに渡せば全セルnullで枠が残る。`cell.labels` には階層に使ったラベルキーの代表原値(最初に該当した行のもの)を入れる
   - `collectRefIds(rows: NormalizedRow[]): string[]` — 出現順のrefId一覧
 
 - [ ] **Step 1: 失敗するテストを書く**
@@ -676,9 +734,9 @@ export function attachCells(
   root: HierarchyNode,
   rows: NormalizedRow[],
   levels: LevelDef[],
-  agg: SpatialAggregation
+  agg: SpatialAggregation,
+  refIds: string[] = collectRefIds(rows)
 ): void {
-  const refIds = collectRefIds(rows);
 
   // pathKey → { 代表原値ラベル, refId → 生値リスト }
   interface Bucket {
@@ -764,9 +822,10 @@ git commit -m "feat: attach per-query cell values with union and spatial aggrega
 - Consumes: `PanelData`のフレーム群、`@grafana/data` の `getDisplayProcessor`
 - Produces:
   - `MetricInfo { refId: string; name: string; processor: DisplayProcessor; field: Field; frame: DataFrame }`
-  - `buildMetricInfos(frames: DataFrame[], theme: GrafanaTheme2, timeZone: string): MetricInfo[]`
-    - refIdごとに先頭フレームの数値フィールドから代表configを取り、min/max未設定ならそのrefIdの全数値の範囲で補完してprocessorを構築
-    - nameはクエリ表示名(`getFieldDisplayName`のフレーム名部分)。フレームnameがなければrefId
+  - `buildMetricInfos(frames: DataFrame[], theme: GrafanaTheme2, timeZone: string, rangeByRef?: Map<string, { min: number; max: number }>): MetricInfo[]`
+    - refIdごとに先頭フレームの数値フィールドから代表configを取り、min/max未設定なら `rangeByRef`(セル値由来のrefId別範囲。Task 10のbuildModelが渡す)で補完。rangeByRefがなければフレーム走査で補完
+    - display processorは `config.min/max` より `field.state.range` を優先するため、**`state.range` にも同じ値を設定する**(applyFieldOverridesがパネル全体のグローバル範囲を注入していても、refId別範囲で上書きされる)
+    - nameは `frame.name ?? refId`
   - `chooseCellText(display: DisplayValue, cellW: number, cellH: number, measure: (text: string, fontPx: number) => number): { text: string; fontPx: number } | null`
     - フォント= `clamp(cellH * 0.38, 9, 15)`。`suffix付き → 数値のみ → null` の順で判定。条件は `幅+4 <= cellW`
 
@@ -814,6 +873,25 @@ describe('buildMetricInfos', () => {
     expect(infos[0].field.config.min).toBe(0);
     expect(infos[0].field.config.max).toBe(2000);
   });
+
+  it('overrides inherited global state.range with the per-query range', () => {
+    // applyFieldOverridesはパネル全体のグローバル範囲をstate.rangeに注入することがある
+    const f = frame('A', 'power', [600, 1000]);
+    f.fields[1].state = { range: { min: 0, max: 2000, delta: 2000 } };
+    const infos = buildMetricInfos([f], theme, 'browser');
+    expect(infos[0].field.state?.range).toEqual({ min: 600, max: 1000, delta: 400 });
+  });
+
+  it('prefers cell-derived ranges when provided', () => {
+    const infos = buildMetricInfos(
+      [frame('A', 'power', [600, 1000])],
+      theme,
+      'browser',
+      new Map([['A', { min: 700, max: 900 }]])
+    );
+    expect(infos[0].field.config.min).toBe(700);
+    expect(infos[0].field.config.max).toBe(900);
+  });
 });
 
 describe('chooseCellText', () => {
@@ -857,6 +935,7 @@ import {
   Field,
   FieldType,
   GrafanaTheme2,
+  formattedValueToString,
   getDisplayProcessor,
 } from '@grafana/data';
 
@@ -868,7 +947,12 @@ export interface MetricInfo {
   frame: DataFrame;
 }
 
-export function buildMetricInfos(frames: DataFrame[], theme: GrafanaTheme2, timeZone: string): MetricInfo[] {
+export function buildMetricInfos(
+  frames: DataFrame[],
+  theme: GrafanaTheme2,
+  timeZone: string,
+  rangeByRef?: Map<string, { min: number; max: number }>
+): MetricInfo[] {
   const byRef = new Map<string, DataFrame[]>();
   for (const f of frames) {
     const refId = f.refId ?? 'A';
@@ -884,20 +968,23 @@ export function buildMetricInfos(frames: DataFrame[], theme: GrafanaTheme2, time
       continue;
     }
 
-    // refId内の全数値からmin/maxを補完(明示設定があれば優先)
-    let min = Number.POSITIVE_INFINITY;
-    let max = Number.NEGATIVE_INFINITY;
-    for (const f of group) {
-      for (const field of f.fields) {
-        if (field.type !== FieldType.number) {
-          continue;
-        }
-        for (const v of field.values) {
-          if (v == null || Number.isNaN(v)) {
+    // refId単位のmin/max: セル値由来のrangeByRefを優先し、なければフレーム走査で補完(明示設定が最優先)
+    const preset = rangeByRef?.get(refId);
+    let min = preset ? preset.min : Number.POSITIVE_INFINITY;
+    let max = preset ? preset.max : Number.NEGATIVE_INFINITY;
+    if (!preset) {
+      for (const f of group) {
+        for (const field of f.fields) {
+          if (field.type !== FieldType.number) {
             continue;
           }
-          min = Math.min(min, v);
-          max = Math.max(max, v);
+          for (const v of field.values) {
+            if (v == null || Number.isNaN(v)) {
+              continue;
+            }
+            min = Math.min(min, v);
+            max = Math.max(max, v);
+          }
         }
       }
     }
@@ -910,9 +997,16 @@ export function buildMetricInfos(frames: DataFrame[], theme: GrafanaTheme2, time
     }
 
     const config = { ...firstNumeric.field.config };
-    config.min = config.min ?? min;
-    config.max = config.max ?? max;
-    const field: Field = { ...firstNumeric.field, config };
+    const effMin = config.min ?? min;
+    const effMax = config.max ?? max;
+    config.min = effMin;
+    config.max = effMax;
+    // display processorはconfigよりfield.state.rangeを優先するため、両方を揃える
+    const field: Field = {
+      ...firstNumeric.field,
+      config,
+      state: { ...firstNumeric.field.state, range: { min: effMin, max: effMax, delta: effMax - effMin } },
+    };
     const processor = getDisplayProcessor({ field, theme, timeZone });
 
     infos.push({
@@ -940,7 +1034,7 @@ export function chooseCellText(
   if (cellH < FONT_MIN + 2) {
     return null;
   }
-  const withSuffix = `${display.text}${display.suffix ?? ''}`;
+  const withSuffix = formattedValueToString(display); // prefix/suffix込みの標準整形
   if (measure(withSuffix, fontPx) + TEXT_PAD <= cellW) {
     return { text: withSuffix, fontPx };
   }
@@ -1035,7 +1129,7 @@ describe('computeLayout', () => {
     expect(r.labels.map((l) => l.text)).toEqual(['zone-a', 'zone-b']);
   });
 
-  it('finds intermediate cell size by binary search', () => {
+  it('finds intermediate cell size by descending scan', () => {
     // 1 zone × 100 GPU、10列grid。幅800なら 800/10−gap ≒ 79 → S_MAXでは幅超過しない
     // 高さを絞って中間サイズを強制: 10行 × (s+1) + LABEL_H <= 200
     const wide: LevelDef[] = [
@@ -1156,23 +1250,14 @@ export function computeLayout(
     return m.w <= width && m.h <= height;
   };
 
-  let s: number;
-  if (!fits(S_MIN)) {
-    s = S_MIN;
-  } else if (fits(S_MAX)) {
-    s = S_MAX;
-  } else {
-    let lo = S_MIN;
-    let hi = S_MAX;
-    for (let i = 0; i < 20; i++) {
-      const mid = (lo + hi) / 2;
-      if (fits(mid)) {
-        lo = mid;
-      } else {
-        hi = mid;
-      }
+  // flowレイアウトの折返し位置が変わる境界で fits(s) の単調性が崩れるため、
+  // 二分探索ではなく上限から0.5px刻みの降順走査で「収まる最大のs」を決める(最大69候補、走査はミリ秒オーダー)
+  let s = S_MIN;
+  for (let cand = S_MAX; cand >= S_MIN; cand -= 0.5) {
+    if (fits(cand)) {
+      s = cand;
+      break;
     }
-    s = Math.floor(lo * 2) / 2; // 0.5px単位に切り下げ
   }
 
   const out: Out = { cells: [], labels: [], borders: [] };
@@ -1302,7 +1387,7 @@ Expected: PASS(5件)。座標の期待値がずれた場合はテストの前提
 ```bash
 npm run typecheck && npm run lint && npm run test:ci
 git add src/layout/layout.ts src/layout/layout.test.ts
-git commit -m "feat: layout engine with binary-searched cell size"
+git commit -m "feat: layout engine with auto-fitted cell size"
 ```
 
 ---
@@ -1592,7 +1677,7 @@ git commit -m "feat: canvas renderer, hit test and split-cell regions"
 - Consumes: `LevelDef`, `DEFAULT_LEVEL`(Task 2)、`extractKey`, `naturalCompare`(Task 4)
 - Produces:
   - `LevelsEditor: React.FC<StandardEditorProps<LevelDef[]>>` — `context.data`(DataFrame[])からラベルキーを列挙。レベルの追加/削除/上下移動、各レベルの設定UI、グループ数+サンプル値のライブプレビュー
-  - `ReduceCalcEditor: React.FC<StandardEditorProps<string>>` — `@grafana/ui` の `StatsPicker`(単一選択)の薄いラッパ
+  - `ReduceCalcEditor: React.FC<StandardEditorProps<string>>` — 数値スカラーを返すreducerに限定したSelect(`allValues` 等の配列系・boolean系は `number|null` 契約を破るため選択肢に載せない)
   - `detectLabelKeys(frames: DataFrame[]): string[]` — time series(field.labels)とtable(文字列列名)の両方からラベルキーを収集(export、テスト対象)
   - `previewLevel(frames: DataFrame[], level: LevelDef): { count: number; samples: string[] }`(export、テスト対象)
 
@@ -1662,16 +1747,17 @@ import { DataFrame, FieldType, SelectableValue, StandardEditorProps } from '@gra
 import { Button, IconButton, InlineField, InlineFieldRow, Input, RadioButtonGroup, Select, Switch } from '@grafana/ui';
 import { DEFAULT_LEVEL, ExtractPreset, LevelDef, LevelLayout, SortOrder } from '../types';
 import { extractKey, naturalCompare } from '../data/hierarchy';
+import { isTableFrame } from '../data/normalize';
 
 export function detectLabelKeys(frames: DataFrame[]): string[] {
   const keys = new Set<string>();
   for (const frame of frames) {
-    const hasTime = frame.fields.some((f) => f.type === FieldType.time);
+    const table = isTableFrame(frame);
     for (const field of frame.fields) {
       if (field.type === FieldType.number && field.labels) {
         Object.keys(field.labels).forEach((k) => keys.add(k));
       }
-      if (!hasTime && field.type === FieldType.string) {
+      if (table && field.type === FieldType.string) {
         keys.add(field.name);
       }
     }
@@ -1682,7 +1768,7 @@ export function detectLabelKeys(frames: DataFrame[]): string[] {
 export function previewLevel(frames: DataFrame[], level: LevelDef): { count: number; samples: string[] } {
   const found = new Set<string>();
   for (const frame of frames) {
-    const hasTime = frame.fields.some((f) => f.type === FieldType.time);
+    const table = isTableFrame(frame);
     for (const field of frame.fields) {
       if (field.type === FieldType.number && field.labels && level.label in field.labels) {
         const key = extractKey(field.labels[level.label], level);
@@ -1690,7 +1776,7 @@ export function previewLevel(frames: DataFrame[], level: LevelDef): { count: num
           found.add(key);
         }
       }
-      if (!hasTime && field.type === FieldType.string && field.name === level.label) {
+      if (table && field.type === FieldType.string && field.name === level.label) {
         for (const v of field.values) {
           const key = extractKey(String(v), level);
           if (key !== null) {
@@ -1804,11 +1890,26 @@ export const LevelsEditor: React.FC<StandardEditorProps<LevelDef[]>> = ({ value,
 
 ```tsx
 import React from 'react';
-import { StandardEditorProps } from '@grafana/data';
-import { StatsPicker } from '@grafana/ui';
+import { ReducerID, StandardEditorProps } from '@grafana/data';
+import { Select } from '@grafana/ui';
+
+// 数値スカラーを返すreducerのみ(allValues等の配列系、allIsNull等のboolean系はセル値契約を破るため除外)
+const NUMERIC_CALCS: ReducerID[] = [
+  ReducerID.lastNotNull,
+  ReducerID.last,
+  ReducerID.mean,
+  ReducerID.min,
+  ReducerID.max,
+  ReducerID.sum,
+  ReducerID.count,
+];
 
 export const ReduceCalcEditor: React.FC<StandardEditorProps<string>> = ({ value, onChange }) => (
-  <StatsPicker stats={value ? [value] : ['lastNotNull']} onChange={(stats) => onChange(stats[0] ?? 'lastNotNull')} allowMultiple={false} />
+  <Select
+    options={NUMERIC_CALCS.map((id) => ({ value: id as string, label: id as string }))}
+    value={NUMERIC_CALCS.includes(value as ReducerID) ? value : ReducerID.lastNotNull}
+    onChange={(v) => onChange(v.value ?? ReducerID.lastNotNull)}
+  />
 );
 ```
 
@@ -1841,7 +1942,9 @@ git commit -m "feat: hierarchy levels editor with live preview"
 - Consumes: Task 3〜9の全成果物
 - Produces:
   - `PanelModel { root: HierarchyNode; warnings: string[]; metricInfos: MetricInfo[]; refIds: string[] }`
-  - `buildModel(frames: DataFrame[], options: ClusterviewOptions, theme: GrafanaTheme2, timeZone: string): PanelModel`
+  - `buildModel(frames: DataFrame[], options: ClusterviewOptions, theme: GrafanaTheme2, timeZone: string, targetRefIds?: string[]): PanelModel`
+    - refIdsは `targetRefIds`(パネルの設定済みクエリ)と行由来refIdのunion。結果0系列のクエリも欠損として枠が残る
+    - 色スケール用のrefId別min/maxは**セル値(reduce・空間集約後)**から計算し、`buildMetricInfos` に渡す(生の時系列履歴から計算すると過去の外れ値がスケールを歪めるため)
   - `ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>>` — スクロールコンテナ+canvas+メトリクスセレクタ(RadioButtonGroup)。選択はローカルstate(初期値 `options.defaultMetric`)
   - `module.ts` — PanelPlugin登録。オプション: levels(LevelsEditor)/displayMode/defaultMetric/showValues/missingColor/spatialAggregation/reduceCalc(ReduceCalcEditor)
 
@@ -1891,6 +1994,12 @@ describe('buildModel', () => {
     const m = buildModel([frame('A', 'zone-a', '0', 1)], { ...options, levels: [{ ...DEFAULT_LEVEL, label: 'rack' }] }, theme, 'browser');
     expect(m.warnings.length).toBeGreaterThan(0);
   });
+
+  it('keeps refIds for configured queries that returned no series', () => {
+    const m = buildModel([frame('A', 'zone-a', '0', 1)], options, theme, 'browser', ['A', 'B']);
+    expect(m.refIds).toEqual(['A', 'B']);
+    expect(m.root.children[0].children[0].cell!.values.get('B')).toBeNull();
+  });
 });
 ```
 
@@ -1925,13 +2034,36 @@ export function buildModel(
   frames: DataFrame[],
   options: ClusterviewOptions,
   theme: GrafanaTheme2,
-  timeZone: string
+  timeZone: string,
+  targetRefIds: string[] = []
 ): PanelModel {
   const rows = normalizeFrames(frames, options.reduceCalc || 'lastNotNull');
   const { root, warnings } = buildHierarchy(rows, options.levels);
-  attachCells(root, rows, options.levels, options.spatialAggregation);
-  const metricInfos = buildMetricInfos(frames, theme, timeZone);
-  return { root, warnings, metricInfos, refIds: collectRefIds(rows) };
+  // 設定済みクエリのrefIdを保持する(結果0系列でも欠損として枠を残す)
+  const refIds = [...new Set([...targetRefIds, ...collectRefIds(rows)])];
+  attachCells(root, rows, options.levels, options.spatialAggregation, refIds);
+
+  // 色スケールは表示値(reduce・空間集約後のセル値)から計算する
+  const ranges = new Map<string, { min: number; max: number }>();
+  const visit = (node: HierarchyNode) => {
+    node.children.forEach(visit);
+    if (!node.cell) {
+      return;
+    }
+    for (const [refId, v] of node.cell.values) {
+      if (v === null) {
+        continue;
+      }
+      const r = ranges.get(refId) ?? { min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY };
+      r.min = Math.min(r.min, v);
+      r.max = Math.max(r.max, v);
+      ranges.set(refId, r);
+    }
+  };
+  visit(root);
+
+  const metricInfos = buildMetricInfos(frames, theme, timeZone, ranges);
+  return { root, warnings, metricInfos, refIds };
 }
 ```
 
@@ -1940,6 +2072,7 @@ export function buildModel(
 ```tsx
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { PanelProps } from '@grafana/data';
+import { PanelDataErrorView } from '@grafana/runtime';
 import { RadioButtonGroup, useTheme2 } from '@grafana/ui';
 import { ClusterviewOptions } from '../types';
 import { buildModel } from '../data/model';
@@ -1956,9 +2089,13 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
   const [scrollTop, setScrollTop] = useState(0);
   const [selected, setSelected] = useState<string | undefined>(options.defaultMetric || undefined);
 
+  const targetRefIds = useMemo(
+    () => (data.request?.targets ?? []).map((t) => t.refId).filter((r): r is string => Boolean(r)),
+    [data.request]
+  );
   const model = useMemo(
-    () => buildModel(data.series, options, theme, timeZone),
-    [data.series, options, theme, timeZone]
+    () => buildModel(data.series, options, theme, timeZone, targetRefIds),
+    [data.series, options, theme, timeZone, targetRefIds]
   );
 
   const showHeader = model.refIds.length > 1 && options.displayMode === 'single';
@@ -1987,6 +2124,9 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
     }
   }, [layout, model, selectedRefId, options, theme, scrollTop, bodyH]);
 
+  if (data.series.length === 0) {
+    return <PanelDataErrorView panelId={props.id} data={data} />;
+  }
   if (options.levels.length === 0) {
     return <p>パネルオプションで階層レベルを設定してください。</p>;
   }
@@ -2014,7 +2154,14 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
       )}
       <div
         ref={scrollRef}
-        style={{ width, height: bodyH, overflowY: layout.scrollable ? 'auto' : 'hidden', overflowX: 'hidden' }}
+        style={{
+          width,
+          height: bodyH,
+          position: 'relative',
+          overflowY: layout.scrollable ? 'auto' : 'hidden',
+          // S_MINでも幅に収まらない設定(列数過多など)では横スクロールで切れを防ぐ
+          overflowX: layout.contentWidth > width ? 'auto' : 'hidden',
+        }}
         onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
       >
         <canvas ref={canvasRef} />
@@ -2033,7 +2180,9 @@ import { ClusterviewPanel } from './components/ClusterviewPanel';
 import { LevelsEditor } from './options/LevelsEditor';
 import { ReduceCalcEditor } from './options/ReduceCalcEditor';
 
-export const plugin = new PanelPlugin<ClusterviewOptions>(ClusterviewPanel).setPanelOptions((builder) =>
+// useFieldConfig() が標準Field設定(Color scheme / Thresholds / Unit / Min-Max / Data Links / Overrides)を
+// 有効化する。これがないと本プラグインの配色・単位の全設計が機能しない
+export const plugin = new PanelPlugin<ClusterviewOptions>(ClusterviewPanel).useFieldConfig().setPanelOptions((builder) =>
   builder
     .addCustomEditor({
       id: 'levels',
@@ -2043,18 +2192,7 @@ export const plugin = new PanelPlugin<ClusterviewOptions>(ClusterviewPanel).setP
       editor: LevelsEditor,
       defaultValue: [],
     })
-    .addRadio({
-      path: 'displayMode',
-      name: '表示モード',
-      category: ['Display'],
-      defaultValue: 'single',
-      settings: {
-        options: [
-          { value: 'single', label: '単一' },
-          { value: 'split', label: '分割セル' },
-        ],
-      },
-    })
+    // 表示モード(単一/分割)のオプションは分割描画と凡例が揃うTask 14で登録する
     .addTextInput({
       path: 'defaultMetric',
       name: '既定の表示メトリクス(refId)',
@@ -2092,7 +2230,76 @@ export const plugin = new PanelPlugin<ClusterviewOptions>(ClusterviewPanel).setP
 
 scaffoldが生成した旧 `src/panels` 系ファイル(SimplePanel等)は削除する。
 
-- [ ] **Step 4: テストが通ることを確認**
+- [ ] **Step 4: パネル統合テストを書く**
+
+`src/components/ClusterviewPanel.test.tsx`(canvasはTask 1で導入したjest-canvas-mockが担う):
+
+```tsx
+import React from 'react';
+import { render, screen } from '@testing-library/react';
+import { FieldType, LoadingState, getDefaultTimeRange, toDataFrame } from '@grafana/data';
+import { DEFAULT_LEVEL } from '../types';
+import { ClusterviewPanel } from './ClusterviewPanel';
+
+jest.mock('@grafana/runtime', () => ({
+  ...jest.requireActual('@grafana/runtime'),
+  PanelDataErrorView: () => <div>No data</div>,
+}));
+
+const series = (refId: string, name: string, zone: string) =>
+  toDataFrame({
+    refId,
+    name,
+    fields: [
+      { name: 'Time', type: FieldType.time, values: [1000] },
+      { name: 'Value', type: FieldType.number, values: [1], labels: { zone } },
+    ],
+  });
+
+const makeProps = (frames: unknown[]): any => ({
+  id: 1,
+  width: 400,
+  height: 300,
+  timeZone: 'browser',
+  timeRange: getDefaultTimeRange(),
+  data: {
+    series: frames,
+    state: LoadingState.Done,
+    timeRange: getDefaultTimeRange(),
+    request: { requestId: 'Q1', targets: (frames as Array<{ refId: string }>).map((f) => ({ refId: f.refId })) },
+  },
+  options: {
+    levels: [{ ...DEFAULT_LEVEL, label: 'zone' }],
+    displayMode: 'single',
+    showValues: true,
+    missingColor: '#444',
+    spatialAggregation: 'max',
+    reduceCalc: 'lastNotNull',
+  },
+});
+
+describe('ClusterviewPanel', () => {
+  it('renders canvas and a metric selector for multiple queries', () => {
+    render(<ClusterviewPanel {...makeProps([series('A', 'power', 'zone-a'), series('B', 'temp', 'zone-a')])} />);
+    expect(document.querySelector('canvas')).toBeInTheDocument();
+    expect(screen.getAllByRole('radio')).toHaveLength(2);
+  });
+
+  it('shows warnings when the hierarchy label is absent', () => {
+    const p = makeProps([series('A', 'power', 'zone-a')]);
+    p.options.levels = [{ ...DEFAULT_LEVEL, label: 'rack' }];
+    render(<ClusterviewPanel {...p} />);
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+  });
+
+  it('shows no-data view when there are no frames', () => {
+    render(<ClusterviewPanel {...makeProps([])} />);
+    expect(screen.getByText('No data')).toBeInTheDocument();
+  });
+});
+```
+
+- [ ] **Step 5: テストが通ることを確認**
 
 ```bash
 npm run test:ci -- model
@@ -2101,7 +2308,7 @@ npm run test:ci
 
 Expected: PASS(既存テスト含め全件)
 
-- [ ] **Step 5: 開発サーバーで手動確認**
+- [ ] **Step 6: 開発サーバーで手動確認**
 
 ```bash
 npm run dev &   # watchビルド
@@ -2118,9 +2325,9 @@ zone-a,node-a002,0,610
 zone-b,node-b001,0,700
 ```
 
-確認項目: (1) 階層レベル(zone→host→gpu)を設定するとグリッドが描画される、(2) Color schemeを `Green-Yellow-Red (by value)` にすると連続配色になる、(3) パネルリサイズでセルサイズが追従する、(4) セルに数値が表示される(小さくすると消える)。結果をスクリーンショットで記録する。
+確認項目: (1) 階層レベル(zone→host→gpu)を設定するとグリッドが描画される、(2) **Fieldタブが表示され**、Color schemeを `Green-Yellow-Red (by value)` にすると連続配色になる、(3) パネルリサイズでセルサイズが追従する、(4) セルに数値が表示される(小さくすると消える)。結果をスクリーンショットで記録する。
 
-- [ ] **Step 6: コミット**
+- [ ] **Step 7: コミット**
 
 ```bash
 git add -A
@@ -2205,6 +2412,7 @@ Expected: FAIL(モジュールが存在しない)
 
 ```tsx
 import React from 'react';
+import { formattedValueToString } from '@grafana/data';
 import { CellModel } from '../types';
 import { MetricInfo } from '../data/display';
 
@@ -2248,7 +2456,7 @@ export const CellTooltip: React.FC<CellTooltipProps> = ({ cell, metricInfos, mis
             }}
           />
           <span>{info.name}</span>
-          <span style={{ marginLeft: 'auto' }}>{disp ? `${disp.text}${disp.suffix ?? ''}` : '欠損'}</span>
+          <span style={{ marginLeft: 'auto' }}>{disp ? formattedValueToString(disp) : '欠損'}</span>
         </div>
       );
     })}
@@ -2304,11 +2512,12 @@ git commit -m "feat: hover tooltip with all metric values"
 - Test: `src/drilldown/series.test.ts`, `src/components/DrilldownPopover.test.tsx`
 
 **Interfaces:**
-- Consumes: `CellModel.labels`(Task 5)、`MetricInfo`(Task 6)
+- Consumes: `CellModel.labels`(Task 5)、`MetricInfo`(Task 6)、`SpatialAggregation`(Task 2)
 - Produces:
-  - `findSeriesFrame(frames: DataFrame[], refId: string, labels: Record<string,string>): DataFrame | null` — refIdが一致し、数値フィールドの `field.labels` がセルのlabelsをすべて含むフレーム。時間フィールドが2点以上あるもののみ(スパークライン用)
-  - `getCellLinks(frames: DataFrame[], refId: string, labels: Record<string,string>): Array<{ href: string; target?: string }>` — 該当系列フィールドの `getLinks?.({ valueRowIndex: 最終行 })` を返す。なければ `[]`
-  - `DrilldownPopover: React.FC<{ cell; metricInfos; frameFor: (refId: string) => DataFrame | null; loading: boolean; x; y; panelWidth; panelHeight; onClose }>` — メトリクスごとに「名前+現在値+スパークライン」の行。フレームがなくloading中は「読み込み中…」、loadingが終わってもなければ「時系列なし」
+  - `findSeriesFrames(frames: DataFrame[], refId: string, labels: Record<string,string>): DataFrame[]` — refIdが一致し、数値フィールドの `field.labels` がセルのlabelsをすべて含む全フレーム。時間フィールドが2点以上あるもののみ(スパークライン用)
+  - `drilldownSeries(frames, refId, labels, agg): { frame: DataFrame | null; seriesCount: number }` — セルに複数系列が畳まれている場合(空間集約セル)、時刻配列が一致すれば**時点ごとに同じ空間集約を適用した合成フレーム**を返す(セルの現在値とスパークラインの整合を保つ)。時刻が揃わなければ先頭系列を返し、seriesCountで区別できるようにする
+  - `getCellLinks(frames: DataFrame[], refId: string, labels: Record<string,string>, calculatedValue?: DisplayValue): Array<LinkModel<Field>>` — 系列フィールドの `getLinks({ calculatedValue })`(reduce値にはvalueRowIndexでなくcalculatedValueを渡すのがGrafanaの契約)。table形式はラベル一致行を特定して `getLinks({ valueRowIndex })`。`LinkModel` を返し `onClick` を保持する
+  - `DrilldownPopover: React.FC<{ cell; metricInfos; seriesFor: (refId: string) => { frame: DataFrame | null; seriesCount: number }; loading: boolean; x; y; panelWidth; panelHeight; onClose }>` — メトリクスごとに「名前+現在値+スパークライン」の行。seriesCount>1なら「(N系列を集約)」を添える。フレームがなくloading中は「読み込み中…」、loadingが終わってもなければ「時系列なし」。パネル端では空いている側に反転配置
 
 - [ ] **Step 1: 失敗するテストを書く**
 
@@ -2316,7 +2525,7 @@ git commit -m "feat: hover tooltip with all metric values"
 
 ```ts
 import { toDataFrame, FieldType } from '@grafana/data';
-import { findSeriesFrame, getCellLinks } from './series';
+import { drilldownSeries, findSeriesFrames, getCellLinks } from './series';
 
 const frame = (refId: string, labels: Record<string, string>, values: number[]) =>
   toDataFrame({
@@ -2327,30 +2536,69 @@ const frame = (refId: string, labels: Record<string, string>, values: number[]) 
     ],
   });
 
-describe('findSeriesFrame', () => {
+describe('findSeriesFrames', () => {
   const frames = [
     frame('A', { zone: 'zone-a', gpu: '0' }, [1, 2]),
     frame('A', { zone: 'zone-a', gpu: '1' }, [3, 4]),
     frame('B', { zone: 'zone-a', gpu: '0' }, [5, 6]),
   ];
   it('matches refId and all cell labels', () => {
-    const f = findSeriesFrame(frames, 'A', { zone: 'zone-a', gpu: '1' });
-    expect(f).not.toBeNull();
-    expect(f!.fields[1].values[0]).toBe(3);
+    const fs = findSeriesFrames(frames, 'A', { zone: 'zone-a', gpu: '1' });
+    expect(fs).toHaveLength(1);
+    expect(fs[0].fields[1].values[0]).toBe(3);
   });
-  it('returns null for single-point series', () => {
-    expect(findSeriesFrame([frame('A', { zone: 'zone-a' }, [1])], 'A', { zone: 'zone-a' })).toBeNull();
+  it('excludes single-point series', () => {
+    expect(findSeriesFrames([frame('A', { zone: 'zone-a' }, [1])], 'A', { zone: 'zone-a' })).toHaveLength(0);
+  });
+});
+
+describe('drilldownSeries', () => {
+  it('aggregates multiple matching series per timestamp with the same spatial aggregation', () => {
+    const frames = [
+      frame('A', { zone: 'zone-a', gpu: '0' }, [10, 30]),
+      frame('A', { zone: 'zone-a', gpu: '1' }, [20, 5]),
+    ];
+    const r = drilldownSeries(frames, 'A', { zone: 'zone-a' }, 'max');
+    expect(r.seriesCount).toBe(2);
+    expect(r.frame!.fields[1].values).toEqual([20, 30]);
+  });
+  it('returns the single matching series as is', () => {
+    const frames = [frame('A', { zone: 'zone-a', gpu: '0' }, [10, 30])];
+    const r = drilldownSeries(frames, 'A', { zone: 'zone-a', gpu: '0' }, 'max');
+    expect(r.seriesCount).toBe(1);
+    expect(r.frame!.fields[1].values[1]).toBe(30);
   });
 });
 
 describe('getCellLinks', () => {
-  it('returns links from field.getLinks when configured', () => {
+  it('returns link models from field.getLinks with calculatedValue', () => {
     const f = frame('A', { zone: 'zone-a' }, [1, 2]);
-    f.fields[1].getLinks = () => [{ href: 'https://example.com/d/abc', target: '_blank', title: '', origin: {} as any }];
-    expect(getCellLinks([f], 'A', { zone: 'zone-a' })).toEqual([{ href: 'https://example.com/d/abc', target: '_blank' }]);
+    const getLinks = jest.fn(() => [
+      { href: 'https://example.com/d/abc', target: '_blank', title: '', origin: {} as any },
+    ]);
+    f.fields[1].getLinks = getLinks;
+    const calculated = { text: '2', numeric: 2 } as any;
+    const links = getCellLinks([f], 'A', { zone: 'zone-a' }, calculated);
+    expect(links).toHaveLength(1);
+    expect(links[0].href).toBe('https://example.com/d/abc');
+    expect(getLinks).toHaveBeenCalledWith({ calculatedValue: calculated });
   });
-  it('returns empty array without links', () => {
+  it('returns empty array when getLinks is absent', () => {
     expect(getCellLinks([frame('A', { zone: 'zone-a' }, [1, 2])], 'A', { zone: 'zone-a' })).toEqual([]);
+  });
+  it('resolves table rows by matching string columns', () => {
+    const table = toDataFrame({
+      refId: 'A',
+      fields: [
+        { name: 'zone', type: FieldType.string, values: ['zone-a', 'zone-b'] },
+        { name: 'Value', type: FieldType.number, values: [1, 2] },
+      ],
+    });
+    const getLinks = jest.fn(() => [{ href: 'https://example.com/row', title: '', origin: {} as any }]);
+    table.fields[1].getLinks = getLinks;
+    const links = getCellLinks([table], 'A', { zone: 'zone-b' });
+    expect(links).toHaveLength(1);
+    expect(getLinks).toHaveBeenCalledWith({ valueRowIndex: 1 });
   });
 });
 ```
@@ -2384,7 +2632,7 @@ describe('DrilldownPopover', () => {
   it('renders a sparkline row per metric', () => {
     const infos = buildMetricInfos([rangeFrame], theme, 'browser');
     render(
-      <DrilldownPopover cell={cell} metricInfos={infos} frameFor={() => rangeFrame} loading={false} x={0} y={0} panelWidth={800} panelHeight={600} onClose={() => {}} />
+      <DrilldownPopover cell={cell} metricInfos={infos} seriesFor={() => ({ frame: rangeFrame, seriesCount: 1 })} loading={false} x={0} y={0} panelWidth={800} panelHeight={600} onClose={() => {}} />
     );
     expect(screen.getByText('zone-a')).toBeInTheDocument();
     expect(screen.getByText('power')).toBeInTheDocument();
@@ -2393,7 +2641,7 @@ describe('DrilldownPopover', () => {
   it('shows loading state', () => {
     const infos = buildMetricInfos([rangeFrame], theme, 'browser');
     render(
-      <DrilldownPopover cell={cell} metricInfos={infos} frameFor={() => null} loading={true} x={0} y={0} panelWidth={800} panelHeight={600} onClose={() => {}} />
+      <DrilldownPopover cell={cell} metricInfos={infos} seriesFor={() => ({ frame: null, seriesCount: 0 })} loading={true} x={0} y={0} panelWidth={800} panelHeight={600} onClose={() => {}} />
     );
     expect(screen.getByText('読み込み中…')).toBeInTheDocument();
   });
@@ -2414,7 +2662,8 @@ Expected: FAIL(モジュールが存在しない)
 `src/drilldown/series.ts`:
 
 ```ts
-import { DataFrame, FieldType } from '@grafana/data';
+import { DataFrame, DisplayValue, Field, FieldType, LinkModel } from '@grafana/data';
+import { SpatialAggregation } from '../types';
 
 function labelsMatch(fieldLabels: Record<string, string> | undefined, want: Record<string, string>): boolean {
   if (!fieldLabels) {
@@ -2423,41 +2672,101 @@ function labelsMatch(fieldLabels: Record<string, string> | undefined, want: Reco
   return Object.entries(want).every(([k, v]) => fieldLabels[k] === v);
 }
 
-export function findSeriesFrame(
-  frames: DataFrame[],
-  refId: string,
-  labels: Record<string, string>
-): DataFrame | null {
-  for (const frame of frames) {
+export function findSeriesFrames(frames: DataFrame[], refId: string, labels: Record<string, string>): DataFrame[] {
+  return frames.filter((frame) => {
     if ((frame.refId ?? 'A') !== refId) {
-      continue;
+      return false;
     }
     const time = frame.fields.find((f) => f.type === FieldType.time);
     if (!time || frame.length < 2) {
-      continue;
+      return false;
     }
-    const value = frame.fields.find((f) => f.type === FieldType.number && labelsMatch(f.labels, labels));
-    if (value) {
-      return frame;
-    }
+    return frame.fields.some((f) => f.type === FieldType.number && labelsMatch(f.labels, labels));
+  });
+}
+
+function aggregatePoint(values: number[], agg: SpatialAggregation): number {
+  switch (agg) {
+    case 'max':
+      return Math.max(...values);
+    case 'min':
+      return Math.min(...values);
+    case 'sum':
+      return values.reduce((a, b) => a + b, 0);
+    case 'mean':
+      return values.reduce((a, b) => a + b, 0) / values.length;
   }
-  return null;
+}
+
+/** セルに複数系列が畳まれている場合、スパークラインにも同じ空間集約を適用してセル値と整合させる */
+export function drilldownSeries(
+  frames: DataFrame[],
+  refId: string,
+  labels: Record<string, string>,
+  agg: SpatialAggregation
+): { frame: DataFrame | null; seriesCount: number } {
+  const matched = findSeriesFrames(frames, refId, labels);
+  if (matched.length === 0) {
+    return { frame: null, seriesCount: 0 };
+  }
+  if (matched.length === 1) {
+    return { frame: matched[0], seriesCount: 1 };
+  }
+  const timeOf = (f: DataFrame) => f.fields.find((x) => x.type === FieldType.time)!;
+  const valueOf = (f: DataFrame) => f.fields.find((x) => x.type === FieldType.number)!;
+  const base = timeOf(matched[0]).values;
+  const aligned = matched.every((f) => {
+    const t = timeOf(f).values;
+    return t.length === base.length && t.every((v, i) => v === base[i]);
+  });
+  if (!aligned) {
+    // 時刻が揃わない場合は集約せず先頭系列を示す(seriesCountで区別可能)
+    return { frame: matched[0], seriesCount: matched.length };
+  }
+  const agged = base.map((_, i) =>
+    aggregatePoint(
+      matched.map((f) => Number(valueOf(f).values[i])).filter((v) => !Number.isNaN(v)),
+      agg
+    )
+  );
+  const frame: DataFrame = {
+    ...matched[0],
+    fields: [timeOf(matched[0]), { ...valueOf(matched[0]), values: agged } as Field],
+  };
+  return { frame, seriesCount: matched.length };
 }
 
 export function getCellLinks(
   frames: DataFrame[],
   refId: string,
-  labels: Record<string, string>
-): Array<{ href: string; target?: string }> {
+  labels: Record<string, string>,
+  calculatedValue?: DisplayValue
+): Array<LinkModel<Field>> {
   for (const frame of frames) {
     if ((frame.refId ?? 'A') !== refId) {
       continue;
     }
+    // 系列形式: labels一致の数値フィールド。reduce値なのでcalculatedValueを渡す(Grafanaの契約)
     const field = frame.fields.find((f) => f.type === FieldType.number && labelsMatch(f.labels, labels));
-    if (field?.getLinks && (field.config.links?.length ?? 0) > 0) {
-      return field
-        .getLinks({ valueRowIndex: Math.max(0, field.values.length - 1) })
-        .map((l) => ({ href: l.href, target: l.target }));
+    if (field?.getLinks) {
+      return field.getLinks({ calculatedValue });
+    }
+    // table形式: 文字列列がセルlabelsに一致する行を特定してvalueRowIndexを渡す
+    const stringFields = frame.fields.filter((f) => f.type === FieldType.string);
+    if (stringFields.length > 0) {
+      for (let row = 0; row < frame.length; row++) {
+        const ok = Object.entries(labels).every(([k, v]) => {
+          const col = stringFields.find((f) => f.name === k);
+          return !col || String(col.values[row]) === v;
+        });
+        if (ok) {
+          const vf = frame.fields.find((f) => f.type === FieldType.number);
+          if (vf?.getLinks) {
+            return vf.getLinks({ valueRowIndex: row });
+          }
+          break;
+        }
+      }
     }
   }
   return [];
@@ -2468,18 +2777,18 @@ export function getCellLinks(
 
 ```tsx
 import React from 'react';
-import { FieldType } from '@grafana/data';
+import { FieldType, formattedValueToString } from '@grafana/data';
 import { Sparkline, useTheme2 } from '@grafana/ui';
 import { CellModel } from '../types';
 import { MetricInfo } from '../data/display';
 
-const W = 280;
+const W = 300;
 const ROW_H = 34;
 
 export interface DrilldownPopoverProps {
   cell: CellModel;
   metricInfos: MetricInfo[];
-  frameFor: (refId: string) => import('@grafana/data').DataFrame | null;
+  seriesFor: (refId: string) => { frame: import('@grafana/data').DataFrame | null; seriesCount: number };
   loading: boolean;
   x: number;
   y: number;
@@ -2491,15 +2800,17 @@ export interface DrilldownPopoverProps {
 export const DrilldownPopover: React.FC<DrilldownPopoverProps> = (props) => {
   const theme = useTheme2();
   const h = 40 + props.metricInfos.length * ROW_H;
-  const left = Math.min(props.x, props.panelWidth - W - 8);
-  const top = Math.min(props.y, props.panelHeight - h - 8);
+  // セル近傍の空いている側に反転配置(右下に収まらなければ左上側へ)
+  const left = props.x + W + 16 > props.panelWidth ? Math.max(0, props.x - W - 8) : props.x + 8;
+  const top = props.y + h + 16 > props.panelHeight ? Math.max(0, props.y - h - 8) : props.y + 8;
 
   return (
     <div
+      onPointerDown={(e) => e.stopPropagation()}
       style={{
         position: 'absolute',
-        left: Math.max(0, left),
-        top: Math.max(0, top),
+        left,
+        top,
         width: W,
         zIndex: 20,
         padding: 8,
@@ -2519,13 +2830,14 @@ export const DrilldownPopover: React.FC<DrilldownPopoverProps> = (props) => {
       {props.metricInfos.map((info) => {
         const v = props.cell.values.get(info.refId) ?? null;
         const disp = v === null ? null : info.processor(v);
-        const frame = props.frameFor(info.refId);
+        const { frame, seriesCount } = props.seriesFor(info.refId);
         const yField = frame?.fields.find((f) => f.type === FieldType.number);
         const xField = frame?.fields.find((f) => f.type === FieldType.time);
+        const name = seriesCount > 1 ? `${info.name} (${seriesCount}系列を集約)` : info.name;
         return (
           <div key={info.refId} style={{ display: 'flex', alignItems: 'center', gap: 8, height: ROW_H }}>
-            <span style={{ width: 70, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{info.name}</span>
-            <span style={{ width: 60, textAlign: 'right' }}>{disp ? `${disp.text}${disp.suffix ?? ''}` : '欠損'}</span>
+            <span style={{ width: 70, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+            <span style={{ width: 60, textAlign: 'right' }}>{disp ? formattedValueToString(disp) : '欠損'}</span>
             <span style={{ flex: 1 }}>
               {yField && xField ? (
                 <Sparkline width={120} height={ROW_H - 8} sparkline={{ y: yField, x: xField }} theme={theme} />
@@ -2548,6 +2860,16 @@ export const DrilldownPopover: React.FC<DrilldownPopoverProps> = (props) => {
 ```tsx
 // 追加state
 const [popover, setPopover] = useState<{ cell: CellModel; x: number; y: number } | null>(null);
+const [linkMenu, setLinkMenu] = useState<{ links: Array<LinkModel<Field>>; x: number; y: number } | null>(null);
+
+// リンクの実行: LinkModel.onClickを保持しているリンク(パネル内リンク等)はそれを優先する
+const followLink = (link: LinkModel<Field>, e: React.MouseEvent) => {
+  if (link.onClick) {
+    link.onClick(e);
+    return;
+  }
+  window.open(link.href, link.target ?? '_self');
+};
 
 // スクロールコンテナに追加
 onClick={(e) => {
@@ -2557,29 +2879,56 @@ onClick={(e) => {
   const hit = hitTest(layout, cx, cy);
   if (!hit) {
     setPopover(null);
+    setLinkMenu(null);
     return;
   }
-  const links = getCellLinks(data.series, selectedRefId, hit.cell.labels);
-  if (links.length > 0) {
-    window.open(links[0].href, links[0].target ?? '_self');
+  // 分割モードではクリックした区画のメトリクスをリンク対象にする
+  let clickRefId = selectedRefId;
+  if (isSplit) {
+    const rects = splitRects(model.metricInfos.length);
+    const rel = { x: (cx - hit.x) / hit.w, y: (cy - hit.y) / hit.h };
+    const idx = rects.findIndex((r) => rel.x >= r.x && rel.x < r.x + r.w && rel.y >= r.y && rel.y < r.y + r.h);
+    if (idx >= 0 && model.metricInfos[idx]) {
+      clickRefId = model.metricInfos[idx].refId;
+    }
+  }
+  const info = model.metricInfos.find((m) => m.refId === clickRefId);
+  const v = hit.cell.values.get(clickRefId);
+  const links = getCellLinks(data.series, clickRefId, hit.cell.labels, v != null ? info?.processor(v) : undefined);
+  if (links.length === 1) {
+    followLink(links[0], e);
     return;
   }
-  setPopover({ cell: hit.cell, x: e.clientX - rect.left, y: e.clientY - rect.top });
+  const pos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  if (links.length > 1) {
+    setLinkMenu({ links, ...pos });   // 複数リンクは選択メニュー
+    return;
+  }
+  setPopover({ cell: hit.cell, ...pos });
 }}
 
-// Escで閉じる
+// Esc・外側ポインタダウン・スクロールで閉じる(ポップオーバー/メニュー側はstopPropagationで防御)
 useEffect(() => {
-  const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setPopover(null);
+  const onKey = (e: KeyboardEvent) => e.key === 'Escape' && (setPopover(null), setLinkMenu(null));
+  const onPointer = () => {
+    setPopover(null);
+    setLinkMenu(null);
+  };
   window.addEventListener('keydown', onKey);
-  return () => window.removeEventListener('keydown', onKey);
+  document.addEventListener('pointerdown', onPointer);
+  return () => {
+    window.removeEventListener('keydown', onKey);
+    document.removeEventListener('pointerdown', onPointer);
+  };
 }, []);
+// スクロールコンテナのonScrollにも setPopover(null); setLinkMenu(null); を追加(座標が実体とずれるため)
 
 // 描画(この時点ではrangeデータのみ対応。requeryはTask 13)
 {popover && (
   <DrilldownPopover
     cell={popover.cell}
     metricInfos={model.metricInfos}
-    frameFor={(refId) => findSeriesFrame(data.series, refId, popover.cell.labels)}
+    seriesFor={(refId) => drilldownSeries(data.series, refId, popover.cell.labels, options.spatialAggregation)}
     loading={false}
     x={popover.x}
     y={popover.y}
@@ -2587,6 +2936,18 @@ useEffect(() => {
     panelHeight={bodyH}
     onClose={() => setPopover(null)}
   />
+)}
+{linkMenu && (
+  <div
+    onPointerDown={(e) => e.stopPropagation()}
+    style={{ position: 'absolute', left: linkMenu.x, top: linkMenu.y, zIndex: 30, background: 'rgba(24,27,31,0.98)', borderRadius: 4, padding: 4 }}
+  >
+    {linkMenu.links.map((l) => (
+      <a key={l.href} href={l.href} target={l.target} style={{ display: 'block', padding: '4px 8px' }}>
+        {l.title || l.href}
+      </a>
+    ))}
+  </div>
 )}
 ```
 
@@ -2619,8 +2980,8 @@ git commit -m "feat: click drilldown popover with data links priority"
 - Consumes: `PanelProps.data.request`(`DataQueryRequest`)
 - Produces:
   - `buildDrilldownRequest(base: DataQueryRequest): DataQueryRequest` — `maxDataPoints: 100`、`intervalMs: max(15000, range/100)`、全targetsを `{ ...t, instant: false, range: true }` に変換、requestIdに `-drilldown` を付与
-  - `fetchDrilldownFrames(base: DataQueryRequest): Promise<DataFrame[]>` — `getDataSourceSrv().get(targets[0].datasource)` → `ds.query()` をawaitしてフレーム配列を返す
-  - パネル側キャッシュ: `data.request.requestId` が変わるまで結果を保持(useRef)。ポップオーバーを開いたとき、いずれかのメトリクスで手元に時系列がなければ1回だけ実行
+  - `fetchDrilldownFrames(base: DataQueryRequest): Promise<DataFrame[]>` — targetsを**datasourceごとに分割**して実行し(Mixed対応)、結果を連結。`DataSourceApi.query` は `Promise | Observable` の両方があり得るため `isObservable` で分岐する
+  - パネル側キャッシュ: `data.request.requestId` が変わるまで結果を保持(useRef)。ポップオーバーを開いたとき、いずれかのメトリクスで手元に時系列がなければ1回だけ実行。**失敗時はエラーstateを立てて再試行ループを防ぎ**、requestIdが変わった後に届いた古い応答は捨てる
 
 - [ ] **Step 1: 失敗するテストを書く**
 
@@ -2661,7 +3022,14 @@ describe('fetchDrilldownFrames', () => {
     jest.spyOn(require('@grafana/runtime'), 'getDataSourceSrv').mockReturnValue({ get: getMock } as any);
     const result = await fetchDrilldownFrames(baseRequest);
     expect(getMock).toHaveBeenCalledWith({ type: 'prometheus', uid: 'ds1' });
-    expect(result).toBe(frames);
+    expect(result).toEqual(frames);
+  });
+
+  it('supports datasources whose query returns a promise', async () => {
+    const frames = [{ refId: 'A', fields: [], length: 0 }];
+    const getMock = jest.fn().mockResolvedValue({ query: () => Promise.resolve({ data: frames }) });
+    jest.spyOn(require('@grafana/runtime'), 'getDataSourceSrv').mockReturnValue({ get: getMock } as any);
+    await expect(fetchDrilldownFrames(baseRequest)).resolves.toEqual(frames);
   });
 });
 ```
@@ -2681,7 +3049,7 @@ Expected: FAIL(モジュールが存在しない)
 ```ts
 import { DataFrame, DataQueryRequest } from '@grafana/data';
 import { getDataSourceSrv } from '@grafana/runtime';
-import { lastValueFrom } from 'rxjs';
+import { isObservable, lastValueFrom } from 'rxjs';
 
 const MAX_POINTS = 100;
 
@@ -2698,14 +3066,26 @@ export function buildDrilldownRequest(base: DataQueryRequest): DataQueryRequest 
   };
 }
 
-export async function fetchDrilldownFrames(base: DataQueryRequest): Promise<DataFrame[]> {
-  const target = base.targets[0];
-  if (!target) {
-    return [];
-  }
-  const ds = await getDataSourceSrv().get(target.datasource);
-  const response = await lastValueFrom(ds.query(buildDrilldownRequest(base)) as any);
+async function runQuery(dsRef: unknown, request: DataQueryRequest): Promise<DataFrame[]> {
+  const ds = await getDataSourceSrv().get(dsRef as never);
+  const result = ds.query(request);
+  // DataSourceApi.queryはPromiseとObservableの両方があり得る
+  const response = isObservable(result) ? await lastValueFrom(result) : await result;
   return ((response as { data?: DataFrame[] })?.data ?? []) as DataFrame[];
+}
+
+export async function fetchDrilldownFrames(base: DataQueryRequest): Promise<DataFrame[]> {
+  const req = buildDrilldownRequest(base);
+  // Mixedデータソース対応: datasourceごとにtargetsを分割して実行する
+  const groups = new Map<string, typeof req.targets>();
+  for (const t of req.targets) {
+    const key = JSON.stringify(t.datasource ?? null);
+    groups.set(key, [...(groups.get(key) ?? []), t]);
+  }
+  const results = await Promise.all(
+    [...groups.values()].map((targets) => runQuery(targets[0].datasource, { ...req, targets }))
+  );
+  return results.flat();
 }
 ```
 
@@ -2715,40 +3095,53 @@ export async function fetchDrilldownFrames(base: DataQueryRequest): Promise<Data
 // 追加state/ref
 const [drillFrames, setDrillFrames] = useState<DataFrame[] | null>(null);
 const [drillLoading, setDrillLoading] = useState(false);
+const [drillError, setDrillError] = useState(false);
 const drillCacheId = useRef<string | undefined>(undefined);
 
-// パネルデータが更新されたらキャッシュ破棄
+// パネルデータが更新されたらキャッシュとエラーを破棄
 useEffect(() => {
   if (data.request?.requestId !== drillCacheId.current) {
     setDrillFrames(null);
+    setDrillError(false);
   }
 }, [data.request?.requestId]);
 
-// ポップオーバーを開いたとき、手元に時系列がないメトリクスがあれば再クエリ(1パネル1回)
+// ポップオーバーを開いたとき、手元に時系列がないメトリクスがあれば再クエリ(1リフレッシュにつき1回)
+// drillErrorガードで失敗時の再試行ループを防ぎ、requestId比較で古い応答を捨てる
 useEffect(() => {
-  if (!popover || drillFrames || drillLoading || !data.request) {
+  if (!popover || drillFrames || drillLoading || drillError || !data.request) {
     return;
   }
   const missing = model.metricInfos.some(
-    (info) => !findSeriesFrame(data.series, info.refId, popover.cell.labels)
+    (info) => drilldownSeries(data.series, info.refId, popover.cell.labels, options.spatialAggregation).frame === null
   );
   if (!missing) {
     return;
   }
+  const requestId = data.request.requestId;
   setDrillLoading(true);
   fetchDrilldownFrames(data.request)
     .then((frames) => {
-      drillCacheId.current = data.request?.requestId;
+      if (data.request?.requestId !== requestId) {
+        return; // 古い応答
+      }
+      drillCacheId.current = requestId;
       setDrillFrames(frames);
     })
+    .catch(() => setDrillError(true))
     .finally(() => setDrillLoading(false));
-}, [popover, drillFrames, drillLoading, data, model.metricInfos]);
+}, [popover, drillFrames, drillLoading, drillError, data, model.metricInfos, options.spatialAggregation]);
 
 // DrilldownPopoverのpropsを変更
-frameFor={(refId) =>
-  findSeriesFrame(data.series, refId, popover.cell.labels) ??
-  (drillFrames ? findSeriesFrame(drillFrames, refId, popover.cell.labels) : null)
-}
+seriesFor={(refId) => {
+  const local = drilldownSeries(data.series, refId, popover.cell.labels, options.spatialAggregation);
+  if (local.frame) {
+    return local;
+  }
+  return drillFrames
+    ? drilldownSeries(drillFrames, refId, popover.cell.labels, options.spatialAggregation)
+    : { frame: null, seriesCount: 0 };
+}}
 loading={drillLoading}
 ```
 
@@ -2778,8 +3171,10 @@ git commit -m "feat: on-demand range requery for drilldown on instant queries"
 - Test: `src/components/SplitLegend.test.tsx`
 
 **Interfaces:**
-- Consumes: `MetricInfo`(Task 6)、`MAX_SPLIT`(Task 8)。Canvas側の分割描画はTask 8のrendererで実装済み
-- Produces: `SplitLegend: React.FC<{ metricInfos: MetricInfo[] }>` — 区画番号(1〜)+クエリ名の並び。`metricInfos.length > MAX_SPLIT` のとき「分割表示は9クエリまでです(N件は非表示)」を表示
+- Consumes: `MetricInfo`(Task 6)、`MAX_SPLIT` / `splitRects`(Task 8)。Canvas側の分割描画はTask 8のrendererで実装済み
+- Produces:
+  - `SplitLegend: React.FC<{ metricInfos: MetricInfo[] }>` — 各項目に**区画位置のミニチュア図**(splitRectsと同じ分割の小さな格子でその区画を塗る)+「番号: クエリ名」。`metricInfos.length > MAX_SPLIT` のとき「分割表示は9クエリまでです(N件は非表示)」を表示
+  - `module.ts` に表示モードオプション(単一/分割)を登録(Task 10では未登録。分割描画と凡例が揃うこのタスクで公開する)
 
 - [ ] **Step 1: 失敗するテストを書く**
 
@@ -2838,20 +3233,56 @@ Expected: FAIL(モジュールが存在しない)
 ```tsx
 import React from 'react';
 import { MetricInfo } from '../data/display';
-import { MAX_SPLIT } from '../render/split';
+import { MAX_SPLIT, splitRects } from '../render/split';
 
 export const SplitLegend: React.FC<{ metricInfos: MetricInfo[] }> = ({ metricInfos }) => {
   const shown = metricInfos.slice(0, MAX_SPLIT);
+  const rects = splitRects(shown.length);
   const hidden = metricInfos.length - shown.length;
   return (
     <div style={{ display: 'flex', gap: 12, alignItems: 'center', fontSize: 12, flexWrap: 'wrap' }}>
       {shown.map((info, i) => (
-        <span key={info.refId}>{`${i + 1}: ${info.name}`}</span>
+        <span key={info.refId} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          {/* 区画位置のミニチュア: セル内のどの区画にこのメトリクスが描かれるか(仕様の位置対応図) */}
+          <span
+            aria-hidden
+            style={{ position: 'relative', width: 14, height: 14, border: '1px solid currentColor', display: 'inline-block' }}
+          >
+            <span
+              style={{
+                position: 'absolute',
+                left: `${rects[i].x * 100}%`,
+                top: `${rects[i].y * 100}%`,
+                width: `${rects[i].w * 100}%`,
+                height: `${rects[i].h * 100}%`,
+                background: 'currentColor',
+              }}
+            />
+          </span>
+          <span>{`${i + 1}: ${info.name}`}</span>
+        </span>
       ))}
       {hidden > 0 && <span style={{ opacity: 0.7 }}>{`分割表示は9クエリまでです(${hidden}件は非表示)`}</span>}
     </div>
   );
 };
+```
+
+`src/module.ts` に表示モードオプションを追加(`levels` のaddCustomEditorの直後):
+
+```ts
+    .addRadio({
+      path: 'displayMode',
+      name: '表示モード',
+      category: ['Display'],
+      defaultValue: 'single',
+      settings: {
+        options: [
+          { value: 'single', label: '単一' },
+          { value: 'split', label: '分割セル' },
+        ],
+      },
+    })
 ```
 
 `src/components/ClusterviewPanel.tsx` のヘッダを変更(分割モード時はセレクタの代わりに凡例):
@@ -2954,6 +3385,16 @@ npm run e2e
 
 Expected: 2件PASS。セレクタのroleが実際のDOMと違う場合はPlaywright Inspectorで確認して修正する。
 
+続けて、サポート下限のGrafana 11.6系でも同じE2Eを実行する(create-pluginのdocker-composeは `GRAFANA_VERSION` で切替可能):
+
+```bash
+docker compose down
+GRAFANA_VERSION=11.6.0 npm run server &
+npm run e2e
+```
+
+Expected: 同じく2件PASS(`grafanaDependency >=11.6.0` の実証)。
+
 - [ ] **Step 4: 手動確認チェックリストを実施**
 
 開発サーバー上で以下を確認し、結果とスクリーンショットを報告に残す:
@@ -3015,5 +3456,6 @@ git commit -m "docs: usage and development guide"
 ## 完了条件
 
 - 全タスクのテストが通り、`npm run build` が成功している
+- E2EがGrafana最新(scaffold既定)と11.6系の両方でPASSしている
 - Task 15の手動確認チェックリスト10項目がすべて確認済み(結果はスクリーンショット付きで報告)
 - 仕様書の「確定要件」8行すべてに対応する実装が存在する
