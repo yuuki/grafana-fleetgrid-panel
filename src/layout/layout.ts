@@ -65,8 +65,8 @@ export function computeLayout(
     return m.w <= width && m.h <= height;
   };
 
-  // flowレイアウトの折返し位置が変わる境界で fits(s) の単調性が崩れるため、
-  // 二分探索ではなく上限から0.5px刻みの降順走査で「収まる最大のs」を決める(最大69候補、走査はミリ秒オーダー)
+  // Since fits(s)'s monotonicity breaks at boundaries where the flow layout's wrap position changes,
+  // determine the "largest s that fits" via a descending 0.5px-step scan from the upper bound rather than binary search (at most 69 candidates, scan is on the order of milliseconds)
   let s = S_MIN;
   for (let cand = S_MAX; cand >= S_MIN; cand -= 0.5) {
     if (fits(cand)) {
@@ -109,7 +109,7 @@ function layoutNode(
   const pad = childDef.showBorder ? BORDER_PAD : 0;
   const labelH = childDef.showLabel && !childIsLeaf ? LABEL_H : 0;
 
-  // 子(装飾込み)の配置。emit=nullなら計測のみ
+  // Places children (including decorations). Measurement only when emit=null
   const childBox = (child: HierarchyNode, innerAvailW: number, cx: number, cy: number, emit: Out | null): Size => {
     const inner = layoutNode(child, levels, s, innerAvailW - pad * 2, cx + pad, cy + pad + labelH, emit);
     const w = inner.w + pad * 2;

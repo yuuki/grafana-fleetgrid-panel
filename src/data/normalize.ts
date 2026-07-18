@@ -2,9 +2,9 @@ import { DataFrame, Field, FieldType, reduceField } from '@grafana/data';
 import { NormalizedRow } from '../types';
 
 /**
- * ラベルが列として展開されたtable形式か。
- * Prometheus/VictoriaMetricsのinstant+format=tableはTime列を含むため、Time列の有無では判定しない。
- * 「文字列列があり、かつ数値フィールドがlabelsを持たない」ことをtableの根拠にする。
+ * Is this a table format where labels are expanded into columns?
+ * Prometheus/VictoriaMetrics's instant+format=table includes a Time column, so the presence of a Time column is not used for judgment.
+ * The basis for determining table format is "there is a string column, and the numeric field has no labels."
  */
 export function isTableFrame(frame: DataFrame): boolean {
   const hasLabeledNumber = frame.fields.some(
@@ -22,7 +22,7 @@ export function normalizeFrames(frames: DataFrame[], reduceCalc: string): Normal
     const numberFields = frame.fields.filter((f) => f.type === FieldType.number);
 
     if (isTableFrame(frame)) {
-      // table形式: 行ごとに1レコード
+      // Table format: one record per row
       const valueField = numberFields[0];
       if (!valueField) {
         continue;
@@ -33,14 +33,14 @@ export function normalizeFrames(frames: DataFrame[], reduceCalc: string): Normal
           labels[f.name] = String(f.values[i]);
         }
         const raw = valueField.values[i];
-        // 数値化できない/非有限(NaN/Infinity)な値は欠損として null に正規化する
+        // Values that can't be numerified or are non-finite (NaN/Infinity) are normalized to null as missing
         const num = raw == null ? null : Number(raw);
         rows.push({ labels, value: num != null && Number.isFinite(num) ? num : null, refId });
       }
       continue;
     }
 
-    // time series形式: 数値フィールドごとに1レコード
+    // Time series format: one record per numeric field
     for (const field of numberFields) {
       rows.push({
         labels: { ...(field.labels ?? {}) },
@@ -55,6 +55,6 @@ export function normalizeFrames(frames: DataFrame[], reduceCalc: string): Normal
 function reduceToValue(field: Field, reduceCalc: string): number | null {
   const stats = reduceField({ field, reducers: [reduceCalc] });
   const v = stats[reduceCalc];
-  // allValues等の非数値reducerが指定されても契約(number|null)を守る
+  // Preserve the contract (number|null) even when a non-numeric reducer like allValues is specified
   return typeof v !== 'number' || Number.isNaN(v) ? null : v;
 }

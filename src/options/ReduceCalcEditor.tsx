@@ -2,7 +2,7 @@ import React from 'react';
 import { ReducerID, StandardEditorProps } from '@grafana/data';
 import { Select } from '@grafana/ui';
 
-// 数値スカラーを返すreducerのみ(allValues等の配列系、allIsNull等のboolean系はセル値契約を破るため除外)
+// Only reducers that return a numeric scalar (array-type like allValues, boolean-type like allIsNull are excluded since they break the cell-value contract)
 const NUMERIC_CALCS: ReducerID[] = [
   ReducerID.lastNotNull,
   ReducerID.last,

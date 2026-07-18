@@ -38,7 +38,7 @@ export function buildMetricInfos(
       continue;
     }
 
-    // refId単位のmin/max: セル値由来のrangeByRefを優先し、なければフレーム走査で補完(明示設定が最優先)
+    // Per-refId min/max: prefer rangeByRef derived from cell values, and fall back to scanning frames if unavailable (explicit config always takes precedence)
     const preset = rangeByRef?.get(refId);
     let min = preset ? preset.min : Number.POSITIVE_INFINITY;
     let max = preset ? preset.max : Number.NEGATIVE_INFINITY;
@@ -71,7 +71,7 @@ export function buildMetricInfos(
     const effMax = config.max ?? max;
     config.min = effMin;
     config.max = effMax;
-    // display processorはconfigよりfield.state.rangeを優先するため、両方を揃える
+    // The display processor prioritizes field.state.range over config, so keep both in sync
     const field: Field = {
       ...firstNumeric.field,
       config,
@@ -104,7 +104,7 @@ export function chooseCellText(
   if (cellH < FONT_MIN + 2) {
     return null;
   }
-  const withSuffix = formattedValueToString(display); // prefix/suffix込みの標準整形
+  const withSuffix = formattedValueToString(display); // Standard formatting including prefix/suffix
   if (measure(withSuffix, fontPx) + TEXT_PAD <= cellW) {
     return { text: withSuffix, fontPx };
   }

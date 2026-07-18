@@ -8,7 +8,7 @@ describe('isTableFrame', () => {
     expect(isTableFrame(frame)).toBe(true);
   });
   it('is NOT table when a numeric field carries labels, even alongside a string column', () => {
-    // AND条件: hasStringColumn は真でも hasLabeledNumber が真なら time_series 扱い(単独検証)
+    // AND condition: even if hasStringColumn is true, it's treated as time_series if hasLabeledNumber is true (isolated verification)
     const frame = toDataFrame({
       refId: 'A',
       fields: [strField, { name: 'Value', type: FieldType.number, values: [1], labels: { host: 'node-a001' } }],
@@ -62,7 +62,7 @@ describe('normalizeFrames', () => {
   });
 
   it('treats frames with string columns and unlabeled values as table even with a time column', () => {
-    // Prometheusのinstant+format=tableはTime列を持つ
+    // Prometheus's instant+format=table has a Time column
     const frame = toDataFrame({
       refId: 'B',
       fields: [

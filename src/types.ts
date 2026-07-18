@@ -22,7 +22,7 @@ export interface ClusterviewOptions {
   showValues: boolean;
   missingColor: string;
   spatialAggregation: SpatialAggregation;
-  /** ReducerID (e.g. 'lastNotNull') — 時間方向reduce */
+  /** ReducerID (e.g. 'lastNotNull') — reduce along the time axis */
   reduceCalc: string;
 }
 
@@ -43,13 +43,13 @@ export interface NormalizedRow {
 
 export interface CellModel {
   path: string[];
-  /** 階層に使ったラベルキーの代表原値(表示・後方互換用。先頭のlabelSetと一致する) */
+  /** The representative original value of the label key used for the hierarchy (for display/backward compatibility; matches the first labelSet) */
   labels: Record<string, string>;
   /**
-   * このセルに畳まれた全ての原値ラベル組。抽出キーが衝突する異なる原値
-   * (例: node-a017 と node-b017 がどちらも "017")を全て保持し、ドリルダウンが
-   * セル値と同じ系列集合を探索できるようにする。
-   * 本番経路(attachCells)では常に設定される。表示専用/軽量フィクスチャでは省略可。
+   * All original label sets collapsed into this cell. Holds every distinct original value whose
+   * extraction key collides (e.g. both node-a017 and node-b017 mapping to "017"), so drilldown
+   * can search the same series set as the cell value.
+   * Always set on the production path (attachCells). May be omitted for display-only/lightweight fixtures.
    */
   labelSets?: Array<Record<string, string>>;
   values: Map<string, number | null>;

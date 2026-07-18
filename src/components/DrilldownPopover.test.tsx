@@ -70,10 +70,10 @@ describe('DrilldownPopover', () => {
   });
   it('clamps a flipped popover within a scrolled (non-zero) visible range', () => {
     const infos = buildMetricInfos([rangeFrame], theme, 'browser');
-    // スクロール後の狭い可視範囲。右下端付近クリックで左上へ反転し、素朴なx-W-8はminXを下回る。
+    // Narrow visible range after scrolling. Clicking near the bottom-right flips to top-left; a naive x-W-8 would fall below minX.
     const minX = 200;
     const minY = 150;
-    const maxX = 500; // 幅は内部W(300)と同じ → クランプ必須
+    const maxX = 500; // Width is the same as the internal W(300) → clamping is required
     const maxY = 400;
     render(
       <DrilldownPopover
@@ -93,12 +93,12 @@ describe('DrilldownPopover', () => {
     const popover = screen.getByText('zone-a').parentElement!.parentElement as HTMLElement;
     const left = parseFloat(popover.style.left);
     const top = parseFloat(popover.style.top);
-    const W = 300; // DrilldownPopover内部の固定幅
-    const h = 40 + infos.length * 34; // 内部の高さ算出(ヘッダ40 + 行数*ROW_H)
-    // 左上端が可視範囲内。0固定クランプなら left=172 < minX でこのassertは落ちる。
+    const W = 300; // DrilldownPopover's internal fixed width
+    const h = 40 + infos.length * 34; // Internal height calculation (header 40 + rowCount*ROW_H)
+    // The top-left corner is within the visible range. With a fixed clamp of 0, left=172 < minX would fail this assertion.
     expect(left).toBeGreaterThanOrEqual(minX);
     expect(top).toBeGreaterThanOrEqual(minY);
-    // 右下端(left+幅 / top+高さ)も可視範囲内に収まる
+    // The bottom-right corner (left+width / top+height) also fits within the visible range
     expect(left + W).toBeLessThanOrEqual(maxX);
     expect(top + h).toBeLessThanOrEqual(maxY);
   });

@@ -77,7 +77,7 @@ function editorProps(
   return { value, onChange, context: { data: frames }, item: { id: 'levels', name: 'levels' } };
 }
 
-// 制御コンポーネントなので、抽出プリセット切替後の再描画を検証するには親側で状態を保持する。
+// Since this is a controlled component, the parent must hold the state to verify re-rendering after switching the extraction preset.
 function StatefulLevelsEditor({ initial, frames = [] }: { initial: LevelDef[]; frames?: DataFrame[] }) {
   const [value, setValue] = React.useState<LevelDef[]>(initial);
   return <LevelsEditor {...editorProps(value, (v) => setValue(v ?? []), frames)} />;

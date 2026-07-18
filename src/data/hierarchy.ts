@@ -23,7 +23,7 @@ export function extractKey(value: string, level: LevelDef): string | null {
         return null;
       }
       const m = re.exec(value);
-      // 仕様どおり第1キャプチャグループを必須とする(グループなしregexは全行アンマッチ扱いで警告に乗る)
+      // Per spec, the first capture group is required (a regex without a group treats all rows as a mismatch and surfaces in the warning)
       return m && m[1] !== undefined ? m[1] : null;
     }
   }
@@ -46,7 +46,7 @@ export function buildHierarchy(rows: NormalizedRow[], levels: LevelDef[]): Build
     Object.keys(row.labels).forEach((k) => detectedLabels.add(k));
   }
 
-  // レベルごとの適用統計を取りつつ、行→パスを解決する
+  // Collect per-level application stats while resolving rows to paths
   const labelHit = new Array(levels.length).fill(0);
   const extractHit = new Array(levels.length).fill(0);
   const leafPaths = new Map<string, string[]>();
@@ -56,9 +56,9 @@ export function buildHierarchy(rows: NormalizedRow[], levels: LevelDef[]): Build
     const path: string[] = [];
     let ok = true;
     for (let i = 0; i < levels.length; i++) {
-      // ラベル存在/抽出ヒットの統計は全レベルについて行ごとに収集する。
-      // 前段レベルで失敗しても break せず continue で走査を続け、全行に存在するラベルを
-      // 「クエリ結果にありません」と誤警告しないようにする(pathの採否判定は ok で分離)。
+      // Collect label-presence/extraction-hit stats for every level, per row.
+      // Even if an earlier level fails, keep scanning with continue instead of break, so a label
+      // present on every row isn't falsely reported as "クエリ結果にありません" (not present in query results) (path acceptance is tracked separately via ok).
       const raw = row.labels[levels[i].label];
       if (raw === undefined) {
         ok = false;
@@ -71,7 +71,7 @@ export function buildHierarchy(rows: NormalizedRow[], levels: LevelDef[]): Build
         continue;
       }
       extractHit[i]++;
-      // 1レベルでも失敗した行は葉にしない。path は全レベル成功中のみ積む。
+      // A row that fails even one level is not treated as a leaf. path is only pushed while every level succeeds.
       if (ok) {
         path.push(key);
       }
@@ -82,8 +82,8 @@ export function buildHierarchy(rows: NormalizedRow[], levels: LevelDef[]): Build
     }
   }
 
-  // 完全pathが1件も成立しない(matched===0)場合も含めて警告する。
-  // 各レベルにヒットがあっても全レベルを満たす行が無ければ黙って空表示になるのを防ぐ(仕様: 黙って空にしない)。
+  // Warn even when not a single complete path is formed (matched===0).
+  // Prevents silently showing an empty display when there are hits at each level but no row satisfies every level (spec: never silently show empty).
   if (rows.length > 0 && matched < rows.length) {
     warnings.push(`${rows.length - matched}/${rows.length} 行が階層にマッチせず除外されました`);
   }
@@ -98,7 +98,7 @@ export function buildHierarchy(rows: NormalizedRow[], levels: LevelDef[]): Build
     }
   }
 
-  // ツリー構築
+  // Build the tree
   const root: HierarchyNode = { key: '', path: [], children: [] };
   for (const path of leafPaths.values()) {
     let node = root;
@@ -112,7 +112,7 @@ export function buildHierarchy(rows: NormalizedRow[], levels: LevelDef[]): Build
     }
   }
 
-  // レベルごとのソート
+  // Sort per level
   const sortLevel = (node: HierarchyNode, depth: number) => {
     const def = levels[depth];
     if (def) {

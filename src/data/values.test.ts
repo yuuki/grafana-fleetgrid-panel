@@ -12,7 +12,7 @@ describe('attachCells', () => {
     const rows: NormalizedRow[] = [
       { labels: { zone: 'zone-a', gpu: '0' }, value: 503, refId: 'A' },
       { labels: { zone: 'zone-a', gpu: '0' }, value: 61, refId: 'B' },
-      { labels: { zone: 'zone-a', gpu: '1' }, value: 28, refId: 'B' }, // Aには存在しない
+      { labels: { zone: 'zone-a', gpu: '1' }, value: 28, refId: 'B' }, // Not present in A
     ];
     const { root } = buildHierarchy(rows, levels);
     attachCells(root, rows, levels, 'max');
@@ -21,9 +21,9 @@ describe('attachCells', () => {
     const cell1 = zoneA.children.find((c) => c.key === '1')!.cell!;
     expect(cell0.values.get('A')).toBe(503);
     expect(cell0.values.get('B')).toBe(61);
-    expect(cell1.values.get('A')).toBeNull(); // union由来の欠損
+    expect(cell1.values.get('A')).toBeNull(); // Missing due to the union
     expect(cell1.values.get('B')).toBe(28);
-    expect(cell0.labels).toEqual({ zone: 'zone-a', gpu: '0' }); // 代表原値
+    expect(cell0.labels).toEqual({ zone: 'zone-a', gpu: '0' }); // Representative original value
   });
 
   it('aggregates multiple series falling into one cell', () => {
@@ -49,14 +49,14 @@ describe('attachCells', () => {
     const { root } = buildHierarchy(rows, trailing);
     attachCells(root, rows, trailing, 'max');
     const cell = root.children[0].cell!;
-    expect(root.children[0].key).toBe('017'); // 抽出キー
-    expect(cell.labels).toEqual({ host: 'node-a017' }); // 代表原値は抽出前のraw
+    expect(root.children[0].key).toBe('017'); // Extraction key
+    expect(cell.labels).toEqual({ host: 'node-a017' }); // The representative original value is the raw value before extraction
     expect(cell.labelSets).toEqual([{ host: 'node-a017' }]);
   });
 
   it('retains all colliding raw label sets and aggregates their values into one cell', () => {
-    // node-a017 と node-b017 はどちらも trailingNumber で "017" に抽出され同一セルに畳まれる。
-    // セル値は両方を集約し、labelSets は両方の原値組を保持する(ドリルダウンの探索対象)。
+    // Both node-a017 and node-b017 are extracted to "017" via trailingNumber and collapse into the same cell.
+    // The cell value aggregates both, and labelSets holds both original label sets (targets for drilldown search).
     const trailing: LevelDef[] = [{ ...DEFAULT_LEVEL, label: 'host', extract: 'trailingNumber' }];
     const rows: NormalizedRow[] = [
       { labels: { host: 'node-a017' }, value: 10, refId: 'A' },
@@ -65,7 +65,7 @@ describe('attachCells', () => {
     const { root } = buildHierarchy(rows, trailing);
     attachCells(root, rows, trailing, 'sum');
     const cell = root.children[0].cell!;
-    expect(cell.values.get('A')).toBe(40); // 両系列を集約
+    expect(cell.values.get('A')).toBe(40); // Aggregates both series
     expect(cell.labelSets).toEqual([{ host: 'node-a017' }, { host: 'node-b017' }]);
   });
 

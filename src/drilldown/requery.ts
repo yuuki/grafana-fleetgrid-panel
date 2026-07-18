@@ -15,8 +15,8 @@ export function buildDrilldownRequest(base: DataQueryRequest): DataQueryRequest 
     interval: `${Math.round(intervalMs / 1000)}s`,
     targets: base.targets.map((t) => {
       const next = { ...t, instant: false, range: true } as typeof t & { format?: string };
-      // instant+table を素朴に range 化すると range table 形式が返り、collectSeries が時系列を拾えない。
-      // format:'table' のときだけ 'time_series' へ上書きする(他の値・未設定はデータソース既定に委ねる)。
+      // Naively converting instant+table to range returns a range table format, and collectSeries can't pick up the time series.
+      // Only override to 'time_series' when format:'table' (other values/unset are deferred to the datasource default).
       if (next.format === 'table') {
         next.format = 'time_series';
       }
@@ -28,14 +28,14 @@ export function buildDrilldownRequest(base: DataQueryRequest): DataQueryRequest 
 async function runQuery(dsRef: unknown, request: DataQueryRequest): Promise<DataFrame[]> {
   const ds = await getDataSourceSrv().get(dsRef as never);
   const result = ds.query(request);
-  // DataSourceApi.queryはPromiseとObservableの両方があり得る
+  // DataSourceApi.query can return either a Promise or an Observable
   const response = isObservable(result) ? await lastValueFrom(result) : await result;
   return ((response as { data?: DataFrame[] })?.data ?? []) as DataFrame[];
 }
 
 export async function fetchDrilldownFrames(base: DataQueryRequest): Promise<DataFrame[]> {
   const req = buildDrilldownRequest(base);
-  // Mixedデータソース対応: datasourceごとにtargetsを分割して実行する
+  // Support for mixed datasources: split targets per datasource and execute
   const groups = new Map<string, typeof req.targets>();
   for (const t of req.targets) {
     const key = JSON.stringify(t.datasource ?? null);

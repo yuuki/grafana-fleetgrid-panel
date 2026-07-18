@@ -10,12 +10,12 @@ jest.mock('@grafana/runtime', () => ({
   PanelDataErrorView: () => <div>No data</div>,
 }));
 
-// 再クエリはwiring(instant判定/staleガード/キャッシュ)を検証するためモックする
+// Mock the requery to verify the wiring (instant detection / stale guard / cache)
 jest.mock('../drilldown/requery', () => ({
   fetchDrilldownFrames: jest.fn(),
 }));
 
-// SparklineはuPlot依存のためテスト用のプレースホルダに差し替える(描画有無だけを見る)
+// Replace Sparkline with a test placeholder since it depends on uPlot (only check whether it renders)
 jest.mock('@grafana/ui', () => ({
   ...jest.requireActual('@grafana/ui'),
   Sparkline: () => <div data-testid="sparkline" />,
@@ -85,32 +85,32 @@ describe('ClusterviewPanel', () => {
     const p = makeProps([series('A', 'power', 'zone-a'), series('B', 'temp', 'zone-a')]);
     p.options.displayMode = 'split';
     render(<ClusterviewPanel {...p} />);
-    expect(screen.getByText('1: power')).toBeInTheDocument(); // 凡例(区画位置ミニチュア + 番号:名)
+    expect(screen.getByText('1: power')).toBeInTheDocument(); // Legend (zone-position miniature + number:name)
     expect(screen.getByText('2: temp')).toBeInTheDocument();
-    expect(screen.queryByRole('radio')).not.toBeInTheDocument(); // 単一モードのセレクタは出さない
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument(); // Don't show the selector in single mode
   });
 
   it('uses content coordinates (incl. scrollLeft) for hover hit testing', () => {
-    // 同一refId・2ゾーンで横並び2セル(flow, s=40 → zone-a:[0,40), zone-b:[41,81))。refIdは1つなのでヘッダー無し。
+    // Same refId, 2 zones side by side as 2 cells (flow, s=40 → zone-a:[0,40), zone-b:[41,81)). No header since there's only one refId.
     render(<ClusterviewPanel {...makeProps([series('A', 'power', 'zone-a'), series('A', 'power', 'zone-b')])} />);
     const container = document.querySelector('canvas')!.parentElement as HTMLElement;
-    // 横スクロール状態(scrollLeft=50)を再現する
+    // Reproduce a horizontally scrolled state (scrollLeft=50)
     Object.defineProperty(container, 'scrollLeft', { configurable: true, value: 50 });
-    // clientX=10 は素朴にはzone-a([0,40))だが、+scrollLeft=50でcx=60 → zone-b([41,81))が正しいヒット
+    // clientX=10 would naively be zone-a([0,40)), but with +scrollLeft=50, cx=60 → zone-b([41,81)) is the correct hit
     fireEvent.mouseMove(container, { clientX: 10, clientY: 5 });
-    const title = screen.getByText('zone-b'); // scrollLeftを加味した正しいセルがヒットしている
+    const title = screen.getByText('zone-b'); // The correct cell accounting for scrollLeft is hit
     expect(title).toBeInTheDocument();
-    expect(title.parentElement).toHaveStyle({ left: '72px' }); // ツールチップx = cx(60) + 12 = コンテンツ座標
+    expect(title.parentElement).toHaveStyle({ left: '72px' }); // tooltip x = cx(60) + 12 = content coordinates
   });
 
   it('lists refIds for configured queries that returned no series', () => {
     const p = makeProps([series('A', 'power', 'zone-a')]);
-    // クエリBは設定済み(targets)だが0系列(seriesには無い)
+    // Query B is configured (targets) but has 0 series (not present in series)
     p.data.request.targets = [{ refId: 'A' }, { refId: 'B' }];
     render(<ClusterviewPanel {...p} />);
     expect(screen.getAllByRole('radio')).toHaveLength(2);
-    expect(screen.getByText('power')).toBeInTheDocument(); // Aは系列名
-    expect(screen.getByText('B')).toBeInTheDocument(); // BはmetricInfoが無いのでrefId表示
+    expect(screen.getByText('power')).toBeInTheDocument(); // A is the series name
+    expect(screen.getByText('B')).toBeInTheDocument(); // B has no metricInfo, so the refId is displayed
   });
 
   it('shows a warning banner while still rendering cells when only some rows match', () => {
@@ -123,18 +123,18 @@ describe('ClusterviewPanel', () => {
           { name: 'Value', type: FieldType.number, values: [1], labels: gpu ? { zone, gpu } : { zone } },
         ],
       });
-    const p = makeProps([twoLevel('zone-a', '0'), twoLevel('zone-b')]); // 2件目は gpu 欠落 → 除外
+    const p = makeProps([twoLevel('zone-a', '0'), twoLevel('zone-b')]); // The second one is missing gpu → excluded
     p.options.levels = [{ ...DEFAULT_LEVEL, label: 'zone' }, { ...DEFAULT_LEVEL, label: 'gpu' }];
     render(<ClusterviewPanel {...p} />);
-    expect(document.querySelector('canvas')).toBeInTheDocument(); // マッチ行のセルは描画される
-    expect(screen.getByRole('alert')).toBeInTheDocument(); // かつ警告帯も同時に出る
+    expect(document.querySelector('canvas')).toBeInTheDocument(); // The matching row's cell is rendered
+    expect(screen.getByRole('alert')).toBeInTheDocument(); // and the warning banner is also shown at the same time
     expect(screen.getByText(/1\/2/)).toBeInTheDocument();
   });
 
   it('shows an explicit data error when queries return no numeric cells (not a silent empty canvas)', () => {
     const stringOnly = toDataFrame({
       refId: 'A',
-      fields: [{ name: 'zone', type: FieldType.string, values: ['zone-a'] }], // 数値フィールド無し
+      fields: [{ name: 'zone', type: FieldType.string, values: ['zone-a'] }], // No numeric field
     });
     render(<ClusterviewPanel {...makeProps([stringOnly])} />);
     expect(screen.getByRole('alert')).toBeInTheDocument();
@@ -142,7 +142,7 @@ describe('ClusterviewPanel', () => {
     expect(document.querySelector('canvas')).not.toBeInTheDocument();
   });
 
-  // 横並び2セル(zone-a:[0,40))を持つフレーム。clientX=10でzone-aをヒットする。
+  // A frame with 2 side-by-side cells (zone-a:[0,40)). clientX=10 hits zone-a.
   const clickable = () => [series('A', 'power', 'zone-a'), series('A', 'power', 'zone-b')];
   const containerOf = () => document.querySelector('canvas')!.parentElement as HTMLElement;
 
@@ -154,8 +154,8 @@ describe('ClusterviewPanel', () => {
     ]) as any;
     render(<ClusterviewPanel {...makeProps(frames)} />);
     fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
-    expect(onLinkClick).toHaveBeenCalled(); // Data Links優先で即実行
-    expect(screen.queryByLabelText('閉じる')).not.toBeInTheDocument(); // ポップオーバーは抑止
+    expect(onLinkClick).toHaveBeenCalled(); // Data Links take priority and execute immediately
+    expect(screen.queryByLabelText('閉じる')).not.toBeInTheDocument(); // The popover is suppressed
   });
 
   it('shows a selection menu for multiple data links (not the popover)', () => {
@@ -180,15 +180,15 @@ describe('ClusterviewPanel', () => {
     render(<ClusterviewPanel {...makeProps(frames)} />);
     fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
     const menu = screen.getByRole('menu');
-    // 旧実装の固定暗色ではなくテーマ由来の配色にする(ライトテーマでも読める)
+    // Use theme-derived colors instead of the old implementation's fixed dark color (readable in light theme too)
     expect(menu.style.background).not.toBe('rgba(24,27,31,0.98)');
     expect(menu.style.background).toBeTruthy();
-    // 位置は数値でクランプ範囲内(左上端は 0 以上)
+    // Position is numeric and within the clamp range (top-left is >= 0)
     expect(parseFloat(menu.style.left)).toBeGreaterThanOrEqual(0);
     expect(parseFloat(menu.style.top)).toBeGreaterThanOrEqual(0);
   });
 
-  // コンテナの実可視内寸・スクロール量を差し替える(jsdomはレイアウトしないため明示設定する)
+  // Override the container's actual visible inner size and scroll amount (set explicitly since jsdom doesn't perform layout)
   const setBox = (el: HTMLElement, box: { sl?: number; st?: number; cw: number; ch: number }) => {
     Object.defineProperty(el, 'scrollLeft', { configurable: true, value: box.sl ?? 0 });
     Object.defineProperty(el, 'scrollTop', { configurable: true, value: box.st ?? 0 });
@@ -200,14 +200,14 @@ describe('ClusterviewPanel', () => {
 
   it('places the link menu in content coordinates using the scroll offset', () => {
     const frames = clickable();
-    frames[1].fields[1].getLinks = linksOf(2); // zone-b セルに2リンク
+    frames[1].fields[1].getLinks = linksOf(2); // 2 links on the zone-b cell
     render(<ClusterviewPanel {...makeProps(frames)} />);
     const container = containerOf();
     setBox(container, { sl: 50, cw: 400, ch: 300 });
-    // clientX=10 + scrollLeft=50 → cx=60(横スクロール込みで zone-b をヒット)
+    // clientX=10 + scrollLeft=50 → cx=60 (hits zone-b including horizontal scroll)
     fireEvent.click(container, { clientX: 10, clientY: 5 });
     const menu = screen.getByRole('menu');
-    expect(parseFloat(menu.style.left)).toBe(68); // cx(60)+8、コンテンツ座標(scrollLeft込み)
+    expect(parseFloat(menu.style.left)).toBe(68); // cx(60)+8, content coordinates (including scrollLeft)
     expect(parseFloat(menu.style.top)).toBe(13); // cy(5)+8
   });
 
@@ -216,32 +216,32 @@ describe('ClusterviewPanel', () => {
     frames[1].fields[1].getLinks = linksOf(2);
     render(<ClusterviewPanel {...makeProps(frames)} />);
     const container = containerOf();
-    // 実可視内寸を props.width(400) より狭い 300 にする。width を使うと右端をはみ出す。
+    // Make the actual visible inner size 300, narrower than props.width(400). Using width would overflow the right edge.
     setBox(container, { cw: 300, ch: 300 });
     fireEvent.click(container, { clientX: 60, clientY: 5 }); // cx=60(zone-b)
     const menu = screen.getByRole('menu');
     const left = parseFloat(menu.style.left);
     expect(left).toBeGreaterThanOrEqual(0);
-    expect(left + 240).toBeLessThanOrEqual(300); // 実可視内寸に収まる(clientWidth基準)
-    expect(left).toBeLessThan(60); // クリック位置より左へ反転している
+    expect(left + 240).toBeLessThanOrEqual(300); // Fits within the actual visible inner size (based on clientWidth)
+    expect(left).toBeLessThan(60); // Flipped to the left of the click position
   });
 
   it('caps a tall link menu to the visible height and enables internal scroll', () => {
     const frames = clickable();
-    frames[0].fields[1].getLinks = linksOf(12); // 背の高いメニュー
+    frames[0].fields[1].getLinks = linksOf(12); // A tall menu
     render(<ClusterviewPanel {...makeProps(frames)} />);
     const container = containerOf();
-    setBox(container, { cw: 400, ch: 100 }); // 可視高100pxより高い
+    setBox(container, { cw: 400, ch: 100 }); // Taller than the visible height of 100px
     fireEvent.click(container, { clientX: 10, clientY: 5 }); // cx=10(zone-a)
     const menu = screen.getByRole('menu');
-    expect(menu.style.maxHeight).toBe('100px'); // 可視高にクランプ
-    expect(menu.style.overflowY).toBe('auto'); // 内部スクロール
-    expect(parseFloat(menu.style.top) + 100).toBeLessThanOrEqual(100); // 下端が可視範囲内
+    expect(menu.style.maxHeight).toBe('100px'); // Clamped to the visible height
+    expect(menu.style.overflowY).toBe('auto'); // Internal scroll
+    expect(parseFloat(menu.style.top) + 100).toBeLessThanOrEqual(100); // The bottom edge is within the visible range
   });
 
   it('collects data links across colliding label sets when a cell is clicked', () => {
-    // node-a017 と node-b017 は trailingNumber で同じ "017" セルに畳まれる。
-    // クリック配線(getCellLinks(..., cell.labelSets))が両組のリンクを集めて選択メニューを出す。
+    // node-a017 and node-b017 collapse into the same "017" cell via trailingNumber.
+    // The click wiring (getCellLinks(..., cell.labelSets)) collects links from both sets and shows a selection menu.
     const mk = (host: string, href: string) => {
       const f = toDataFrame({
         refId: 'A',
@@ -301,11 +301,11 @@ describe('ClusterviewPanel', () => {
       });
 
     it('does not requery when the panel data has no instant targets (range-only)', () => {
-      // makePropsのtargetsはinstantフラグ無し(range-only)なので再クエリは走らない
+      // makeProps's targets have no instant flag (range-only), so no requery runs
       render(<ClusterviewPanel {...makeProps(clickable())} />);
       fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
-      expect(screen.getByLabelText('閉じる')).toBeInTheDocument(); // ポップオーバーは開く
-      expect(mockFetch).not.toHaveBeenCalled(); // range-only → 再クエリしない
+      expect(screen.getByLabelText('閉じる')).toBeInTheDocument(); // The popover opens
+      expect(mockFetch).not.toHaveBeenCalled(); // range-only → no requery
     });
 
     it('requeries once for instant queries and discards a stale response after the requestId changes', async () => {
@@ -320,27 +320,27 @@ describe('ClusterviewPanel', () => {
       p1.data.request.targets = instantTargets;
       const { rerender } = render(<ClusterviewPanel {...p1} />);
       fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
-      // instantで手元に時系列が無い → 再クエリ開始、取得中表示
+      // With instant and no time series on hand → requery starts, showing loading state
       expect(mockFetch).toHaveBeenCalledTimes(1);
       expect(screen.getByText('読み込み中…')).toBeInTheDocument();
 
-      // requestIdがQ2へ更新される(パネルデータ更新)
+      // requestId is updated to Q2 (panel data update)
       const p2 = makeProps(clickable());
       p2.data.request.requestId = 'Q2';
       p2.data.request.targets = instantTargets;
       await act(async () => {
         rerender(<ClusterviewPanel {...p2} />);
       });
-      expect(mockFetch).toHaveBeenCalledTimes(2); // 新しいrequestIdで再クエリが走る
+      expect(mockFetch).toHaveBeenCalledTimes(2); // A requery runs with the new requestId
 
-      // 古いQ1応答が遅れて届く → staleガードで破棄され、反映されない
+      // The old Q1 response arrives late → discarded by the stale guard, not reflected
       await act(async () => {
         resolve1([sparkFrame(90)]);
       });
-      expect(screen.getByText('読み込み中…')).toBeInTheDocument(); // まだ取得中(Q1は捨てられた)
+      expect(screen.getByText('読み込み中…')).toBeInTheDocument(); // Still loading (Q1 was discarded)
       expect(screen.queryByTestId('sparkline')).not.toBeInTheDocument();
 
-      // 新しいQ2応答が届く → こちらは反映されてスパークラインが出る
+      // The new Q2 response arrives → this one is reflected and the sparkline appears
       await act(async () => {
         resolve2([sparkFrame(1)]);
       });
@@ -349,8 +349,8 @@ describe('ClusterviewPanel', () => {
     });
 
     it('discards a stale rejection so a later empty-but-successful requery shows 時系列なし, not an error', async () => {
-      // Q1 を reject(stale)、Q2 を「時系列を含まない空フレーム」で成功させる。
-      // これにより loading/sparkline が消えた最終状態で、ガード有=「時系列なし」/ ガード無=「再取得に失敗しました」を判別できる。
+      // Reject Q1 (stale), and succeed Q2 with "an empty frame containing no time series."
+      // This lets us distinguish, in the final state after loading/sparkline has disappeared, between guard-present = "時系列なし" / guard-absent = "再取得に失敗しました".
       let reject1!: (e: unknown) => void;
       let resolve2!: (v: unknown) => void;
       mockFetch
@@ -365,7 +365,7 @@ describe('ClusterviewPanel', () => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
       expect(screen.getByText('読み込み中…')).toBeInTheDocument();
 
-      // requestId が Q2 へ更新 → 世代が進む
+      // requestId updates to Q2 → generation advances
       const p2 = makeProps(clickable());
       p2.data.request.requestId = 'Q2';
       p2.data.request.targets = instantTargets;
@@ -374,18 +374,18 @@ describe('ClusterviewPanel', () => {
       });
       expect(mockFetch).toHaveBeenCalledTimes(2);
 
-      // 遅れて届いた Q1 の失敗。ガードが無いと setDrillError(true) が走り、Q2 成功後に「再取得に失敗しました」が残る。
+      // Q1's failure arrives late. Without the guard, setDrillError(true) would run and "再取得に失敗しました" would remain even after Q2 succeeds.
       await act(async () => {
         reject1(new Error('boom'));
       });
 
-      // Q2 は空フレーム(refId不一致=一致系列なし)で成功 → loading 解除、drillFrames セット、sparkline は出ない
+      // Q2 succeeds with an empty frame (refId mismatch = no matching series) → loading clears, drillFrames is set, no sparkline appears
       await act(async () => {
         resolve2([toDataFrame({ refId: 'ZZ', fields: [{ name: 'Value', type: FieldType.number, values: [] }] })]);
       });
       expect(screen.queryByText('読み込み中…')).not.toBeInTheDocument();
       expect(screen.queryByTestId('sparkline')).not.toBeInTheDocument();
-      // ガードが効いていれば drillError は false のまま → 「時系列なし」。混入していれば「再取得に失敗しました」。
+      // If the guard is effective, drillError stays false → "時系列なし". If it leaked through, "再取得に失敗しました".
       expect(screen.getAllByText('時系列なし').length).toBeGreaterThan(0);
       expect(screen.queryByText('再取得に失敗しました')).not.toBeInTheDocument();
     });

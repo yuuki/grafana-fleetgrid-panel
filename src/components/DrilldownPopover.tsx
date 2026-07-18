@@ -17,11 +17,11 @@ export interface DrilldownPopoverProps {
     aggregated: boolean;
   };
   loading: boolean;
-  /** instantクエリの再クエリが失敗したか。手元に時系列が無い行に失敗メッセージを出す */
+  /** Whether the requery for an instant query failed. Shows a failure message on rows with no time series on hand */
   error?: boolean;
   x: number;
   y: number;
-  /** クリック時点の可視範囲(コンテンツ座標)。反転配置を可視範囲の両端にクランプするのに使う */
+  /** The visible range at click time (content coordinates). Used to clamp the flipped placement to both ends of the visible range */
   minX: number;
   minY: number;
   maxX: number;
@@ -32,7 +32,7 @@ export interface DrilldownPopoverProps {
 export const DrilldownPopover: React.FC<DrilldownPopoverProps> = (props) => {
   const theme = useTheme2();
   const h = 40 + props.metricInfos.length * ROW_H;
-  // セル近傍の空いている側に反転配置し、可視範囲(min..max)の両端にクランプする
+  // Flip-place near the open side of the cell, clamped to both ends of the visible range (min..max)
   const { left, top } = placeOverlay(props.x, props.y, W, h, props);
 
   return (
@@ -64,7 +64,7 @@ export const DrilldownPopover: React.FC<DrilldownPopoverProps> = (props) => {
         const { frame, seriesCount, aggregated } = props.seriesFor(info.refId);
         const yField = frame?.fields.find((f) => f.type === FieldType.number);
         const xField = frame?.fields.find((f) => f.type === FieldType.time);
-        // 集約時は「N系列を集約」、時刻不一致で先頭系列フォールバック時は正確に「N系列中の先頭を表示」
+        // When aggregated, shows "(N系列を集約)"; when falling back to the first series due to a timestamp mismatch, shows exactly "(N系列中の先頭を表示)"
         const name =
           seriesCount > 1
             ? aggregated
@@ -81,7 +81,7 @@ export const DrilldownPopover: React.FC<DrilldownPopoverProps> = (props) => {
               ) : props.loading ? (
                 <span style={{ opacity: 0.7 }}>読み込み中…</span>
               ) : props.error ? (
-                // 再クエリ失敗。データ更新で自動リトライされるため恒久エラーではない
+                // Requery failed. Not a permanent error since a data update triggers an automatic retry
                 <span style={{ opacity: 0.7, color: theme.colors.warning.text }}>再取得に失敗しました</span>
               ) : (
                 <span style={{ opacity: 0.7 }}>時系列なし</span>

@@ -8,7 +8,7 @@ function labelsMatch(fieldLabels: Record<string, string> | undefined, want: Reco
   return Object.entries(want).every(([k, v]) => fieldLabels[k] === v);
 }
 
-/** セルは複数の原値ラベル組(抽出キー衝突)を持ちうる。単一組も配列に正規化して扱う。 */
+/** A cell may have multiple original label sets (extraction-key collisions). A single set is also normalized to an array. */
 type LabelSpec = Record<string, string> | Array<Record<string, string>>;
 function toLabelSets(labels: LabelSpec): Array<Record<string, string>> {
   return Array.isArray(labels) ? labels : [labels];
@@ -24,9 +24,9 @@ interface SeriesCandidate {
 }
 
 /**
- * refIdが一致し時間フィールドが2点以上あるフレームから、セルlabelsを含む数値フィールドを
- * 「1系列=1数値フィールド」として列挙する。wide frame(1フレームに複数数値フィールド)は
- * normalize側と同じく数値フィールドごとに別系列として扱い、セル値との系列集合を一致させる。
+ * From frames whose refId matches and that have 2 or more time points, enumerate the numeric fields
+ * containing the cell's labels as "1 series = 1 numeric field". A wide frame (multiple numeric fields
+ * in one frame) is treated as a separate series per numeric field, same as on the normalize side, to match the series set against the cell value.
  */
 function collectSeries(frames: DataFrame[], refId: string, sets: Array<Record<string, string>>): SeriesCandidate[] {
   const out: SeriesCandidate[] = [];
@@ -47,7 +47,7 @@ function collectSeries(frames: DataFrame[], refId: string, sets: Array<Record<st
   return out;
 }
 
-/** セルlabelsを含む数値フィールドを持つフレーム(スパークライン用に2点以上)を重複なく返す */
+/** Returns, without duplicates, the frames with a numeric field containing the cell's labels (2+ points, for the sparkline) */
 export function findSeriesFrames(frames: DataFrame[], refId: string, labels: LabelSpec): DataFrame[] {
   const seen = new Set<DataFrame>();
   const out: DataFrame[] = [];
@@ -76,15 +76,15 @@ function aggregatePoint(values: number[], agg: SpatialAggregation): number {
 export interface DrilldownResult {
   frame: DataFrame | null;
   seriesCount: number;
-  /** 複数系列を時点ごとに集約したか。falseなら先頭系列のみのフォールバック表示 */
+  /** Whether multiple series were aggregated per timestamp. If false, it's a fallback display of the first series only */
   aggregated: boolean;
 }
 
 /**
- * セルに複数系列が畳まれている場合、時刻配列が一致すればスパークラインにも同じ空間集約を
- * 時点ごとに適用してセル値と整合させる。欠損サンプル(null/undefined/NaN)は集約から除外し、
- * その時点の有効値が0件なら時点値をnullにする。時刻が揃わなければ集約せず先頭系列を返す
- * (aggregated:falseで区別できる)。
+ * When multiple series are collapsed into a cell and their time arrays match, apply the same spatial
+ * aggregation per timestamp to the sparkline too, to keep it consistent with the cell value. Missing
+ * samples (null/undefined/NaN) are excluded from the aggregation, and a timestamp's value becomes null
+ * if it has zero valid values. If the times don't align, skip aggregation and return the first series (distinguishable via aggregated:false).
  */
 export function drilldownSeries(
   frames: DataFrame[],
@@ -96,7 +96,7 @@ export function drilldownSeries(
   if (series.length === 0) {
     return { frame: null, seriesCount: 0, aggregated: false };
   }
-  // スパークラインは一致した数値フィールドのみを描くよう[time, value]で再構成する
+  // Reconstruct as [time, value] so the sparkline only draws the matched numeric field
   const asFrame = (s: SeriesCandidate): DataFrame => ({ ...s.frame, fields: [s.time, s.value] });
   if (series.length === 1) {
     return { frame: asFrame(series[0]), seriesCount: 1, aggregated: false };
@@ -107,7 +107,7 @@ export function drilldownSeries(
     return t.length === base.length && t.every((v, i) => v === base[i]);
   });
   if (!aligned) {
-    // 時刻が揃わない場合は集約せず先頭系列を示す(seriesCount/aggregatedで区別可能)
+    // If times don't align, skip aggregation and show the first series (distinguishable via seriesCount/aggregated)
     return { frame: asFrame(series[0]), seriesCount: series.length, aggregated: false };
   }
   const agged: Array<number | null> = base.map((_, i) => {
@@ -124,25 +124,25 @@ export function drilldownSeries(
 }
 
 /**
- * 意味上同一のリンクだけを畳む。典型的には同じData Link設定が各系列に適用され、
- * href/title/targetが一致する同一リンクが系列数分返るケースを1件にする。
- * onClickは動作が異なり得るため保守的に扱い、同一関数参照のときのみ同一視する
- * (origin一致でも別の関数参照なら別物として残す。判断に迷えば残す)。
+ * Collapses only links that are semantically identical. Typically handles the case where the same
+ * Data Link config is applied to each series, returning identical (href/title/target) links once per series — collapsed to one.
+ * onClick is treated conservatively since behavior can differ; only identified as the same when the
+ * function reference matches exactly (even with a matching origin, a different function reference is kept as distinct; when in doubt, keep it).
  */
 function sameLink(a: LinkModel<Field>, b: LinkModel<Field>): boolean {
   if (a.href !== b.href || a.title !== b.title || (a.target ?? '') !== (b.target ?? '')) {
     return false;
   }
   if (!a.onClick && !b.onClick) {
-    // 純粋なhrefリンク同士: href/title/targetが一致すれば同一とみなす
+    // Pure href links: considered identical if href/title/target match
     return true;
   }
   if (a.onClick && b.onClick) {
-    // onClickあり同士: originは生成元を示すだけで動作の同一性を保証しない。
-    // 関数参照が同一のときのみ同一動作とみなして畳む。
+    // Both have onClick: origin only indicates the source and doesn't guarantee identical behavior.
+    // Only collapse as the same behavior when the function reference is identical.
     return a.onClick === b.onClick;
   }
-  // 片方だけonClick: 動作が異なるため別物として残す
+  // Only one side has onClick: kept as distinct since the behavior differs
   return false;
 }
 
@@ -168,8 +168,8 @@ export function getCellLinks(
     if ((frame.refId ?? 'A') !== refId) {
       continue;
     }
-    // 系列形式: labels一致の数値フィールドすべてを対象にする(wide frameは複数系列)。
-    // reduce値なのでcalculatedValueを渡す(Grafanaの契約)。
+    // Series format: target every numeric field whose labels match (a wide frame has multiple series).
+    // Pass calculatedValue since it's a reduced value (Grafana's contract).
     const seriesFields = frame.fields.filter((f) => f.type === FieldType.number && matchesAnySet(f.labels, sets));
     if (seriesFields.length > 0) {
       for (const field of seriesFields) {
@@ -179,8 +179,8 @@ export function getCellLinks(
       }
       continue;
     }
-    // table形式: 必要なラベル列が全て存在し値が一致する行を全て対象にする(欠落列は不一致)。
-    // 最初の一致行で打ち切らず、全一致行からリンクを収集する(重複は末尾のdedupeで畳む)。
+    // Table format: target every row where all required label columns exist and their values match (a missing column is a mismatch).
+    // Don't stop at the first matching row — collect links from every matching row (duplicates are collapsed by the trailing dedupe).
     const stringFields = frame.fields.filter((f) => f.type === FieldType.string);
     if (stringFields.length > 0) {
       const numberFields = frame.fields.filter((f) => f.type === FieldType.number);
@@ -202,6 +202,6 @@ export function getCellLinks(
       }
     }
   }
-  // 意味上単一のリンクが系列数分重複して即実行されない/メニューが重複キーで溢れるのを防ぐ
+  // Prevents a semantically single link from being duplicated per series and either firing repeatedly on immediate execution or flooding the menu with duplicate keys
   return dedupeLinks(out);
 }

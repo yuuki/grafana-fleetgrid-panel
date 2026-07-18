@@ -10,7 +10,7 @@ const frame = (refId: string, labels: Record<string, string>, values: Array<numb
     ],
   });
 
-// 1フレームに複数の数値フィールドを持つwide frame(数値フィールドごとに1系列)
+// A wide frame with multiple numeric fields in one frame (one series per numeric field)
 const wideFrame = (refId: string, cols: Array<{ labels: Record<string, string>; values: Array<number | null> }>) =>
   toDataFrame({
     refId,
@@ -64,7 +64,7 @@ describe('drilldownSeries', () => {
     expect(drilldownSeries(frames, 'A', { zone: 'zone-a' }, 'sum').frame!.fields[1].values).toEqual([30, 36]);
   });
   it('excludes missing samples from aggregation and yields null when all missing', () => {
-    // t0: 両系列, t1: 第2系列のみ, t2: 全欠損
+    // t0: both series, t1: second series only, t2: all missing
     const frames = [
       frame('A', { zone: 'zone-a', gpu: '0' }, [10, null, null]),
       frame('A', { zone: 'zone-a', gpu: '1' }, [20, 4, null]),
@@ -103,7 +103,7 @@ describe('drilldownSeries', () => {
     const r = drilldownSeries([a, b], 'A', { zone: 'zone-a' }, 'max');
     expect(r.seriesCount).toBe(2);
     expect(r.aggregated).toBe(false);
-    expect(r.frame!.fields[1].values).toEqual([10, 30]); // 先頭系列そのまま
+    expect(r.frame!.fields[1].values).toEqual([10, 30]); // The first series unchanged
   });
 });
 
@@ -134,7 +134,7 @@ describe('getCellLinks', () => {
     expect(links.map((l) => l.href)).toEqual(['https://a', 'https://b']);
   });
   it('collapses one Data Link applied to every aggregated series to a single link', () => {
-    // 同一Data Link設定が各系列に適用され、系列数分の同一(href/title/target)リンクが返る典型ケース
+    // A typical case where the same Data Link config is applied to each series, returning as many identical (href/title/target) links as there are series
     const frames = [
       frame('A', { zone: 'zone-a', gpu: '0' }, [1, 2]),
       frame('A', { zone: 'zone-a', gpu: '1' }, [3, 4]),
@@ -143,7 +143,7 @@ describe('getCellLinks', () => {
     const link = () => [{ href: 'https://example.com/d/dash', title: 'Dashboard', target: '_blank', origin: {} }];
     frames.forEach((f) => (f.fields[1].getLinks = link as any));
     const links = getCellLinks(frames, 'A', { zone: 'zone-a' });
-    expect(links).toHaveLength(1); // 単一リンクとして即実行できる
+    expect(links).toHaveLength(1); // Can be executed immediately as a single link
     expect(links[0].href).toBe('https://example.com/d/dash');
   });
   it('keeps links that share an href but differ in title', () => {
@@ -157,7 +157,7 @@ describe('getCellLinks', () => {
     expect(links.map((l) => l.title)).toEqual(['Logs', 'Traces']);
   });
   it('keeps onClick links with the same origin but different callbacks', () => {
-    // originは生成元を示すだけで動作の同一性を保証しない。origin一致でも別onClickなら両方残す
+    // origin only indicates the source and doesn't guarantee identical behavior. Even with a matching origin, keep both if onClick differs
     const sharedOrigin = { name: 'field' } as any;
     const wide = wideFrame('A', [
       { labels: { zone: 'zone-a', gpu: '0' }, values: [1, 2] },
@@ -200,7 +200,7 @@ describe('getCellLinks', () => {
     expect(getLinks).toHaveBeenCalledWith({ valueRowIndex: 1 });
   });
   it('does not match a table row when a required label column is absent', () => {
-    // gpu 列が無いフレームに対し gpu を要求 → 誤マッチさせない(欠落列は不一致)
+    // Requesting gpu against a frame with no gpu column → must not falsely match (a missing column is a mismatch)
     const table = toDataFrame({
       refId: 'A',
       fields: [
@@ -219,7 +219,7 @@ describe('getCellLinks', () => {
         { name: 'Value', type: FieldType.number, values: [1, 2, 3] },
       ],
     });
-    // 行ごとに異なる href(dedupeで畳まれない)。2つの zone-a 行が両方収集されることを見る。
+    // A different href per row (not collapsed by dedupe). Verifies both zone-a rows are collected.
     table.fields[1].getLinks = ((opts: { valueRowIndex: number }) => [
       { href: `https://row/${opts.valueRowIndex}`, title: '', origin: {} },
     ]) as any;
@@ -227,7 +227,7 @@ describe('getCellLinks', () => {
     expect(links.map((l) => l.href)).toEqual(['https://row/0', 'https://row/1']);
   });
   it('collects Data Links from series matching any of multiple label sets', () => {
-    // 抽出キー衝突(例: node-a017 / node-b017 が同一セル)の両組から Data Links を収集する
+    // Collect Data Links from both sets in an extraction-key collision (e.g. node-a017 / node-b017 mapping to the same cell)
     const a = frame('A', { host: 'node-a017' }, [1, 2]);
     const b = frame('A', { host: 'node-b017' }, [3, 4]);
     a.fields[1].getLinks = (() => [{ href: 'https://a', title: 'A', target: '_blank', origin: {} }]) as any;
@@ -236,7 +236,7 @@ describe('getCellLinks', () => {
     expect(links.map((l) => l.href).sort()).toEqual(['https://a', 'https://b']);
   });
   it('matches series across multiple colliding label sets (extraction-key collision)', () => {
-    // node-a017 と node-b017 が同じセルに畳まれたときの labelSets 探索
+    // labelSets search for when node-a017 and node-b017 collapse into the same cell
     const frames = [
       toDataFrame({
         refId: 'A',

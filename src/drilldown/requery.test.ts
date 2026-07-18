@@ -24,8 +24,8 @@ describe('buildDrilldownRequest', () => {
   });
 
   it('rewrites format:table targets to time_series so range re-query yields time series', () => {
-    // instant+table のtargetをそのままrange化すると range table 形式が返り、
-    // 時系列抽出(collectSeries)が空になる。format を time_series に上書きして時系列を得る。
+    // Naively converting an instant+table target to range returns a range table format,
+    // and time series extraction (collectSeries) comes back empty. Override format to time_series to get the time series.
     const withFormat = {
       ...baseRequest,
       targets: [
@@ -35,13 +35,13 @@ describe('buildDrilldownRequest', () => {
       ],
     } as any;
     const req = buildDrilldownRequest(withFormat) as any;
-    expect(req.targets[0].format).toBe('time_series'); // table → time_series へ上書き
-    expect(req.targets[1].format).toBe('time_series'); // 既に time_series はそのまま
-    expect(req.targets[2].format).toBeUndefined(); // 未設定は触らない(データソース既定に委ねる)
+    expect(req.targets[0].format).toBe('time_series'); // table → overridden to time_series
+    expect(req.targets[1].format).toBe('time_series'); // Already time_series, left as-is
+    expect(req.targets[2].format).toBeUndefined(); // Unset is left untouched (deferred to the datasource default)
   });
 
   it('clamps intervalMs to the 15s floor for short ranges and converts every target', () => {
-    // 60s span / 100 = 600ms → 15000msの下限に丸める。全targetをinstant:false/range:trueへ変換する
+    // 60s span / 100 = 600ms → rounded up to the 15000ms floor. Converts all targets to instant:false/range:true
     const shortReq = {
       ...baseRequest,
       range: { from: dateTime(0), to: dateTime(60_000), raw: baseRequest.range.raw },
@@ -90,12 +90,12 @@ describe('fetchDrilldownFrames', () => {
       ],
     } as any;
     await fetchDrilldownFrames(mixed);
-    // 2つの異なるdatasource → get/queryは各1回(同一datasourceのtargetsは束ねる)
+    // 2 different datasources → get/query is called once each (targets on the same datasource are bundled)
     expect(getMock).toHaveBeenCalledTimes(2);
     expect(query).toHaveBeenCalledTimes(2);
     expect(getMock).toHaveBeenCalledWith({ type: 'prometheus', uid: 'ds1' });
     expect(getMock).toHaveBeenCalledWith({ type: 'loki', uid: 'ds2' });
-    // 各requestが自datasourceのtargetsのみを保持している(A,Bはds1、Cはds2)
+    // Each request holds only the targets for its own datasource (A,B are ds1, C is ds2)
     const requests = query.mock.calls.map((c: any[]) => c[0]);
     const ds1req = requests.find((r: any) => r.targets[0].datasource.uid === 'ds1');
     const ds2req = requests.find((r: any) => r.targets[0].datasource.uid === 'ds2');

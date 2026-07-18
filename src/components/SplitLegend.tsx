@@ -10,7 +10,7 @@ export const SplitLegend: React.FC<{ metricInfos: MetricInfo[] }> = ({ metricInf
     <div style={{ display: 'flex', gap: 12, alignItems: 'center', fontSize: 12, flexWrap: 'wrap' }}>
       {shown.map((info, i) => (
         <span key={info.refId} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-          {/* 区画位置のミニチュア: セル内のどの区画にこのメトリクスが描かれるか(仕様の位置対応図) */}
+          {/* Zone-position miniature: which zone within the cell this metric is drawn in (the spec's position-mapping diagram) */}
           <span
             aria-hidden
             style={{ position: 'relative', width: 14, height: 14, border: '1px solid currentColor', display: 'inline-block' }}

@@ -32,18 +32,18 @@ export function renderCanvas(canvas: HTMLCanvasElement, rc: RenderContext): void
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssW, cssH);
 
-  // 枠線
+  // Border
   ctx.strokeStyle = theme.colors.border.medium;
   for (const b of layout.borders) {
     ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
   }
 
-  // セル
+  // Cells
   const infoByRef = new Map(rc.metricInfos.map((m) => [m.refId, m]));
-  // 選択refIdにMetricInfoが無い場合(0系列クエリ等)はフォールバックせず欠損描画に落とす
+  // When the selected refId has no MetricInfo (e.g. a 0-series query), don't fall back — render it as missing
   const selected = infoByRef.get(rc.selectedRefId);
-  // split時はMetricInfoが1件でも区画描画に入る(1件なら全区画=全面)。これにより選択refIdが
-  // 0系列でも選択に依らずMetricInfoの色で描き、凡例(metricInfos基準)・クリック判定と一致させる
+  // In split mode, zone rendering kicks in even with a single MetricInfo (with one, all zones = the whole cell). This way, even
+  // when the selected refId has 0 series, it's drawn with MetricInfo's color regardless of selection, keeping it consistent with the legend (based on metricInfos) and click detection
   const split = rc.displayMode === 'split' && rc.metricInfos.length > 0;
   const rects = split ? splitRects(rc.metricInfos.length) : null;
 
@@ -58,7 +58,7 @@ export function renderCanvas(canvas: HTMLCanvasElement, rc: RenderContext): void
       continue;
     }
     if (!selected) {
-      // 選択メトリクスが無い(0系列refId選択など) → 全セルを欠損色で描画する
+      // No selected metric (e.g. a 0-series refId is selected) → render the whole cell with the missing color
       ctx.fillStyle = rc.missingColor;
       ctx.fillRect(c.x, c.y, c.w, c.h);
       continue;
@@ -88,7 +88,7 @@ export function renderCanvas(canvas: HTMLCanvasElement, rc: RenderContext): void
     }
   }
 
-  // グループラベル
+  // Group label
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.font = `${12}px ${theme.typography.fontFamily}`;
@@ -97,7 +97,7 @@ export function renderCanvas(canvas: HTMLCanvasElement, rc: RenderContext): void
     ctx.fillText(l.text, l.x + 2, l.y + l.h / 2, l.w - 4);
   }
 
-  // スクロール時: 最上位レベルのラベルを上端に固定表示
+  // While scrolling: pin the top-level label's display to the top edge
   if (rc.scrollTop > 0) {
     const tops = layout.labels.filter((l) => l.depth === 1);
     const current = [...tops].reverse().find((l) => l.y <= rc.scrollTop);

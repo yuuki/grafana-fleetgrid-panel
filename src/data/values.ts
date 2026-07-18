@@ -31,7 +31,7 @@ export function attachCells(
   agg: SpatialAggregation,
   refIds: string[] = collectRefIds(rows)
 ): void {
-  // pathKey → { 全原値ラベル組, refId → 生値リスト }
+  // pathKey → { all original label sets, refId → raw value list }
   interface Bucket {
     labelSets: Array<Record<string, string>>;
     seenLabelSets: Set<string>;
@@ -59,8 +59,8 @@ export function attachCells(
       bucket = { labelSets: [], seenLabelSets: new Set(), byRef: new Map() };
       buckets.set(pk, bucket);
     }
-    // 抽出キーが衝突する異なる原値組をすべて記録する(重複は畳む)。
-    // 例: node-a017 と node-b017 が同じ "017" に抽出されても両方をドリルダウンで探索できる。
+    // Record all distinct original label sets whose extraction keys collide (duplicates are collapsed).
+    // Example: even if node-a017 and node-b017 both extract to "017", both can still be searched via drilldown.
     const rep: Record<string, string> = {};
     for (const level of levels) {
       rep[level.label] = row.labels[level.label];
@@ -87,7 +87,7 @@ export function attachCells(
         values.set(refId, list && list.length > 0 ? aggregate(list, agg) : null);
       }
       const labelSets = bucket?.labelSets ?? [];
-      // labels は後方互換の代表原値(先頭の組)
+      // labels is the representative original value for backward compatibility (the first set)
       node.cell = { path: node.path, labels: labelSets[0] ?? {}, labelSets, values };
       return;
     }

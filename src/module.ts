@@ -4,8 +4,8 @@ import { ClusterviewPanel } from './components/ClusterviewPanel';
 import { LevelsEditor } from './options/LevelsEditor';
 import { ReduceCalcEditor } from './options/ReduceCalcEditor';
 
-// useFieldConfig() が標準Field設定(Color scheme / Thresholds / Unit / Min-Max / Data Links / Overrides)を
-// 有効化する。これがないと本プラグインの配色・単位の全設計が機能しない
+// useFieldConfig() enables the standard Field settings (Color scheme / Thresholds / Unit / Min-Max / Data Links / Overrides).
+// Without this, this plugin's entire color/unit design would not function.
 export const plugin = new PanelPlugin<ClusterviewOptions>(ClusterviewPanel).useFieldConfig().setPanelOptions((builder) =>
   builder
     .addCustomEditor({

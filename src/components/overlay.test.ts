@@ -8,7 +8,7 @@ describe('placeOverlay', () => {
   });
 
   it('flips to the left/top near the right/bottom edge and clamps within bounds', () => {
-    // 右下端付近: 反転して左上に置き、min..max-size に収める
+    // Near the bottom-right corner: flip to place at top-left, keeping it within min..max-size
     const p = placeOverlay(390, 290, 100, 80, bounds);
     expect(p.left).toBeGreaterThanOrEqual(bounds.minX);
     expect(p.top).toBeGreaterThanOrEqual(bounds.minY);
@@ -17,10 +17,10 @@ describe('placeOverlay', () => {
   });
 
   it('clamps to a scrolled (non-zero) visible range', () => {
-    // 可視範囲がスクロールで [200,150]-[500,400] に移動。幅300はちょうど範囲幅と同じ。
+    // The visible range shifts to [200,150]-[500,400] due to scrolling. Width 300 is exactly the same as the range width.
     const scrolled = { minX: 200, minY: 150, maxX: 500, maxY: 400 };
     const p = placeOverlay(480, 380, 300, 200, scrolled);
-    expect(p.left).toBe(200); // 素朴な x-W-8=172 は minX を下回るため 200 にクランプ
+    expect(p.left).toBe(200); // A naive x-W-8=172 would fall below minX, so it's clamped to 200
     expect(p.top).toBeGreaterThanOrEqual(150);
     expect(p.top + 200).toBeLessThanOrEqual(400);
   });

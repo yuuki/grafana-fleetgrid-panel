@@ -37,16 +37,16 @@ describe('CellTooltip', () => {
     };
     render(<CellTooltip cell={cell} metricInfos={infos} missingColor="#444" x={0} y={0} />);
     expect(screen.getByText('zone-a / 0')).toBeInTheDocument();
-    expect(screen.getByText(/503\s*W/)).toBeInTheDocument(); // 単位付き整形結果(生値ではない)
+    expect(screen.getByText(/503\s*W/)).toBeInTheDocument(); // Formatted result with unit (not the raw value)
     expect(screen.getByText('power')).toBeInTheDocument();
-    expect(screen.getByText('temp')).toBeInTheDocument(); // 2件目のメトリクス名
+    expect(screen.getByText('temp')).toBeInTheDocument(); // Name of the second metric
     expect(screen.getByText('欠損')).toBeInTheDocument();
   });
 
-  // 適応: 選択肢はmodel.refIds基準になったため、0系列クエリのrefIdはMetricInfoを持たない。
-  // その場合でもrefIdを名前として欠損表示する(ディスパッチ指示のガード)。
+  // Adaptation: since choices are now based on model.refIds, a refId with 0 series has no MetricInfo.
+  // Even in that case, show it as missing using the refId as the name (guard per dispatch instructions).
   it('lists a configured refId without MetricInfo as missing', () => {
-    const infos = buildMetricInfos([frames[0]], theme, 'browser'); // Aのみ。Bは0系列でMetricInfoなし
+    const infos = buildMetricInfos([frames[0]], theme, 'browser'); // A only. B has 0 series and no MetricInfo
     const cell = {
       path: ['zone-a', '0'],
       labels: { zone: 'zone-a' },
@@ -57,7 +57,7 @@ describe('CellTooltip', () => {
     };
     render(<CellTooltip cell={cell} metricInfos={infos} missingColor="#444" x={0} y={0} />);
     expect(screen.getByText('power')).toBeInTheDocument();
-    expect(screen.getByText('B')).toBeInTheDocument(); // MetricInfoが無いrefIdは名前をrefIdにフォールバック
+    expect(screen.getByText('B')).toBeInTheDocument(); // A refId without MetricInfo falls back to using the refId as its name
     expect(screen.getByText('欠損')).toBeInTheDocument();
   });
 });

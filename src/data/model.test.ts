@@ -25,7 +25,7 @@ const frame = (refId: string, zone: string, gpu: string, value: number) =>
     ],
   });
 
-// 生履歴(過去の外れ値を含む)と reduce 後のセル値がずれるフィクスチャ
+// A fixture where the raw history (including past outliers) diverges from the post-reduce cell value
 const seriesFrame = (refId: string, gpu: string, values: number[]) =>
   toDataFrame({
     refId,
@@ -47,7 +47,7 @@ describe('buildModel', () => {
   });
 
   it('orders metric infos by configured refId order, not by series appearance order', () => {
-    // data.series が targets 順と逆(B が先)でも、凡例/分割区画は refId 順(A,B)に整列する
+    // Even if data.series is in reverse order from targets (B first), the legend/split zones align in refId order (A,B)
     const m = buildModel(
       [frame('B', 'zone-a', '0', 61), frame('A', 'zone-a', '0', 503)],
       options,
@@ -71,8 +71,8 @@ describe('buildModel', () => {
   });
 
   it('builds the color range from spatially aggregated cell values, not individual series values', () => {
-    // zone-a セルに 2 系列(10, 30)が sum で 40 に集約される。zone-b は 100。
-    // 個々の系列値(10)が range に入るなら min=10 だが、集約後の値だけなら min=40。
+    // The zone-a cell has 2 series (10, 30) aggregated to 40 via sum. zone-b is 100.
+    // If individual series values (10) were included in the range, min=10, but with only post-aggregation values, min=40.
     const opts = { ...options, levels: [{ ...DEFAULT_LEVEL, label: 'zone' }], spatialAggregation: 'sum' as const };
     const m = buildModel(
       [frame('A', 'zone-a', '0', 10), frame('A', 'zone-a', '1', 30), frame('A', 'zone-b', '0', 100)],
@@ -82,13 +82,13 @@ describe('buildModel', () => {
     );
     const infoA = m.metricInfos.find((i) => i.refId === 'A')!;
     expect(m.root.children.find((c) => c.key === 'zone-a')!.cell!.values.get('A')).toBe(40);
-    expect(infoA.field.config.min).toBe(40); // 集約前の 10 ではない
+    expect(infoA.field.config.min).toBe(40); // Not the pre-aggregation 10
     expect(infoA.field.config.max).toBe(100);
   });
 
   it('derives the color range from reduced cell values, not raw history', () => {
-    // gpu 0: 現在値 503(生の peak 1000)、gpu 1: 現在値 480(生の trough 100)
-    // 生履歴由来なら min=100/max=1000 になるが、セル値由来なら min=480/max=503
+    // gpu 0: current value 503 (raw peak 1000), gpu 1: current value 480 (raw trough 100)
+    // If derived from the raw history, min=100/max=1000, but if derived from cell values, min=480/max=503
     const m = buildModel(
       [seriesFrame('A', '0', [1000, 503]), seriesFrame('A', '1', [100, 480])],
       options,

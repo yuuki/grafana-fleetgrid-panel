@@ -21,7 +21,7 @@ describe('buildMetricInfos', () => {
       'browser'
     );
     expect(infos.map((i) => i.refId)).toEqual(['A', 'B']);
-    // Aのmin/maxはAのデータ範囲(600-1000)になる: 800は中間の色、Bの範囲とは独立
+    // A's min/max become A's data range (600-1000): 800 is a mid-range color, independent of B's range
     const a = infos[0].processor(800);
     const b = infos[1].processor(60);
     expect(a.color).toBeDefined();
@@ -39,7 +39,7 @@ describe('buildMetricInfos', () => {
   });
 
   it('overrides inherited global state.range with the per-query range', () => {
-    // applyFieldOverridesはパネル全体のグローバル範囲をstate.rangeに注入することがある
+    // applyFieldOverrides may inject the panel-wide global range into state.range
     const f = frame('A', 'power', [600, 1000]);
     f.fields[1].state = { range: { min: 0, max: 2000, delta: 2000 } };
     const infos = buildMetricInfos([f], theme, 'browser');
@@ -59,7 +59,7 @@ describe('buildMetricInfos', () => {
 });
 
 describe('chooseCellText', () => {
-  // 幅 = 文字数 × fontPx × 0.6 の擬似メジャラ
+  // A pseudo measurer: width = charCount × fontPx × 0.6
   const measure = (text: string, fontPx: number) => text.length * fontPx * 0.6;
   const display = { text: '503', suffix: ' W', numeric: 503 } as any;
 

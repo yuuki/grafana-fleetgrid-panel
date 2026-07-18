@@ -63,12 +63,12 @@ describe('renderCanvas', () => {
   it('renders a selected zero-series refId as missing without falling back to another metric', () => {
     const spy = jest.fn((v: number): DisplayValue => ({ numeric: v, text: String(v), color: '#abcdef' }));
     const canvas = document.createElement('canvas');
-    // 'B' は0系列で metricInfos に存在しない。旧実装は metricInfos[0]('A') にフォールバックしていた。
+    // 'B' has 0 series and isn't present in metricInfos. The old implementation used to fall back to metricInfos[0]('A').
     renderCanvas(canvas, baseCtx({ metricInfos: [makeInfo('A', spy)], selectedRefId: 'B' }));
     expect(spy).not.toHaveBeenCalled();
     const styles = fillStyles(canvas);
-    expect(styles).toContain('#123456'); // 欠損色で塗る
-    expect(styles).not.toContain('#abcdef'); // 先頭メトリクスの色は使わない
+    expect(styles).toContain('#123456'); // Filled with the missing color
+    expect(styles).not.toContain('#abcdef'); // Doesn't use the first metric's color
   });
 
   it('uses the metric processor color when its own refId is selected', () => {
@@ -82,14 +82,14 @@ describe('renderCanvas', () => {
   it('draws the sole MetricInfo across the whole cell in split mode even if a zero-series refId is selected', () => {
     const spy = jest.fn((v: number): DisplayValue => ({ numeric: v, text: String(v), color: '#abcdef' }));
     const canvas = document.createElement('canvas');
-    // A のみデータ、B は0系列で metricInfos に無い。B選択済みでも split では選択に依らず A を全面に描く
+    // Only A has data; B has 0 series and isn't in metricInfos. Even with B selected, split draws A across the whole cell regardless of selection
     renderCanvas(canvas, baseCtx({ metricInfos: [makeInfo('A', spy)], selectedRefId: 'B', displayMode: 'split' }));
-    expect(spy).toHaveBeenCalledWith(1); // 欠損色ではなく A の processor を通す
+    expect(spy).toHaveBeenCalledWith(1); // Goes through A's processor rather than the missing color
     const styles = fillStyles(canvas);
-    expect(styles).toContain('#abcdef'); // A の色で描画(凡例「1: A」と一致)
-    expect(styles).not.toContain('#123456'); // 欠損色で全面を塗らない
+    expect(styles).toContain('#abcdef'); // Rendered with A's color (matches the legend "1: A")
+    expect(styles).not.toContain('#123456'); // Doesn't fill the whole cell with the missing color
     const rects = fillRects(canvas);
-    expect(rects).toEqual([{ x: 0, y: 0, width: 39.5, height: 39.5 }]); // splitRects(1)=全面(40x40セル)
+    expect(rects).toEqual([{ x: 0, y: 0, width: 39.5, height: 39.5 }]); // splitRects(1)=full cell (40x40 cell)
   });
 
   it('splits a cell into per-metric regions using splitRects geometry in split mode', () => {
@@ -107,13 +107,13 @@ describe('renderCanvas', () => {
         ]),
       })
     );
-    // splitRects(2)=左右2分割。40x40セルで各区画は x/幅がハーフ、幅高は-0.5の目地込み
+    // splitRects(2)=split left/right. In a 40x40 cell, each zone has half the x/width, with -0.5 for the grout included in width/height
     expect(fillRects(canvas)).toEqual([
       { x: 0, y: 0, width: 19.5, height: 39.5 },
       { x: 20, y: 0, width: 19.5, height: 39.5 },
     ]);
     const styles = fillStyles(canvas);
-    expect(styles).toContain('#aaaaaa'); // 区画1: A
-    expect(styles).toContain('#bbbbbb'); // 区画2: B
+    expect(styles).toContain('#aaaaaa'); // Zone 1: A
+    expect(styles).toContain('#bbbbbb'); // Zone 2: B
   });
 });

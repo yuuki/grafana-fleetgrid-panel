@@ -37,7 +37,7 @@ describe('SplitLegend', () => {
     const infos = buildMetricInfos([frame('A', 'power'), frame('B', 'temp')], theme, 'browser');
     const { container } = render(<SplitLegend metricInfos={infos} />);
     const rects = splitRects(infos.length);
-    // ミニチュア枠(aria-hidden)の直下spanが区画塗り。splitRectsと同じ割合であることを検証(単一の真実の源)
+    // The span directly under the miniature frame (aria-hidden) is the zone fill. Verifies it has the same proportions as splitRects (single source of truth)
     const fills = container.querySelectorAll<HTMLElement>('span[aria-hidden] > span');
     expect(fills).toHaveLength(rects.length);
     fills.forEach((el, i) => {

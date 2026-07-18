@@ -21,11 +21,11 @@ export function buildModel(
 ): PanelModel {
   const rows = normalizeFrames(frames, options.reduceCalc || 'lastNotNull');
   const { root, warnings } = buildHierarchy(rows, options.levels);
-  // 設定済みクエリのrefIdを保持する(結果0系列でも欠損として枠を残す)
+  // Keep the refIds of configured queries (leave a slot marked as missing even when the result has 0 series)
   const refIds = [...new Set([...targetRefIds, ...collectRefIds(rows)])];
   attachCells(root, rows, options.levels, options.spatialAggregation, refIds);
 
-  // 色スケールは表示値(reduce・空間集約後のセル値)から計算する
+  // The color scale is computed from the display value (the cell value after reduce and spatial aggregation)
   const ranges = new Map<string, { min: number; max: number }>();
   const visit = (node: HierarchyNode) => {
     node.children.forEach(visit);
@@ -45,9 +45,9 @@ export function buildModel(
   visit(root);
 
   const metricInfos = buildMetricInfos(frames, theme, timeZone, ranges);
-  // 凡例・分割区画の並びを仕様の refId 順に固定する。buildMetricInfos は frame 走査順で
-  // MetricInfo を作るため、data.series が targets 順と異なると並びが崩れる。refIds 順に整列する
-  // (refIds に無い refId は末尾へ回し、Array.sort の安定性で相対順を保つ)。
+  // Fix the legend/split-zone order to the refId order per spec. buildMetricInfos builds MetricInfo
+  // in frame-scan order, so the order breaks if data.series differs from the targets order. Sort by refIds order
+  // (a refId not in refIds is pushed to the end, relying on Array.sort's stability to preserve relative order).
   const orderByRef = new Map(refIds.map((r, i) => [r, i]));
   metricInfos.sort((a, b) => (orderByRef.get(a.refId) ?? Infinity) - (orderByRef.get(b.refId) ?? Infinity));
   return { root, warnings, metricInfos, refIds };

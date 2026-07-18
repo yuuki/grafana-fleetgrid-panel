@@ -13,8 +13,8 @@ export interface CellTooltipProps {
 
 export const CellTooltip: React.FC<CellTooltipProps> = ({ cell, metricInfos, missingColor, x, y }) => {
   const infoByRef = new Map(metricInfos.map((info) => [info.refId, info]));
-  // 適応: 選択肢はmodel.refIds基準のため、0系列クエリのrefIdはMetricInfoを持たない。
-  // metricInfos順を優先しつつ、cell.valuesにのみ存在するrefId(0系列)も末尾に列挙し欠損表示する。
+  // Adaptation: since choices are based on model.refIds, a refId with 0 series has no MetricInfo.
+  // Prioritize metricInfos order, while also listing refIds that exist only in cell.values (0 series) at the end and showing them as missing.
   const refIds = [
     ...metricInfos.map((info) => info.refId),
     ...[...cell.values.keys()].filter((refId) => !infoByRef.has(refId)),

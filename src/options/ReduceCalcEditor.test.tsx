@@ -20,7 +20,7 @@ function calcProps(value: string, onChange: (v?: string) => void): StandardEdito
   return { value, onChange, context: { data: [] }, item: { id: 'reduceCalc', name: 'reduceCalc' } };
 }
 
-// 数値スカラーを返すreducerのみを許可する(配列系・boolean系は除外)。
+// Only allow reducers that return a numeric scalar (array-type and boolean-type are excluded).
 const ALLOWED = ['lastNotNull', 'last', 'mean', 'min', 'max', 'sum', 'count'];
 
 function openMenu() {
