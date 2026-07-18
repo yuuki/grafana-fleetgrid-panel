@@ -31,9 +31,10 @@ export function attachCells(
   agg: SpatialAggregation,
   refIds: string[] = collectRefIds(rows)
 ): void {
-  // pathKey → { 代表原値ラベル, refId → 生値リスト }
+  // pathKey → { 全原値ラベル組, refId → 生値リスト }
   interface Bucket {
-    labels: Record<string, string>;
+    labelSets: Array<Record<string, string>>;
+    seenLabelSets: Set<string>;
     byRef: Map<string, number[]>;
   }
   const buckets = new Map<string, Bucket>();
@@ -55,12 +56,19 @@ export function attachCells(
     const pk = pathKey(path);
     let bucket = buckets.get(pk);
     if (!bucket) {
-      const rep: Record<string, string> = {};
-      for (const level of levels) {
-        rep[level.label] = row.labels[level.label];
-      }
-      bucket = { labels: rep, byRef: new Map() };
+      bucket = { labelSets: [], seenLabelSets: new Set(), byRef: new Map() };
       buckets.set(pk, bucket);
+    }
+    // 抽出キーが衝突する異なる原値組をすべて記録する(重複は畳む)。
+    // 例: node-a017 と node-b017 が同じ "017" に抽出されても両方をドリルダウンで探索できる。
+    const rep: Record<string, string> = {};
+    for (const level of levels) {
+      rep[level.label] = row.labels[level.label];
+    }
+    const repKey = pathKey(levels.map((l) => rep[l.label]));
+    if (!bucket.seenLabelSets.has(repKey)) {
+      bucket.seenLabelSets.add(repKey);
+      bucket.labelSets.push(rep);
     }
     if (row.value === null) {
       continue;
@@ -78,7 +86,9 @@ export function attachCells(
         const list = bucket?.byRef.get(refId);
         values.set(refId, list && list.length > 0 ? aggregate(list, agg) : null);
       }
-      node.cell = { path: node.path, labels: bucket?.labels ?? {}, values };
+      const labelSets = bucket?.labelSets ?? [];
+      // labels は後方互換の代表原値(先頭の組)
+      node.cell = { path: node.path, labels: labelSets[0] ?? {}, labelSets, values };
       return;
     }
     node.children.forEach(visit);

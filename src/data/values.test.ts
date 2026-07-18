@@ -43,6 +43,32 @@ describe('attachCells', () => {
     expect(root.children[0].cell!.values.get('A')).toBe(10);
   });
 
+  it('keeps the raw label as the representative even when the extracted key differs', () => {
+    const trailing: LevelDef[] = [{ ...DEFAULT_LEVEL, label: 'host', extract: 'trailingNumber' }];
+    const rows: NormalizedRow[] = [{ labels: { host: 'node-a017' }, value: 5, refId: 'A' }];
+    const { root } = buildHierarchy(rows, trailing);
+    attachCells(root, rows, trailing, 'max');
+    const cell = root.children[0].cell!;
+    expect(root.children[0].key).toBe('017'); // 抽出キー
+    expect(cell.labels).toEqual({ host: 'node-a017' }); // 代表原値は抽出前のraw
+    expect(cell.labelSets).toEqual([{ host: 'node-a017' }]);
+  });
+
+  it('retains all colliding raw label sets and aggregates their values into one cell', () => {
+    // node-a017 と node-b017 はどちらも trailingNumber で "017" に抽出され同一セルに畳まれる。
+    // セル値は両方を集約し、labelSets は両方の原値組を保持する(ドリルダウンの探索対象)。
+    const trailing: LevelDef[] = [{ ...DEFAULT_LEVEL, label: 'host', extract: 'trailingNumber' }];
+    const rows: NormalizedRow[] = [
+      { labels: { host: 'node-a017' }, value: 10, refId: 'A' },
+      { labels: { host: 'node-b017' }, value: 30, refId: 'A' },
+    ];
+    const { root } = buildHierarchy(rows, trailing);
+    attachCells(root, rows, trailing, 'sum');
+    const cell = root.children[0].cell!;
+    expect(cell.values.get('A')).toBe(40); // 両系列を集約
+    expect(cell.labelSets).toEqual([{ host: 'node-a017' }, { host: 'node-b017' }]);
+  });
+
   it('collects refIds in appearance order', () => {
     const rows: NormalizedRow[] = [
       { labels: {}, value: 1, refId: 'B' },

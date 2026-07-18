@@ -43,8 +43,15 @@ export interface NormalizedRow {
 
 export interface CellModel {
   path: string[];
-  /** 階層に使ったラベルキーの代表原値(ドリルダウンの系列特定に使う) */
+  /** 階層に使ったラベルキーの代表原値(表示・後方互換用。先頭のlabelSetと一致する) */
   labels: Record<string, string>;
+  /**
+   * このセルに畳まれた全ての原値ラベル組。抽出キーが衝突する異なる原値
+   * (例: node-a017 と node-b017 がどちらも "017")を全て保持し、ドリルダウンが
+   * セル値と同じ系列集合を探索できるようにする。
+   * 本番経路(attachCells)では常に設定される。表示専用/軽量フィクスチャでは省略可。
+   */
+  labelSets?: Array<Record<string, string>>;
   values: Map<string, number | null>;
 }
 

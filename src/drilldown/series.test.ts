@@ -199,4 +199,54 @@ describe('getCellLinks', () => {
     expect(links).toHaveLength(1);
     expect(getLinks).toHaveBeenCalledWith({ valueRowIndex: 1 });
   });
+  it('does not match a table row when a required label column is absent', () => {
+    // gpu 列が無いフレームに対し gpu を要求 → 誤マッチさせない(欠落列は不一致)
+    const table = toDataFrame({
+      refId: 'A',
+      fields: [
+        { name: 'zone', type: FieldType.string, values: ['zone-a'] },
+        { name: 'Value', type: FieldType.number, values: [1] },
+      ],
+    });
+    table.fields[1].getLinks = (() => [{ href: 'https://x', title: '', origin: {} }]) as any;
+    expect(getCellLinks([table], 'A', { zone: 'zone-a', gpu: '0' })).toEqual([]);
+  });
+  it('collects links from every matching table row, not just the first', () => {
+    const table = toDataFrame({
+      refId: 'A',
+      fields: [
+        { name: 'zone', type: FieldType.string, values: ['zone-a', 'zone-a', 'zone-b'] },
+        { name: 'Value', type: FieldType.number, values: [1, 2, 3] },
+      ],
+    });
+    // 行ごとに異なる href(dedupeで畳まれない)。2つの zone-a 行が両方収集されることを見る。
+    table.fields[1].getLinks = ((opts: { valueRowIndex: number }) => [
+      { href: `https://row/${opts.valueRowIndex}`, title: '', origin: {} },
+    ]) as any;
+    const links = getCellLinks([table], 'A', { zone: 'zone-a' });
+    expect(links.map((l) => l.href)).toEqual(['https://row/0', 'https://row/1']);
+  });
+  it('matches series across multiple colliding label sets (extraction-key collision)', () => {
+    // node-a017 と node-b017 が同じセルに畳まれたときの labelSets 探索
+    const frames = [
+      toDataFrame({
+        refId: 'A',
+        fields: [
+          { name: 'Time', type: FieldType.time, values: [0, 1000] },
+          { name: 'Value', type: FieldType.number, values: [10, 30], labels: { host: 'node-a017' } },
+        ],
+      }),
+      toDataFrame({
+        refId: 'A',
+        fields: [
+          { name: 'Time', type: FieldType.time, values: [0, 1000] },
+          { name: 'Value', type: FieldType.number, values: [20, 5], labels: { host: 'node-b017' } },
+        ],
+      }),
+    ];
+    const r = drilldownSeries(frames, 'A', [{ host: 'node-a017' }, { host: 'node-b017' }], 'max');
+    expect(r.seriesCount).toBe(2);
+    expect(r.aggregated).toBe(true);
+    expect(r.frame!.fields[1].values).toEqual([20, 30]);
+  });
 });

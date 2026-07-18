@@ -8,6 +8,15 @@ function labelsMatch(fieldLabels: Record<string, string> | undefined, want: Reco
   return Object.entries(want).every(([k, v]) => fieldLabels[k] === v);
 }
 
+/** セルは複数の原値ラベル組(抽出キー衝突)を持ちうる。単一組も配列に正規化して扱う。 */
+type LabelSpec = Record<string, string> | Array<Record<string, string>>;
+function toLabelSets(labels: LabelSpec): Array<Record<string, string>> {
+  return Array.isArray(labels) ? labels : [labels];
+}
+function matchesAnySet(fieldLabels: Record<string, string> | undefined, sets: Array<Record<string, string>>): boolean {
+  return sets.some((s) => labelsMatch(fieldLabels, s));
+}
+
 interface SeriesCandidate {
   frame: DataFrame;
   time: Field;
@@ -19,7 +28,7 @@ interface SeriesCandidate {
  * 「1系列=1数値フィールド」として列挙する。wide frame(1フレームに複数数値フィールド)は
  * normalize側と同じく数値フィールドごとに別系列として扱い、セル値との系列集合を一致させる。
  */
-function collectSeries(frames: DataFrame[], refId: string, labels: Record<string, string>): SeriesCandidate[] {
+function collectSeries(frames: DataFrame[], refId: string, sets: Array<Record<string, string>>): SeriesCandidate[] {
   const out: SeriesCandidate[] = [];
   for (const frame of frames) {
     if ((frame.refId ?? 'A') !== refId) {
@@ -30,7 +39,7 @@ function collectSeries(frames: DataFrame[], refId: string, labels: Record<string
       continue;
     }
     for (const value of frame.fields) {
-      if (value.type === FieldType.number && labelsMatch(value.labels, labels)) {
+      if (value.type === FieldType.number && matchesAnySet(value.labels, sets)) {
         out.push({ frame, time, value });
       }
     }
@@ -39,10 +48,10 @@ function collectSeries(frames: DataFrame[], refId: string, labels: Record<string
 }
 
 /** セルlabelsを含む数値フィールドを持つフレーム(スパークライン用に2点以上)を重複なく返す */
-export function findSeriesFrames(frames: DataFrame[], refId: string, labels: Record<string, string>): DataFrame[] {
+export function findSeriesFrames(frames: DataFrame[], refId: string, labels: LabelSpec): DataFrame[] {
   const seen = new Set<DataFrame>();
   const out: DataFrame[] = [];
-  for (const c of collectSeries(frames, refId, labels)) {
+  for (const c of collectSeries(frames, refId, toLabelSets(labels))) {
     if (!seen.has(c.frame)) {
       seen.add(c.frame);
       out.push(c.frame);
@@ -80,10 +89,10 @@ export interface DrilldownResult {
 export function drilldownSeries(
   frames: DataFrame[],
   refId: string,
-  labels: Record<string, string>,
+  labels: LabelSpec,
   agg: SpatialAggregation
 ): DrilldownResult {
-  const series = collectSeries(frames, refId, labels);
+  const series = collectSeries(frames, refId, toLabelSets(labels));
   if (series.length === 0) {
     return { frame: null, seriesCount: 0, aggregated: false };
   }
@@ -117,8 +126,8 @@ export function drilldownSeries(
 /**
  * 意味上同一のリンクだけを畳む。典型的には同じData Link設定が各系列に適用され、
  * href/title/targetが一致する同一リンクが系列数分返るケースを1件にする。
- * onClickは動作が異なり得るため保守的に扱い、同一関数参照または同一originのときのみ同一視する
- * (判断に迷えば残す)。
+ * onClickは動作が異なり得るため保守的に扱い、同一関数参照のときのみ同一視する
+ * (origin一致でも別の関数参照なら別物として残す。判断に迷えば残す)。
  */
 function sameLink(a: LinkModel<Field>, b: LinkModel<Field>): boolean {
   if (a.href !== b.href || a.title !== b.title || (a.target ?? '') !== (b.target ?? '')) {
@@ -150,9 +159,10 @@ function dedupeLinks(links: Array<LinkModel<Field>>): Array<LinkModel<Field>> {
 export function getCellLinks(
   frames: DataFrame[],
   refId: string,
-  labels: Record<string, string>,
+  labels: LabelSpec,
   calculatedValue?: DisplayValue
 ): Array<LinkModel<Field>> {
+  const sets = toLabelSets(labels);
   const out: Array<LinkModel<Field>> = [];
   for (const frame of frames) {
     if ((frame.refId ?? 'A') !== refId) {
@@ -160,7 +170,7 @@ export function getCellLinks(
     }
     // 系列形式: labels一致の数値フィールドすべてを対象にする(wide frameは複数系列)。
     // reduce値なのでcalculatedValueを渡す(Grafanaの契約)。
-    const seriesFields = frame.fields.filter((f) => f.type === FieldType.number && labelsMatch(f.labels, labels));
+    const seriesFields = frame.fields.filter((f) => f.type === FieldType.number && matchesAnySet(f.labels, sets));
     if (seriesFields.length > 0) {
       for (const field of seriesFields) {
         if (field.getLinks) {
@@ -169,21 +179,25 @@ export function getCellLinks(
       }
       continue;
     }
-    // table形式: 文字列列がセルlabelsに一致する行を特定してvalueRowIndexを渡す
+    // table形式: 必要なラベル列が全て存在し値が一致する行を全て対象にする(欠落列は不一致)。
+    // 最初の一致行で打ち切らず、全一致行からリンクを収集する(重複は末尾のdedupeで畳む)。
     const stringFields = frame.fields.filter((f) => f.type === FieldType.string);
     if (stringFields.length > 0) {
+      const numberFields = frame.fields.filter((f) => f.type === FieldType.number);
       for (let row = 0; row < frame.length; row++) {
-        const ok = Object.entries(labels).every(([k, v]) => {
-          const col = stringFields.find((f) => f.name === k);
-          return !col || String(col.values[row]) === v;
-        });
-        if (ok) {
-          for (const vf of frame.fields.filter((f) => f.type === FieldType.number)) {
-            if (vf.getLinks) {
-              out.push(...vf.getLinks({ valueRowIndex: row }));
-            }
+        const ok = sets.some((set) =>
+          Object.entries(set).every(([k, v]) => {
+            const col = stringFields.find((f) => f.name === k);
+            return col !== undefined && String(col.values[row]) === v;
+          })
+        );
+        if (!ok) {
+          continue;
+        }
+        for (const vf of numberFields) {
+          if (vf.getLinks) {
+            out.push(...vf.getLinks({ valueRowIndex: row }));
           }
-          break;
         }
       }
     }
