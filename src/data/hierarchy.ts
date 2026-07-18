@@ -56,19 +56,25 @@ export function buildHierarchy(rows: NormalizedRow[], levels: LevelDef[]): Build
     const path: string[] = [];
     let ok = true;
     for (let i = 0; i < levels.length; i++) {
+      // ラベル存在/抽出ヒットの統計は全レベルについて行ごとに収集する。
+      // 前段レベルで失敗しても break せず continue で走査を続け、全行に存在するラベルを
+      // 「クエリ結果にありません」と誤警告しないようにする(pathの採否判定は ok で分離)。
       const raw = row.labels[levels[i].label];
       if (raw === undefined) {
         ok = false;
-        break;
+        continue;
       }
       labelHit[i]++;
       const key = extractKey(raw, levels[i]);
       if (key === null) {
         ok = false;
-        break;
+        continue;
       }
       extractHit[i]++;
-      path.push(key);
+      // 1レベルでも失敗した行は葉にしない。path は全レベル成功中のみ積む。
+      if (ok) {
+        path.push(key);
+      }
     }
     if (ok && path.length === levels.length) {
       leafPaths.set(pathKey(path), path);
