@@ -46,6 +46,19 @@ describe('buildModel', () => {
     expect(leaf.cell!.values.get('A')).toBe(503);
   });
 
+  it('orders metric infos by configured refId order, not by series appearance order', () => {
+    // data.series が targets 順と逆(B が先)でも、凡例/分割区画は refId 順(A,B)に整列する
+    const m = buildModel(
+      [frame('B', 'zone-a', '0', 61), frame('A', 'zone-a', '0', 503)],
+      options,
+      theme,
+      'browser',
+      ['A', 'B']
+    );
+    expect(m.refIds).toEqual(['A', 'B']);
+    expect(m.metricInfos.map((i) => i.refId)).toEqual(['A', 'B']);
+  });
+
   it('propagates hierarchy warnings', () => {
     const m = buildModel([frame('A', 'zone-a', '0', 1)], { ...options, levels: [{ ...DEFAULT_LEVEL, label: 'rack' }] }, theme, 'browser');
     expect(m.warnings.length).toBeGreaterThan(0);
@@ -55,6 +68,22 @@ describe('buildModel', () => {
     const m = buildModel([frame('A', 'zone-a', '0', 1)], options, theme, 'browser', ['A', 'B']);
     expect(m.refIds).toEqual(['A', 'B']);
     expect(m.root.children[0].children[0].cell!.values.get('B')).toBeNull();
+  });
+
+  it('builds the color range from spatially aggregated cell values, not individual series values', () => {
+    // zone-a セルに 2 系列(10, 30)が sum で 40 に集約される。zone-b は 100。
+    // 個々の系列値(10)が range に入るなら min=10 だが、集約後の値だけなら min=40。
+    const opts = { ...options, levels: [{ ...DEFAULT_LEVEL, label: 'zone' }], spatialAggregation: 'sum' as const };
+    const m = buildModel(
+      [frame('A', 'zone-a', '0', 10), frame('A', 'zone-a', '1', 30), frame('A', 'zone-b', '0', 100)],
+      opts,
+      theme,
+      'browser'
+    );
+    const infoA = m.metricInfos.find((i) => i.refId === 'A')!;
+    expect(m.root.children.find((c) => c.key === 'zone-a')!.cell!.values.get('A')).toBe(40);
+    expect(infoA.field.config.min).toBe(40); // 集約前の 10 ではない
+    expect(infoA.field.config.max).toBe(100);
   });
 
   it('derives the color range from reduced cell values, not raw history', () => {

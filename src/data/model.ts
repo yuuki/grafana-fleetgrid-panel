@@ -45,5 +45,10 @@ export function buildModel(
   visit(root);
 
   const metricInfos = buildMetricInfos(frames, theme, timeZone, ranges);
+  // 凡例・分割区画の並びを仕様の refId 順に固定する。buildMetricInfos は frame 走査順で
+  // MetricInfo を作るため、data.series が targets 順と異なると並びが崩れる。refIds 順に整列する
+  // (refIds に無い refId は末尾へ回し、Array.sort の安定性で相対順を保つ)。
+  const orderByRef = new Map(refIds.map((r, i) => [r, i]));
+  metricInfos.sort((a, b) => (orderByRef.get(a.refId) ?? Infinity) - (orderByRef.get(b.refId) ?? Infinity));
   return { root, warnings, metricInfos, refIds };
 }
