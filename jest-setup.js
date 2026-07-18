@@ -1,9 +1,8 @@
 // Jest setup provided by Grafana scaffolding
 import './.config/jest-setup';
 
-// Canvas 2D context mock for component tests.
-// Must be imported here (setupFilesAfterEnv) AFTER './.config/jest-setup', because that
-// scaffold file overwrites HTMLCanvasElement.prototype.getContext with a stub that returns
-// undefined. Loading jest-canvas-mock last lets its working mock win. Placing it in
-// jest.config.js `setupFiles` does not work: it runs first and then gets clobbered.
+// jest-canvas-mock must load AFTER ./.config/jest-setup, which runs in
+// setupFilesAfterEnv and sets `HTMLCanvasElement.prototype.getContext = () => {}`.
+// Importing it here (rather than via jest.config `setupFiles`) ensures the mock
+// wins the last write, so component tests get a working 2D canvas context.
 import 'jest-canvas-mock';
