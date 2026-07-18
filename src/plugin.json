@@ -5,7 +5,7 @@
   "id": "yuuk1-clusterview-panel",
   "info": {
     "keywords": ["panel"],
-    "description": "",
+    "description": "Visualize nested cluster topologies (zones, hosts, GPUs) as a hierarchical grid colored by Prometheus / VictoriaMetrics metrics, with hover tooltips, click drilldown, and multi-metric comparison.",
     "author": {
       "name": "Yuuk1"
     },
