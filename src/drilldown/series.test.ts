@@ -226,6 +226,15 @@ describe('getCellLinks', () => {
     const links = getCellLinks([table], 'A', { zone: 'zone-a' });
     expect(links.map((l) => l.href)).toEqual(['https://row/0', 'https://row/1']);
   });
+  it('collects Data Links from series matching any of multiple label sets', () => {
+    // 抽出キー衝突(例: node-a017 / node-b017 が同一セル)の両組から Data Links を収集する
+    const a = frame('A', { host: 'node-a017' }, [1, 2]);
+    const b = frame('A', { host: 'node-b017' }, [3, 4]);
+    a.fields[1].getLinks = (() => [{ href: 'https://a', title: 'A', target: '_blank', origin: {} }]) as any;
+    b.fields[1].getLinks = (() => [{ href: 'https://b', title: 'B', target: '_blank', origin: {} }]) as any;
+    const links = getCellLinks([a, b], 'A', [{ host: 'node-a017' }, { host: 'node-b017' }]);
+    expect(links.map((l) => l.href).sort()).toEqual(['https://a', 'https://b']);
+  });
   it('matches series across multiple colliding label sets (extraction-key collision)', () => {
     // node-a017 と node-b017 が同じセルに畳まれたときの labelSets 探索
     const frames = [
