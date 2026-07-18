@@ -2,10 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { PanelProps } from '@grafana/data';
 import { PanelDataErrorView } from '@grafana/runtime';
 import { RadioButtonGroup, useTheme2 } from '@grafana/ui';
-import { ClusterviewOptions } from '../types';
+import { CellModel, ClusterviewOptions } from '../types';
 import { buildModel } from '../data/model';
 import { computeLayout } from '../layout/layout';
 import { renderCanvas } from '../render/renderer';
+import { hitTest } from '../render/hitTest';
+import { CellTooltip } from './CellTooltip';
 
 const HEADER_H = 32;
 
@@ -16,6 +18,7 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [selected, setSelected] = useState<string | undefined>(options.defaultMetric || undefined);
+  const [hover, setHover] = useState<{ cell: CellModel; x: number; y: number } | null>(null);
 
   const targetRefIds = useMemo(
     () => (data.request?.targets ?? []).map((t) => t.refId).filter((r): r is string => Boolean(r)),
@@ -97,8 +100,27 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
           overflowX: layout.contentWidth > width ? 'auto' : 'hidden',
         }}
         onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+        onMouseMove={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          const cx = e.clientX - rect.left;
+          const cy = e.clientY - rect.top + e.currentTarget.scrollTop;
+          const hit = hitTest(layout, cx, cy);
+          // 適応: ツールチップはスクロールコンテナのabsolute子でコンテンツ座標系に置かれるため、
+          // hitTestと同じコンテンツy(cy)を保存する。viewport-y保存だとスクロール時に誤配置する。
+          setHover(hit ? { cell: hit.cell, x: cx, y: cy } : null);
+        }}
+        onMouseLeave={() => setHover(null)}
       >
         <canvas ref={canvasRef} />
+        {hover && (
+          <CellTooltip
+            cell={hover.cell}
+            metricInfos={model.metricInfos}
+            missingColor={options.missingColor}
+            x={hover.x}
+            y={hover.y}
+          />
+        )}
       </div>
     </div>
   );
