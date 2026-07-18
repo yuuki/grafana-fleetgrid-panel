@@ -156,19 +156,34 @@ describe('getCellLinks', () => {
     const links = getCellLinks([wide], 'A', { zone: 'zone-a' });
     expect(links.map((l) => l.title)).toEqual(['Logs', 'Traces']);
   });
-  it('keeps onClick links from different series conservatively (behavior may differ)', () => {
+  it('keeps onClick links with the same origin but different callbacks', () => {
+    // originは生成元を示すだけで動作の同一性を保証しない。origin一致でも別onClickなら両方残す
+    const sharedOrigin = { name: 'field' } as any;
+    const wide = wideFrame('A', [
+      { labels: { zone: 'zone-a', gpu: '0' }, values: [1, 2] },
+      { labels: { zone: 'zone-a', gpu: '1' }, values: [3, 4] },
+    ]);
+    wide.fields[1].getLinks = (() => [
+      { href: 'https://x', title: 'D', target: '_self', origin: sharedOrigin, onClick: () => undefined },
+    ]) as any;
+    wide.fields[2].getLinks = (() => [
+      { href: 'https://x', title: 'D', target: '_self', origin: sharedOrigin, onClick: () => undefined },
+    ]) as any;
+    expect(getCellLinks([wide], 'A', { zone: 'zone-a' })).toHaveLength(2);
+  });
+  it('collapses onClick links that share the same callback reference', () => {
+    const shared = () => undefined;
     const frames = [
       frame('A', { zone: 'zone-a', gpu: '0' }, [1, 2]),
       frame('A', { zone: 'zone-a', gpu: '1' }, [3, 4]),
     ];
-    // href/title/targetは同一だが別々のonClick・別origin → 保守的に両方残す
     frames[0].fields[1].getLinks = (() => [
-      { href: 'https://x', title: 'D', target: '_self', origin: {}, onClick: () => undefined },
+      { href: 'https://x', title: 'D', target: '_self', origin: {}, onClick: shared },
     ]) as any;
     frames[1].fields[1].getLinks = (() => [
-      { href: 'https://x', title: 'D', target: '_self', origin: {}, onClick: () => undefined },
+      { href: 'https://x', title: 'D', target: '_self', origin: {}, onClick: shared },
     ]) as any;
-    expect(getCellLinks(frames, 'A', { zone: 'zone-a' })).toHaveLength(2);
+    expect(getCellLinks(frames, 'A', { zone: 'zone-a' })).toHaveLength(1);
   });
   it('resolves table rows by matching string columns', () => {
     const table = toDataFrame({

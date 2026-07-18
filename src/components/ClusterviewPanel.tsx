@@ -245,9 +245,10 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
               padding: 4,
             }}
           >
-            {linkMenu.links.map((l) => (
+            {linkMenu.links.map((l, i) => (
               <a
-                key={l.href}
+                // 意味の異なる同一hrefリンクを保持しうるためindexを含めて一意化する
+                key={`${i}-${l.href}`}
                 href={l.href}
                 target={l.target}
                 // onClickを保持するリンク(SPA遷移等)も単一リンクと同様にfollowLinkで実行する

@@ -129,8 +129,9 @@ function sameLink(a: LinkModel<Field>, b: LinkModel<Field>): boolean {
     return true;
   }
   if (a.onClick && b.onClick) {
-    // onClickあり同士: 動作が異なり得るので、同一関数参照 or 同一origin のときだけ同一視
-    return a.onClick === b.onClick || (a.origin != null && a.origin === b.origin);
+    // onClickあり同士: originは生成元を示すだけで動作の同一性を保証しない。
+    // 関数参照が同一のときのみ同一動作とみなして畳む。
+    return a.onClick === b.onClick;
   }
   // 片方だけonClick: 動作が異なるため別物として残す
   return false;

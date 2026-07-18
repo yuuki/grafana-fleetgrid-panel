@@ -77,10 +77,13 @@ describe('DrilldownPopover', () => {
     const popover = screen.getByText('zone-a').parentElement!.parentElement as HTMLElement;
     const left = parseFloat(popover.style.left);
     const top = parseFloat(popover.style.top);
-    // 可視範囲(min..max)内に収まる。0固定クランプなら left=172 < minX でこのassertは落ちる。
+    const W = 300; // DrilldownPopover内部の固定幅
+    const h = 40 + infos.length * 34; // 内部の高さ算出(ヘッダ40 + 行数*ROW_H)
+    // 左上端が可視範囲内。0固定クランプなら left=172 < minX でこのassertは落ちる。
     expect(left).toBeGreaterThanOrEqual(minX);
-    expect(left).toBeLessThanOrEqual(maxX);
     expect(top).toBeGreaterThanOrEqual(minY);
-    expect(top).toBeLessThanOrEqual(maxY);
+    // 右下端(left+幅 / top+高さ)も可視範囲内に収まる
+    expect(left + W).toBeLessThanOrEqual(maxX);
+    expect(top + h).toBeLessThanOrEqual(maxY);
   });
 });
