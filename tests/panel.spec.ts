@@ -68,6 +68,8 @@ async function stableHash(canvas: Locator): Promise<number> {
   let prev = await frameHash(canvas);
   await expect
     .poll(async () => {
+      // 2サンプル目までに時間差を入れ、連続読みで偶然一致するのを避けて実質的な安定を確認する
+      await canvas.page().waitForTimeout(60);
       const h = await frameHash(canvas);
       const same = h === prev;
       prev = h;
@@ -92,6 +94,8 @@ const PATH_RE = /(zone-[a-z0-9]+)\s*\/\s*(node-[a-z0-9]+)\s*\/\s*(gpu\d+)/i;
  */
 async function readPath(canvas: Locator, panel: Locator, x: number, y: number): Promise<CellPath | null> {
   await canvas.hover({ position: { x, y } });
+  // hover 直後は前セルのツールチップが残りうる。1フレーム待ってから内容を読む(旧tooltip誤読防止)。
+  await canvas.page().evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => r())));
   const deadline = Date.now() + 300;
   do {
     const text = await panel.innerText();
