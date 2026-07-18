@@ -54,7 +54,7 @@ export const DrilldownPopover: React.FC<DrilldownPopoverProps> = (props) => {
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
         <strong>{props.cell.path.join(' / ')}</strong>
-        <button onClick={props.onClose} aria-label="閉じる" style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }}>
+        <button onClick={props.onClose} aria-label="Close" style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }}>
           ×
         </button>
       </div>
@@ -64,27 +64,27 @@ export const DrilldownPopover: React.FC<DrilldownPopoverProps> = (props) => {
         const { frame, seriesCount, aggregated } = props.seriesFor(info.refId);
         const yField = frame?.fields.find((f) => f.type === FieldType.number);
         const xField = frame?.fields.find((f) => f.type === FieldType.time);
-        // When aggregated, shows "(N系列を集約)"; when falling back to the first series due to a timestamp mismatch, shows exactly "(N系列中の先頭を表示)"
+        // When aggregated, shows "(aggregating N series)"; when falling back to the first series due to a timestamp mismatch, shows exactly "(showing first of N series)"
         const name =
           seriesCount > 1
             ? aggregated
-              ? `${info.name} (${seriesCount}系列を集約)`
-              : `${info.name} (${seriesCount}系列中の先頭を表示)`
+              ? `${info.name} (aggregating ${seriesCount} series)`
+              : `${info.name} (showing first of ${seriesCount} series)`
             : info.name;
         return (
           <div key={info.refId} style={{ display: 'flex', alignItems: 'center', gap: 8, height: ROW_H }}>
             <span style={{ width: 70, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
-            <span style={{ width: 60, textAlign: 'right' }}>{disp ? formattedValueToString(disp) : '欠損'}</span>
+            <span style={{ width: 60, textAlign: 'right' }}>{disp ? formattedValueToString(disp) : 'No data'}</span>
             <span style={{ flex: 1 }}>
               {yField && xField ? (
                 <Sparkline width={120} height={ROW_H - 8} sparkline={{ y: yField, x: xField }} theme={theme} />
               ) : props.loading ? (
-                <span style={{ opacity: 0.7 }}>読み込み中…</span>
+                <span style={{ opacity: 0.7 }}>Loading…</span>
               ) : props.error ? (
                 // Requery failed. Not a permanent error since a data update triggers an automatic retry
-                <span style={{ opacity: 0.7, color: theme.colors.warning.text }}>再取得に失敗しました</span>
+                <span style={{ opacity: 0.7, color: theme.colors.warning.text }}>Failed to load time series</span>
               ) : (
-                <span style={{ opacity: 0.7 }}>時系列なし</span>
+                <span style={{ opacity: 0.7 }}>No time series</span>
               )}
             </span>
           </div>

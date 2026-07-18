@@ -58,7 +58,7 @@ export function buildHierarchy(rows: NormalizedRow[], levels: LevelDef[]): Build
     for (let i = 0; i < levels.length; i++) {
       // Collect label-presence/extraction-hit stats for every level, per row.
       // Even if an earlier level fails, keep scanning with continue instead of break, so a label
-      // present on every row isn't falsely reported as "クエリ結果にありません" (not present in query results) (path acceptance is tracked separately via ok).
+      // present on every row isn't falsely reported as "was not found in the query results" (path acceptance is tracked separately via ok).
       const raw = row.labels[levels[i].label];
       if (raw === undefined) {
         ok = false;
@@ -85,16 +85,16 @@ export function buildHierarchy(rows: NormalizedRow[], levels: LevelDef[]): Build
   // Warn even when not a single complete path is formed (matched===0).
   // Prevents silently showing an empty display when there are hits at each level but no row satisfies every level (spec: never silently show empty).
   if (rows.length > 0 && matched < rows.length) {
-    warnings.push(`${rows.length - matched}/${rows.length} 行が階層にマッチせず除外されました`);
+    warnings.push(`${rows.length - matched}/${rows.length} rows did not match the hierarchy and were excluded`);
   }
 
   for (let i = 0; i < levels.length; i++) {
     if (rows.length > 0 && labelHit[i] === 0) {
       warnings.push(
-        `ラベル "${levels[i].label}" がクエリ結果にありません(検出されたラベル: ${[...detectedLabels].join(', ')})`
+        `Label "${levels[i].label}" was not found in the query results (detected labels: ${[...detectedLabels].join(', ')})`
       );
     } else if (labelHit[i] > 0 && extractHit[i] === 0) {
-      warnings.push(`レベル ${i + 1} の抽出設定がどの値にもマッチしません(ラベル "${levels[i].label}")`);
+      warnings.push(`The extraction setting for level ${i + 1} did not match any value (label "${levels[i].label}")`);
     }
   }
 

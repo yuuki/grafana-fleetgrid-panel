@@ -11,35 +11,35 @@ export const plugin = new PanelPlugin<ClusterviewOptions>(ClusterviewPanel).useF
     .addCustomEditor({
       id: 'levels',
       path: 'levels',
-      name: '階層レベル',
+      name: 'Hierarchy Levels',
       category: ['Hierarchy'],
       editor: LevelsEditor,
       defaultValue: [],
     })
     .addRadio({
       path: 'displayMode',
-      name: '表示モード',
+      name: 'Display Mode',
       category: ['Display'],
       defaultValue: 'single',
       settings: {
         options: [
-          { value: 'single', label: '単一' },
-          { value: 'split', label: '分割セル' },
+          { value: 'single', label: 'Single' },
+          { value: 'split', label: 'Split cells' },
         ],
       },
     })
     .addTextInput({
       path: 'defaultMetric',
-      name: '既定の表示メトリクス(refId)',
+      name: 'Default Display Metric (refId)',
       category: ['Display'],
       defaultValue: '',
     })
-    .addBooleanSwitch({ path: 'showValues', name: '数値表示', category: ['Display'], defaultValue: true })
-    .addColorPicker({ path: 'missingColor', name: '欠損色', category: ['Display'], defaultValue: 'rgb(70,70,70)' })
+    .addBooleanSwitch({ path: 'showValues', name: 'Show Values', category: ['Display'], defaultValue: true })
+    .addColorPicker({ path: 'missingColor', name: 'Missing Color', category: ['Display'], defaultValue: 'rgb(70,70,70)' })
     .addSelect({
       path: 'spatialAggregation',
-      name: '空間集約',
-      description: '同一セルに複数系列が落ちたときの集約',
+      name: 'Spatial Aggregation',
+      description: 'Aggregation applied when multiple series fall into the same cell',
       category: ['Data'],
       defaultValue: 'max',
       settings: {
@@ -55,7 +55,7 @@ export const plugin = new PanelPlugin<ClusterviewOptions>(ClusterviewPanel).useF
       id: 'reduceCalc',
       path: 'reduceCalc',
       name: 'Calculation',
-      description: 'rangeクエリを現在値に畳む計算',
+      description: 'Calculation used to reduce a range query to a current value',
       category: ['Data'],
       editor: ReduceCalcEditor,
       defaultValue: 'lastNotNull',

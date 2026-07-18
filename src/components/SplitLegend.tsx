@@ -29,7 +29,7 @@ export const SplitLegend: React.FC<{ metricInfos: MetricInfo[] }> = ({ metricInf
           <span>{`${i + 1}: ${info.name}`}</span>
         </span>
       ))}
-      {hidden > 0 && <span style={{ opacity: 0.7 }}>{`分割表示は9クエリまでです(${hidden}件は非表示)`}</span>}
+      {hidden > 0 && <span style={{ opacity: 0.7 }}>{`Split view supports up to 9 queries (${hidden} hidden)`}</span>}
     </div>
   );
 };

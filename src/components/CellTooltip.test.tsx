@@ -40,7 +40,7 @@ describe('CellTooltip', () => {
     expect(screen.getByText(/503\s*W/)).toBeInTheDocument(); // Formatted result with unit (not the raw value)
     expect(screen.getByText('power')).toBeInTheDocument();
     expect(screen.getByText('temp')).toBeInTheDocument(); // Name of the second metric
-    expect(screen.getByText('欠損')).toBeInTheDocument();
+    expect(screen.getByText('No data')).toBeInTheDocument();
   });
 
   // Adaptation: since choices are now based on model.refIds, a refId with 0 series has no MetricInfo.
@@ -58,6 +58,6 @@ describe('CellTooltip', () => {
     render(<CellTooltip cell={cell} metricInfos={infos} missingColor="#444" x={0} y={0} />);
     expect(screen.getByText('power')).toBeInTheDocument();
     expect(screen.getByText('B')).toBeInTheDocument(); // A refId without MetricInfo falls back to using the refId as its name
-    expect(screen.getByText('欠損')).toBeInTheDocument();
+    expect(screen.getByText('No data')).toBeInTheDocument();
   });
 });

@@ -84,48 +84,48 @@ function StatefulLevelsEditor({ initial, frames = [] }: { initial: LevelDef[]; f
 }
 
 describe('LevelsEditor (component)', () => {
-  it('appends a DEFAULT_LEVEL when レベル追加 is clicked', () => {
+  it('appends a DEFAULT_LEVEL when Add Level is clicked', () => {
     const onChange = jest.fn();
     render(<LevelsEditor {...editorProps([], onChange)} />);
-    fireEvent.click(screen.getByRole('button', { name: 'レベル追加' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add Level' }));
     expect(onChange).toHaveBeenCalledWith([{ ...DEFAULT_LEVEL }]);
   });
 
-  it('removes the target level when 削除 is clicked', () => {
+  it('removes the target level when Delete is clicked', () => {
     const onChange = jest.fn();
     render(<LevelsEditor {...editorProps([{ ...DEFAULT_LEVEL, label: 'host' }], onChange)} />);
-    fireEvent.click(screen.getByRole('button', { name: '削除' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     expect(onChange).toHaveBeenCalledWith([]);
   });
 
-  it('moves a level down when 下へ is clicked', () => {
+  it('moves a level down when Move down is clicked', () => {
     const onChange = jest.fn();
     const a = { ...DEFAULT_LEVEL, label: 'host' };
     const b = { ...DEFAULT_LEVEL, label: 'zone' };
     render(<LevelsEditor {...editorProps([a, b], onChange)} />);
-    fireEvent.click(screen.getAllByRole('button', { name: '下へ' })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Move down' })[0]);
     expect(onChange).toHaveBeenCalledWith([b, a]);
   });
 
-  it('moves a level up when 上へ is clicked', () => {
+  it('moves a level up when Move up is clicked', () => {
     const onChange = jest.fn();
     const a = { ...DEFAULT_LEVEL, label: 'host' };
     const b = { ...DEFAULT_LEVEL, label: 'zone' };
     render(<LevelsEditor {...editorProps([a, b], onChange)} />);
-    fireEvent.click(screen.getAllByRole('button', { name: '上へ' })[1]);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Move up' })[1]);
     expect(onChange).toHaveBeenCalledWith([b, a]);
   });
 
-  it('reveals the regex input after switching 抽出 to 正規表現', () => {
+  it('reveals the regex input after switching Extract to Regex', () => {
     render(<StatefulLevelsEditor initial={[{ ...DEFAULT_LEVEL, label: 'host', extract: 'raw' }]} />);
     expect(screen.queryByPlaceholderText('node-.+?(\\d+)')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText('正規表現'));
+    fireEvent.click(screen.getByText('Regex'));
     expect(screen.getByPlaceholderText('node-.+?(\\d+)')).toBeInTheDocument();
   });
 
   it('renders live preview with distinct group count and leading samples', () => {
     const level = { ...DEFAULT_LEVEL, label: 'host', extract: 'trailingNumber' as const };
     render(<LevelsEditor {...editorProps([level], jest.fn(), [tableFrame])} />);
-    expect(screen.getByText(/グループ/)).toHaveTextContent('2グループ: 001, 002');
+    expect(screen.getByText(/groups/)).toHaveTextContent('2 groups: 001, 002');
   });
 });

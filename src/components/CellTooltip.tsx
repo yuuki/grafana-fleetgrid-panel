@@ -52,7 +52,7 @@ export const CellTooltip: React.FC<CellTooltipProps> = ({ cell, metricInfos, mis
               }}
             />
             <span>{info?.name ?? refId}</span>
-            <span style={{ marginLeft: 'auto' }}>{disp ? formattedValueToString(disp) : '欠損'}</span>
+            <span style={{ marginLeft: 'auto' }}>{disp ? formattedValueToString(disp) : 'No data'}</span>
           </div>
         );
       })}

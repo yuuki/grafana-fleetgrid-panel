@@ -210,7 +210,7 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
     return <PanelDataErrorView panelId={props.id} data={data} />;
   }
   if (options.levels.length === 0) {
-    return <p>パネルオプションで階層レベルを設定してください。</p>;
+    return <p>Please configure hierarchy levels in the panel options.</p>;
   }
   // When no cells qualify for rendering at all, don't silently show an empty canvas — state the reason explicitly.
   // If there's a warning, show it; otherwise show a data error to the effect of "unable to build numeric cells" (spec: never silently show an empty display).
@@ -225,7 +225,8 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
           ))
         ) : (
           <p>
-            クエリ結果から数値セルを構築できませんでした。数値を返すクエリと、ラベルに一致する階層レベルの設定を確認してください。
+            Could not build numeric cells from the query results. Check that your queries return numeric values and
+            that the hierarchy levels match your labels.
           </p>
         )}
       </div>

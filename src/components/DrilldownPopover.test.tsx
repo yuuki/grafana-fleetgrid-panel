@@ -36,37 +36,37 @@ describe('DrilldownPopover', () => {
     render(
       <DrilldownPopover cell={cell} metricInfos={infos} seriesFor={() => ({ frame: null, seriesCount: 0, aggregated: false })} loading={true} x={0} y={0} {...bounds} onClose={() => {}} />
     );
-    expect(screen.getByText('読み込み中…')).toBeInTheDocument();
+    expect(screen.getByText('Loading…')).toBeInTheDocument();
   });
   it('shows a re-query failure message when error is set and no series is available', () => {
     const infos = buildMetricInfos([rangeFrame], theme, 'browser');
     render(
       <DrilldownPopover cell={cell} metricInfos={infos} seriesFor={() => ({ frame: null, seriesCount: 0, aggregated: false })} loading={false} error={true} x={0} y={0} {...bounds} onClose={() => {}} />
     );
-    expect(screen.getByText('再取得に失敗しました')).toBeInTheDocument();
-    expect(screen.queryByText('時系列なし')).not.toBeInTheDocument();
+    expect(screen.getByText('Failed to load time series')).toBeInTheDocument();
+    expect(screen.queryByText('No time series')).not.toBeInTheDocument();
   });
   it('prefers loading over error while a fetch is in flight', () => {
     const infos = buildMetricInfos([rangeFrame], theme, 'browser');
     render(
       <DrilldownPopover cell={cell} metricInfos={infos} seriesFor={() => ({ frame: null, seriesCount: 0, aggregated: false })} loading={true} error={true} x={0} y={0} {...bounds} onClose={() => {}} />
     );
-    expect(screen.getByText('読み込み中…')).toBeInTheDocument();
-    expect(screen.queryByText('再取得に失敗しました')).not.toBeInTheDocument();
+    expect(screen.getByText('Loading…')).toBeInTheDocument();
+    expect(screen.queryByText('Failed to load time series')).not.toBeInTheDocument();
   });
   it('labels aggregated multi-series rows', () => {
     const infos = buildMetricInfos([rangeFrame], theme, 'browser');
     render(
       <DrilldownPopover cell={cell} metricInfos={infos} seriesFor={() => ({ frame: rangeFrame, seriesCount: 3, aggregated: true })} loading={false} x={0} y={0} {...bounds} onClose={() => {}} />
     );
-    expect(screen.getByText('power (3系列を集約)')).toBeInTheDocument();
+    expect(screen.getByText('power (aggregating 3 series)')).toBeInTheDocument();
   });
   it('labels non-aggregated fallback multi-series rows precisely', () => {
     const infos = buildMetricInfos([rangeFrame], theme, 'browser');
     render(
       <DrilldownPopover cell={cell} metricInfos={infos} seriesFor={() => ({ frame: rangeFrame, seriesCount: 3, aggregated: false })} loading={false} x={0} y={0} {...bounds} onClose={() => {}} />
     );
-    expect(screen.getByText('power (3系列中の先頭を表示)')).toBeInTheDocument();
+    expect(screen.getByText('power (showing first of 3 series)')).toBeInTheDocument();
   });
   it('clamps a flipped popover within a scrolled (non-zero) visible range', () => {
     const infos = buildMetricInfos([rangeFrame], theme, 'browser');

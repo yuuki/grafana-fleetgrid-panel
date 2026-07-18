@@ -245,8 +245,8 @@ test('clicking a cell opens the drilldown popover', async ({ gotoDashboardPage, 
   }
   await canvas.click({ position: { x: 25, y: cellY } });
   // The popover opens (close button). Since it's instant TestData, there's no time series and no sparkline appears.
-  await expect(panel.locator.getByRole('button', { name: '閉じる' })).toBeVisible();
-  await expect(panel.locator.getByText('時系列なし').first()).toBeVisible();
+  await expect(panel.locator.getByRole('button', { name: 'Close' })).toBeVisible();
+  await expect(panel.locator.getByText('No time series').first()).toBeVisible();
 });
 
 test('split mode shows the position legend instead of the selector', async ({
@@ -347,7 +347,7 @@ test('query-B cell has no link and opens the popover instead of navigating', asy
   const page = canvas.page();
   const urlBefore = page.url();
   await canvas.click({ position: { x: 22, y: cellY } });
-  await expect(panel.locator.getByRole('button', { name: '閉じる' })).toBeVisible();
+  await expect(panel.locator.getByRole('button', { name: 'Close' })).toBeVisible();
   // No navigation occurred (URL unchanged, no link query)
   expect(page.url()).toBe(urlBefore);
   expect(page.url()).not.toContain('from=celllink');

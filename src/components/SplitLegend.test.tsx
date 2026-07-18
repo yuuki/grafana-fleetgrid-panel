@@ -30,8 +30,8 @@ describe('SplitLegend', () => {
       'browser'
     );
     render(<SplitLegend metricInfos={infos} />);
-    expect(screen.getByText(/9クエリまで/)).toBeInTheDocument();
-    expect(screen.getByText(/2件は非表示/)).toBeInTheDocument();
+    expect(screen.getByText(/up to 9 queries/)).toBeInTheDocument();
+    expect(screen.getByText(/2 hidden/)).toBeInTheDocument();
   });
   it('positions each minimap fill to match splitRects percentages', () => {
     const infos = buildMetricInfos([frame('A', 'power'), frame('B', 'temp')], theme, 'browser');

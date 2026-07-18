@@ -47,20 +47,20 @@ export function previewLevel(frames: DataFrame[], level: LevelDef): { count: num
 }
 
 const EXTRACT_OPTIONS: Array<SelectableValue<ExtractPreset>> = [
-  { value: 'raw', label: 'そのまま' },
-  { value: 'trailingNumber', label: '末尾の数値' },
-  { value: 'regex', label: '正規表現' },
+  { value: 'raw', label: 'Raw' },
+  { value: 'trailingNumber', label: 'Trailing number' },
+  { value: 'regex', label: 'Regex' },
 ];
 const SORT_OPTIONS: Array<SelectableValue<SortOrder>> = [
-  { value: 'natural', label: '昇順' },
-  { value: 'naturalDesc', label: '降順' },
-  { value: 'none', label: 'なし' },
+  { value: 'natural', label: 'Ascending' },
+  { value: 'naturalDesc', label: 'Descending' },
+  { value: 'none', label: 'None' },
 ];
 const LAYOUT_OPTIONS: Array<SelectableValue<LevelLayout>> = [
-  { value: 'vertical', label: '縦積み' },
-  { value: 'horizontal', label: '横並び' },
-  { value: 'flow', label: '折返し' },
-  { value: 'grid', label: 'グリッド' },
+  { value: 'vertical', label: 'Vertical stack' },
+  { value: 'horizontal', label: 'Horizontal' },
+  { value: 'flow', label: 'Flow (wrap)' },
+  { value: 'grid', label: 'Grid' },
 ];
 
 export const LevelsEditor: React.FC<StandardEditorProps<LevelDef[]>> = ({ value, onChange, context }) => {
@@ -86,7 +86,7 @@ export const LevelsEditor: React.FC<StandardEditorProps<LevelDef[]>> = ({ value,
         return (
           <div key={i} style={{ marginBottom: 12 }}>
             <InlineFieldRow>
-              <InlineField label={`レベル ${i + 1}`}>
+              <InlineField label={`Level ${i + 1}`}>
                 <Select
                   options={labelOptions}
                   value={level.label}
@@ -95,21 +95,21 @@ export const LevelsEditor: React.FC<StandardEditorProps<LevelDef[]>> = ({ value,
                   width={20}
                 />
               </InlineField>
-              <IconButton name="arrow-up" disabled={i === 0} onClick={() => move(i, -1)} tooltip="上へ" />
+              <IconButton name="arrow-up" disabled={i === 0} onClick={() => move(i, -1)} tooltip="Move up" />
               <IconButton
                 name="arrow-down"
                 disabled={i === levels.length - 1}
                 onClick={() => move(i, 1)}
-                tooltip="下へ"
+                tooltip="Move down"
               />
               <IconButton
                 name="trash-alt"
                 onClick={() => onChange(levels.filter((_, idx) => idx !== i))}
-                tooltip="削除"
+                tooltip="Delete"
               />
             </InlineFieldRow>
             <InlineFieldRow>
-              <InlineField label="抽出">
+              <InlineField label="Extract">
                 <RadioButtonGroup
                   options={EXTRACT_OPTIONS}
                   value={level.extract}
@@ -117,7 +117,7 @@ export const LevelsEditor: React.FC<StandardEditorProps<LevelDef[]>> = ({ value,
                 />
               </InlineField>
               {level.extract === 'regex' && (
-                <InlineField label="正規表現">
+                <InlineField label="Regex">
                   <Input
                     value={level.regex ?? ''}
                     placeholder="node-.+?(\d+)"
@@ -127,10 +127,10 @@ export const LevelsEditor: React.FC<StandardEditorProps<LevelDef[]>> = ({ value,
               )}
             </InlineFieldRow>
             <InlineFieldRow>
-              <InlineField label="ソート">
+              <InlineField label="Sort">
                 <RadioButtonGroup options={SORT_OPTIONS} value={level.sort} onChange={(v) => update(i, { sort: v })} />
               </InlineField>
-              <InlineField label="レイアウト">
+              <InlineField label="Layout">
                 <RadioButtonGroup
                   options={LAYOUT_OPTIONS}
                   value={level.layout}
@@ -138,7 +138,7 @@ export const LevelsEditor: React.FC<StandardEditorProps<LevelDef[]>> = ({ value,
                 />
               </InlineField>
               {level.layout === 'grid' && (
-                <InlineField label="列数">
+                <InlineField label="Columns">
                   <Input
                     type="number"
                     value={level.gridColumns ?? 1}
@@ -149,25 +149,25 @@ export const LevelsEditor: React.FC<StandardEditorProps<LevelDef[]>> = ({ value,
               )}
             </InlineFieldRow>
             <InlineFieldRow>
-              <InlineField label="枠線">
+              <InlineField label="Border">
                 <Switch value={level.showBorder} onChange={(e) => update(i, { showBorder: e.currentTarget.checked })} />
               </InlineField>
-              <InlineField label="ラベル表示">
+              <InlineField label="Show Label">
                 <Switch value={level.showLabel} onChange={(e) => update(i, { showLabel: e.currentTarget.checked })} />
               </InlineField>
             </InlineFieldRow>
             {preview && (
               <div style={{ opacity: 0.8, fontSize: 12 }}>
-                → {preview.count}グループ: {preview.samples.join(', ')}
+                → {preview.count} groups: {preview.samples.join(', ')}
                 {preview.count > preview.samples.length ? ', …' : ''}
-                {preview.count === 0 && ' (マッチしません。設定を確認してください)'}
+                {preview.count === 0 && ' (No matches. Check the settings.)'}
               </div>
             )}
           </div>
         );
       })}
       <Button icon="plus" variant="secondary" onClick={() => onChange([...levels, { ...DEFAULT_LEVEL }])}>
-        レベル追加
+        Add Level
       </Button>
     </div>
   );

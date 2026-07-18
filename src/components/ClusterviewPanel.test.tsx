@@ -138,7 +138,7 @@ describe('ClusterviewPanel', () => {
     });
     render(<ClusterviewPanel {...makeProps([stringOnly])} />);
     expect(screen.getByRole('alert')).toBeInTheDocument();
-    expect(screen.getByText(/数値セル/)).toBeInTheDocument();
+    expect(screen.getByText(/numeric cells/)).toBeInTheDocument();
     expect(document.querySelector('canvas')).not.toBeInTheDocument();
   });
 
@@ -155,7 +155,7 @@ describe('ClusterviewPanel', () => {
     render(<ClusterviewPanel {...makeProps(frames)} />);
     fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
     expect(onLinkClick).toHaveBeenCalled(); // Data Links take priority and execute immediately
-    expect(screen.queryByLabelText('閉じる')).not.toBeInTheDocument(); // The popover is suppressed
+    expect(screen.queryByLabelText('Close')).not.toBeInTheDocument(); // The popover is suppressed
   });
 
   it('shows a selection menu for multiple data links (not the popover)', () => {
@@ -168,7 +168,7 @@ describe('ClusterviewPanel', () => {
     fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
     expect(screen.getByText('Link A')).toBeInTheDocument();
     expect(screen.getByText('Link B')).toBeInTheDocument();
-    expect(screen.queryByLabelText('閉じる')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Close')).not.toBeInTheDocument();
   });
 
   it('renders the link menu with theme colors (not a hardcoded dark background) and a bounded position', () => {
@@ -266,26 +266,26 @@ describe('ClusterviewPanel', () => {
   it('opens the drilldown popover when there are no data links, then closes it on Escape', () => {
     render(<ClusterviewPanel {...makeProps(clickable())} />);
     fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
-    expect(screen.getByLabelText('閉じる')).toBeInTheDocument();
+    expect(screen.getByLabelText('Close')).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
-    expect(screen.queryByLabelText('閉じる')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Close')).not.toBeInTheDocument();
   });
 
   it('closes the popover on an outside pointerdown', () => {
     render(<ClusterviewPanel {...makeProps(clickable())} />);
     fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
-    expect(screen.getByLabelText('閉じる')).toBeInTheDocument();
+    expect(screen.getByLabelText('Close')).toBeInTheDocument();
     fireEvent.pointerDown(document.body);
-    expect(screen.queryByLabelText('閉じる')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Close')).not.toBeInTheDocument();
   });
 
   it('closes the popover on scroll', () => {
     render(<ClusterviewPanel {...makeProps(clickable())} />);
     const container = containerOf();
     fireEvent.click(container, { clientX: 10, clientY: 5 });
-    expect(screen.getByLabelText('閉じる')).toBeInTheDocument();
+    expect(screen.getByLabelText('Close')).toBeInTheDocument();
     fireEvent.scroll(container);
-    expect(screen.queryByLabelText('閉じる')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Close')).not.toBeInTheDocument();
   });
 
   describe('on-demand requery for instant queries', () => {
@@ -304,7 +304,7 @@ describe('ClusterviewPanel', () => {
       // makeProps's targets have no instant flag (range-only), so no requery runs
       render(<ClusterviewPanel {...makeProps(clickable())} />);
       fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
-      expect(screen.getByLabelText('閉じる')).toBeInTheDocument(); // The popover opens
+      expect(screen.getByLabelText('Close')).toBeInTheDocument(); // The popover opens
       expect(mockFetch).not.toHaveBeenCalled(); // range-only → no requery
     });
 
@@ -322,7 +322,7 @@ describe('ClusterviewPanel', () => {
       fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
       // With instant and no time series on hand → requery starts, showing loading state
       expect(mockFetch).toHaveBeenCalledTimes(1);
-      expect(screen.getByText('読み込み中…')).toBeInTheDocument();
+      expect(screen.getByText('Loading…')).toBeInTheDocument();
 
       // requestId is updated to Q2 (panel data update)
       const p2 = makeProps(clickable());
@@ -337,7 +337,7 @@ describe('ClusterviewPanel', () => {
       await act(async () => {
         resolve1([sparkFrame(90)]);
       });
-      expect(screen.getByText('読み込み中…')).toBeInTheDocument(); // Still loading (Q1 was discarded)
+      expect(screen.getByText('Loading…')).toBeInTheDocument(); // Still loading (Q1 was discarded)
       expect(screen.queryByTestId('sparkline')).not.toBeInTheDocument();
 
       // The new Q2 response arrives → this one is reflected and the sparkline appears
@@ -345,12 +345,12 @@ describe('ClusterviewPanel', () => {
         resolve2([sparkFrame(1)]);
       });
       expect(screen.getByTestId('sparkline')).toBeInTheDocument();
-      expect(screen.queryByText('読み込み中…')).not.toBeInTheDocument();
+      expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
     });
 
-    it('discards a stale rejection so a later empty-but-successful requery shows 時系列なし, not an error', async () => {
+    it('discards a stale rejection so a later empty-but-successful requery shows No time series, not an error', async () => {
       // Reject Q1 (stale), and succeed Q2 with "an empty frame containing no time series."
-      // This lets us distinguish, in the final state after loading/sparkline has disappeared, between guard-present = "時系列なし" / guard-absent = "再取得に失敗しました".
+      // This lets us distinguish, in the final state after loading/sparkline has disappeared, between guard-present = "No time series" / guard-absent = "Failed to load time series".
       let reject1!: (e: unknown) => void;
       let resolve2!: (v: unknown) => void;
       mockFetch
@@ -363,7 +363,7 @@ describe('ClusterviewPanel', () => {
       const { rerender } = render(<ClusterviewPanel {...p1} />);
       fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
       expect(mockFetch).toHaveBeenCalledTimes(1);
-      expect(screen.getByText('読み込み中…')).toBeInTheDocument();
+      expect(screen.getByText('Loading…')).toBeInTheDocument();
 
       // requestId updates to Q2 → generation advances
       const p2 = makeProps(clickable());
@@ -374,7 +374,7 @@ describe('ClusterviewPanel', () => {
       });
       expect(mockFetch).toHaveBeenCalledTimes(2);
 
-      // Q1's failure arrives late. Without the guard, setDrillError(true) would run and "再取得に失敗しました" would remain even after Q2 succeeds.
+      // Q1's failure arrives late. Without the guard, setDrillError(true) would run and "Failed to load time series" would remain even after Q2 succeeds.
       await act(async () => {
         reject1(new Error('boom'));
       });
@@ -383,11 +383,11 @@ describe('ClusterviewPanel', () => {
       await act(async () => {
         resolve2([toDataFrame({ refId: 'ZZ', fields: [{ name: 'Value', type: FieldType.number, values: [] }] })]);
       });
-      expect(screen.queryByText('読み込み中…')).not.toBeInTheDocument();
+      expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
       expect(screen.queryByTestId('sparkline')).not.toBeInTheDocument();
-      // If the guard is effective, drillError stays false → "時系列なし". If it leaked through, "再取得に失敗しました".
-      expect(screen.getAllByText('時系列なし').length).toBeGreaterThan(0);
-      expect(screen.queryByText('再取得に失敗しました')).not.toBeInTheDocument();
+      // If the guard is effective, drillError stays false → "No time series". If it leaked through, "Failed to load time series".
+      expect(screen.getAllByText('No time series').length).toBeGreaterThan(0);
+      expect(screen.queryByText('Failed to load time series')).not.toBeInTheDocument();
     });
 
     it('shows a failure message when the current instant re-query rejects', async () => {
@@ -401,7 +401,7 @@ describe('ClusterviewPanel', () => {
       await act(async () => {
         reject1(new Error('boom'));
       });
-      expect(screen.getByText('再取得に失敗しました')).toBeInTheDocument();
+      expect(screen.getByText('Failed to load time series')).toBeInTheDocument();
     });
   });
 });
