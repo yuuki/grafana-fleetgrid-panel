@@ -7,24 +7,33 @@ import { MetricInfo } from '../data/display';
 const W = 300;
 const ROW_H = 34;
 
+const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
+
 export interface DrilldownPopoverProps {
   cell: CellModel;
   metricInfos: MetricInfo[];
-  seriesFor: (refId: string) => { frame: import('@grafana/data').DataFrame | null; seriesCount: number };
+  seriesFor: (refId: string) => {
+    frame: import('@grafana/data').DataFrame | null;
+    seriesCount: number;
+    aggregated: boolean;
+  };
   loading: boolean;
   x: number;
   y: number;
-  panelWidth: number;
-  panelHeight: number;
+  /** クリック時点の可視範囲(コンテンツ座標)。反転配置を可視範囲の両端にクランプするのに使う */
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
   onClose: () => void;
 }
 
 export const DrilldownPopover: React.FC<DrilldownPopoverProps> = (props) => {
   const theme = useTheme2();
   const h = 40 + props.metricInfos.length * ROW_H;
-  // セル近傍の空いている側に反転配置(右下に収まらなければ左上側へ)
-  const left = props.x + W + 16 > props.panelWidth ? Math.max(0, props.x - W - 8) : props.x + 8;
-  const top = props.y + h + 16 > props.panelHeight ? Math.max(0, props.y - h - 8) : props.y + 8;
+  // セル近傍の空いている側に反転配置し、可視範囲(min..max)の両端にクランプする
+  const left = props.x + W + 16 > props.maxX ? clamp(props.x - W - 8, props.minX, props.maxX - W) : props.x + 8;
+  const top = props.y + h + 16 > props.maxY ? clamp(props.y - h - 8, props.minY, props.maxY - h) : props.y + 8;
 
   return (
     <div
@@ -52,10 +61,16 @@ export const DrilldownPopover: React.FC<DrilldownPopoverProps> = (props) => {
       {props.metricInfos.map((info) => {
         const v = props.cell.values.get(info.refId) ?? null;
         const disp = v === null ? null : info.processor(v);
-        const { frame, seriesCount } = props.seriesFor(info.refId);
+        const { frame, seriesCount, aggregated } = props.seriesFor(info.refId);
         const yField = frame?.fields.find((f) => f.type === FieldType.number);
         const xField = frame?.fields.find((f) => f.type === FieldType.time);
-        const name = seriesCount > 1 ? `${info.name} (${seriesCount}系列を集約)` : info.name;
+        // 集約時は「N系列を集約」、時刻不一致で先頭系列フォールバック時は正確に「N系列中の先頭を表示」
+        const name =
+          seriesCount > 1
+            ? aggregated
+              ? `${info.name} (${seriesCount}系列を集約)`
+              : `${info.name} (${seriesCount}系列中の先頭を表示)`
+            : info.name;
         return (
           <div key={info.refId} style={{ display: 'flex', alignItems: 'center', gap: 8, height: ROW_H }}>
             <span style={{ width: 70, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>

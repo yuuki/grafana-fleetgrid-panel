@@ -21,10 +21,11 @@ const rangeFrame = toDataFrame({
 
 describe('DrilldownPopover', () => {
   const cell = { path: ['zone-a'], labels: { zone: 'zone-a' }, values: new Map<string, number | null>([['A', 503]]) };
+  const bounds = { minX: 0, minY: 0, maxX: 800, maxY: 600 };
   it('renders a sparkline row per metric', () => {
     const infos = buildMetricInfos([rangeFrame], theme, 'browser');
     render(
-      <DrilldownPopover cell={cell} metricInfos={infos} seriesFor={() => ({ frame: rangeFrame, seriesCount: 1 })} loading={false} x={0} y={0} panelWidth={800} panelHeight={600} onClose={() => {}} />
+      <DrilldownPopover cell={cell} metricInfos={infos} seriesFor={() => ({ frame: rangeFrame, seriesCount: 1, aggregated: false })} loading={false} x={0} y={0} {...bounds} onClose={() => {}} />
     );
     expect(screen.getByText('zone-a')).toBeInTheDocument();
     expect(screen.getByText('power')).toBeInTheDocument();
@@ -33,8 +34,22 @@ describe('DrilldownPopover', () => {
   it('shows loading state', () => {
     const infos = buildMetricInfos([rangeFrame], theme, 'browser');
     render(
-      <DrilldownPopover cell={cell} metricInfos={infos} seriesFor={() => ({ frame: null, seriesCount: 0 })} loading={true} x={0} y={0} panelWidth={800} panelHeight={600} onClose={() => {}} />
+      <DrilldownPopover cell={cell} metricInfos={infos} seriesFor={() => ({ frame: null, seriesCount: 0, aggregated: false })} loading={true} x={0} y={0} {...bounds} onClose={() => {}} />
     );
     expect(screen.getByText('読み込み中…')).toBeInTheDocument();
+  });
+  it('labels aggregated multi-series rows', () => {
+    const infos = buildMetricInfos([rangeFrame], theme, 'browser');
+    render(
+      <DrilldownPopover cell={cell} metricInfos={infos} seriesFor={() => ({ frame: rangeFrame, seriesCount: 3, aggregated: true })} loading={false} x={0} y={0} {...bounds} onClose={() => {}} />
+    );
+    expect(screen.getByText('power (3系列を集約)')).toBeInTheDocument();
+  });
+  it('labels non-aggregated fallback multi-series rows precisely', () => {
+    const infos = buildMetricInfos([rangeFrame], theme, 'browser');
+    render(
+      <DrilldownPopover cell={cell} metricInfos={infos} seriesFor={() => ({ frame: rangeFrame, seriesCount: 3, aggregated: false })} loading={false} x={0} y={0} {...bounds} onClose={() => {}} />
+    );
+    expect(screen.getByText('power (3系列中の先頭を表示)')).toBeInTheDocument();
   });
 });

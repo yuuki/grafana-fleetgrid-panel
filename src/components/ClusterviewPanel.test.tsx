@@ -89,4 +89,58 @@ describe('ClusterviewPanel', () => {
     expect(screen.getByText('power')).toBeInTheDocument(); // Aは系列名
     expect(screen.getByText('B')).toBeInTheDocument(); // BはmetricInfoが無いのでrefId表示
   });
+
+  // 横並び2セル(zone-a:[0,40))を持つフレーム。clientX=10でzone-aをヒットする。
+  const clickable = () => [series('A', 'power', 'zone-a'), series('A', 'power', 'zone-b')];
+  const containerOf = () => document.querySelector('canvas')!.parentElement as HTMLElement;
+
+  it('follows a single data link (onClick preserved) and suppresses the popover', () => {
+    const onLinkClick = jest.fn();
+    const frames = clickable();
+    frames[0].fields[1].getLinks = (() => [
+      { href: 'https://example.com/d/x', title: 'X', target: '_self', origin: {}, onClick: onLinkClick },
+    ]) as any;
+    render(<ClusterviewPanel {...makeProps(frames)} />);
+    fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
+    expect(onLinkClick).toHaveBeenCalled(); // Data Links優先で即実行
+    expect(screen.queryByLabelText('閉じる')).not.toBeInTheDocument(); // ポップオーバーは抑止
+  });
+
+  it('shows a selection menu for multiple data links (not the popover)', () => {
+    const frames = clickable();
+    frames[0].fields[1].getLinks = (() => [
+      { href: 'https://example.com/a', title: 'Link A', target: '_blank', origin: {} },
+      { href: 'https://example.com/b', title: 'Link B', target: '_blank', origin: {} },
+    ]) as any;
+    render(<ClusterviewPanel {...makeProps(frames)} />);
+    fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
+    expect(screen.getByText('Link A')).toBeInTheDocument();
+    expect(screen.getByText('Link B')).toBeInTheDocument();
+    expect(screen.queryByLabelText('閉じる')).not.toBeInTheDocument();
+  });
+
+  it('opens the drilldown popover when there are no data links, then closes it on Escape', () => {
+    render(<ClusterviewPanel {...makeProps(clickable())} />);
+    fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
+    expect(screen.getByLabelText('閉じる')).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByLabelText('閉じる')).not.toBeInTheDocument();
+  });
+
+  it('closes the popover on an outside pointerdown', () => {
+    render(<ClusterviewPanel {...makeProps(clickable())} />);
+    fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
+    expect(screen.getByLabelText('閉じる')).toBeInTheDocument();
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByLabelText('閉じる')).not.toBeInTheDocument();
+  });
+
+  it('closes the popover on scroll', () => {
+    render(<ClusterviewPanel {...makeProps(clickable())} />);
+    const container = containerOf();
+    fireEvent.click(container, { clientX: 10, clientY: 5 });
+    expect(screen.getByLabelText('閉じる')).toBeInTheDocument();
+    fireEvent.scroll(container);
+    expect(screen.queryByLabelText('閉じる')).not.toBeInTheDocument();
+  });
 });

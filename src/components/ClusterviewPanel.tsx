@@ -23,10 +23,16 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
   const [selected, setSelected] = useState<string | undefined>(options.defaultMetric || undefined);
   const [hover, setHover] = useState<{ cell: CellModel; x: number; y: number } | null>(null);
   // ポップオーバー/リンクメニューはコンテンツ座標(x/y)で保持し、スクロールに追従させる。
-  // maxX/maxYはクリック時点の可視領域右下端(コンテンツ座標)で、反転配置の判定に使う。
-  const [popover, setPopover] = useState<{ cell: CellModel; x: number; y: number; maxX: number; maxY: number } | null>(
-    null
-  );
+  // min/maxはクリック時点の可視領域(コンテンツ座標)の左上・右下端で、反転配置の両端クランプに使う。
+  const [popover, setPopover] = useState<{
+    cell: CellModel;
+    x: number;
+    y: number;
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+  } | null>(null);
   const [linkMenu, setLinkMenu] = useState<{ links: Array<LinkModel<Field>>; x: number; y: number } | null>(null);
 
   const targetRefIds = useMemo(
@@ -183,8 +189,10 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
             followLink(links[0], e);
             return;
           }
-          const maxX = e.currentTarget.scrollLeft + width;
-          const maxY = e.currentTarget.scrollTop + bodyH;
+          const minX = e.currentTarget.scrollLeft;
+          const minY = e.currentTarget.scrollTop;
+          const maxX = minX + width;
+          const maxY = minY + bodyH;
           if (links.length > 1) {
             // 複数リンクは選択メニューを出す
             setLinkMenu({ links, x: cx, y: cy });
@@ -193,7 +201,7 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
           }
           // リンクが無ければ手元rangeデータのスパークライン付きポップオーバー
           setLinkMenu(null);
-          setPopover({ cell: hit.cell, x: cx, y: cy, maxX, maxY });
+          setPopover({ cell: hit.cell, x: cx, y: cy, minX, minY, maxX, maxY });
         }}
       >
         <canvas ref={canvasRef} />
@@ -215,8 +223,10 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
             loading={false}
             x={popover.x}
             y={popover.y}
-            panelWidth={popover.maxX}
-            panelHeight={popover.maxY}
+            minX={popover.minX}
+            minY={popover.minY}
+            maxX={popover.maxX}
+            maxY={popover.maxY}
             onClose={() => setPopover(null)}
           />
         )}
