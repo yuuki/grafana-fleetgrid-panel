@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Field, LinkModel, PanelProps } from '@grafana/data';
+import { DataFrame, Field, LinkModel, PanelProps } from '@grafana/data';
 import { PanelDataErrorView } from '@grafana/runtime';
 import { RadioButtonGroup, useTheme2 } from '@grafana/ui';
 import { CellModel, ClusterviewOptions } from '../types';
@@ -9,6 +9,7 @@ import { renderCanvas } from '../render/renderer';
 import { hitTest } from '../render/hitTest';
 import { splitRects } from '../render/split';
 import { drilldownSeries, getCellLinks } from '../drilldown/series';
+import { fetchDrilldownFrames } from '../drilldown/requery';
 import { CellTooltip } from './CellTooltip';
 import { DrilldownPopover } from './DrilldownPopover';
 
@@ -34,6 +35,11 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
     maxY: number;
   } | null>(null);
   const [linkMenu, setLinkMenu] = useState<{ links: Array<LinkModel<Field>>; x: number; y: number } | null>(null);
+  // instantクエリ時のドリルダウン用にオンデマンドで取得したrangeフレーム(パネル単位でキャッシュ)
+  const [drillFrames, setDrillFrames] = useState<DataFrame[] | null>(null);
+  const [drillLoading, setDrillLoading] = useState(false);
+  const [drillError, setDrillError] = useState(false);
+  const drillCacheId = useRef<string | undefined>(undefined);
 
   const targetRefIds = useMemo(
     () => (data.request?.targets ?? []).map((t) => t.refId).filter((r): r is string => Boolean(r)),
@@ -72,6 +78,42 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
       });
     }
   }, [layout, model, selectedRefId, displayMode, options, theme, scrollTop, bodyH]);
+
+  // パネルデータが更新されたらキャッシュとエラーを破棄(キャッシュはパネル単位・requestIdで無効化)
+  useEffect(() => {
+    if (data.request?.requestId !== drillCacheId.current) {
+      setDrillFrames(null);
+      setDrillError(false);
+    }
+  }, [data.request?.requestId]);
+
+  // ポップオーバーを開いたとき、手元に時系列がないメトリクスがあれば再クエリ(1リフレッシュにつき1回)
+  // drillErrorガードで失敗時の再試行ループを防ぎ、requestId比較で古い応答を捨てる
+  useEffect(() => {
+    if (!popover || drillFrames || drillLoading || drillError || !data.request) {
+      return;
+    }
+    const missing = model.metricInfos.some(
+      (info) => drilldownSeries(data.series, info.refId, popover.cell.labels, options.spatialAggregation).frame === null
+    );
+    if (!missing) {
+      return;
+    }
+    const requestId = data.request.requestId;
+    // ポップオーバー起点の意図的な非同期取得。loadingは取得中UIかつ再入ガードなので同期設定が必要
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDrillLoading(true);
+    fetchDrilldownFrames(data.request)
+      .then((frames) => {
+        if (data.request?.requestId !== requestId) {
+          return; // 古い応答
+        }
+        drillCacheId.current = requestId;
+        setDrillFrames(frames);
+      })
+      .catch(() => setDrillError(true))
+      .finally(() => setDrillLoading(false));
+  }, [popover, drillFrames, drillLoading, drillError, data, model.metricInfos, options.spatialAggregation]);
 
   // Esc・外側ポインタダウンでポップオーバー/メニューを閉じる(ポップオーバー側はstopPropagationで防御)
   useEffect(() => {
@@ -218,9 +260,17 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
           <DrilldownPopover
             cell={popover.cell}
             metricInfos={model.metricInfos}
-            // 手元rangeデータのみで合成(instantクエリ時の再クエリはTask 13)
-            seriesFor={(refId) => drilldownSeries(data.series, refId, popover.cell.labels, options.spatialAggregation)}
-            loading={false}
+            // まず手元rangeデータで合成し、無ければ再クエリ済みフレーム(instantクエリ時)で合成する
+            seriesFor={(refId) => {
+              const local = drilldownSeries(data.series, refId, popover.cell.labels, options.spatialAggregation);
+              if (local.frame) {
+                return local;
+              }
+              return drillFrames
+                ? drilldownSeries(drillFrames, refId, popover.cell.labels, options.spatialAggregation)
+                : { frame: null, seriesCount: 0, aggregated: false };
+            }}
+            loading={drillLoading}
             x={popover.x}
             y={popover.y}
             minX={popover.minX}
