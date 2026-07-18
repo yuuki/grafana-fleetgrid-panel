@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { DataFrame, Field, LinkModel, PanelProps } from '@grafana/data';
 import { PanelDataErrorView } from '@grafana/runtime';
 import { RadioButtonGroup, useTheme2 } from '@grafana/ui';
@@ -13,14 +13,20 @@ import { fetchDrilldownFrames } from '../drilldown/requery';
 import { CellTooltip } from './CellTooltip';
 import { DrilldownPopover } from './DrilldownPopover';
 import { SplitLegend } from './SplitLegend';
+import { placeOverlay } from './overlay';
 
+// showHeader時のヘッダー高フォールバック(実高はレイアウト後に測定して上書きする)
 const HEADER_H = 32;
+// 部分除外などの警告を出す帯の高さ(Canvas領域から差し引く)
+const WARN_H = 20;
+const LINK_MENU_W = 240;
+const LINK_MENU_ROW_H = 28;
 
 export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props) => {
   const { data, width, height, options, timeZone } = props;
   const theme = useTheme2();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [selected, setSelected] = useState<string | undefined>(options.defaultMetric || undefined);
   const [hover, setHover] = useState<{ cell: CellModel; x: number; y: number } | null>(null);
@@ -35,7 +41,15 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
     maxX: number;
     maxY: number;
   } | null>(null);
-  const [linkMenu, setLinkMenu] = useState<{ links: Array<LinkModel<Field>>; x: number; y: number } | null>(null);
+  const [linkMenu, setLinkMenu] = useState<{
+    links: Array<LinkModel<Field>>;
+    x: number;
+    y: number;
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+  } | null>(null);
   // instantクエリ時のドリルダウン用にオンデマンドで取得したrangeフレーム(パネル単位でキャッシュ)
   const [drillFrames, setDrillFrames] = useState<DataFrame[] | null>(null);
   const [drillLoading, setDrillLoading] = useState(false);
@@ -59,7 +73,26 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
   const isSplit = displayMode === 'split' && model.metricInfos.length > 0;
   // 複数クエリ時はヘッダを常設し、分割モードは凡例・単一モードはメトリクスセレクタを載せる
   const showHeader = model.refIds.length > 1;
-  const bodyH = height - (showHeader ? HEADER_H : 0);
+  // ヘッダー実高を測定してCanvas領域から差し引く。多メトリクスで凡例が折返して32pxを超えても重ならない。
+  // 測定できない環境(jsdom)ではフォールバックHEADER_Hを使う。幅変化で折返しが変わるためResizeObserverで追従する。
+  const [headerH, setHeaderH] = useState(0);
+  useLayoutEffect(() => {
+    const el = showHeader ? headerRef.current : null;
+    const measure = () => {
+      // レイアウト確定後のDOM実測をReact stateへ同期する(measure-then-set)。
+      setHeaderH(el && el.offsetHeight ? el.offsetHeight : showHeader ? HEADER_H : 0);
+    };
+    measure();
+    if (el && typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(measure);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+    return undefined;
+  }, [showHeader, model, width]);
+  // 警告(部分除外など)がある場合は帯の高さも差し引く
+  const warnH = model.warnings.length > 0 ? WARN_H : 0;
+  const bodyH = height - headerH - warnH;
 
   const layout = useMemo(
     () => computeLayout(model.root, options.levels, width, bodyH),
@@ -108,8 +141,9 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
     if (!hasInstant) {
       return;
     }
+    const cellLabels = popover.cell.labelSets ?? popover.cell.labels;
     const missing = model.metricInfos.some(
-      (info) => drilldownSeries(data.series, info.refId, popover.cell.labels, options.spatialAggregation).frame === null
+      (info) => drilldownSeries(data.series, info.refId, cellLabels, options.spatialAggregation).frame === null
     );
     if (!missing) {
       return;
@@ -175,12 +209,22 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
   if (options.levels.length === 0) {
     return <p>パネルオプションで階層レベルを設定してください。</p>;
   }
-  if (model.warnings.length > 0 && layout.cells.length === 0) {
+  // 描画すべきセルが1件も成立しない場合、黙って空Canvasにせず理由を明示する。
+  // 警告があれば警告を、無ければ「数値セルを構築できない」旨のデータエラーを表示する(仕様: 黙って空表示にしない)。
+  if (layout.cells.length === 0) {
     return (
-      <div role="alert">
-        {model.warnings.map((w) => (
-          <p key={w}>{w}</p>
-        ))}
+      <div role="alert" style={{ padding: 8 }}>
+        {model.warnings.length > 0 ? (
+          model.warnings.map((w) => (
+            <p key={w} style={{ margin: '2px 0' }}>
+              {w}
+            </p>
+          ))
+        ) : (
+          <p>
+            クエリ結果から数値セルを構築できませんでした。数値を返すクエリと、ラベルに一致する階層レベルの設定を確認してください。
+          </p>
+        )}
       </div>
     );
   }
@@ -188,7 +232,7 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
   return (
     <div style={{ width, height, overflow: 'hidden' }}>
       {showHeader && (
-        <div style={{ height: HEADER_H, display: 'flex', alignItems: 'center' }}>
+        <div ref={headerRef} style={{ minHeight: HEADER_H, display: 'flex', alignItems: 'center' }}>
           {isSplit ? (
             // 分割モードは単一モードのセレクタの代わりに区画位置の凡例を出す
             <SplitLegend metricInfos={model.metricInfos} />
@@ -206,8 +250,30 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
           )}
         </div>
       )}
+      {model.warnings.length > 0 && (
+        // セルが描画できている場合でも警告(部分除外など)を常時表示する。邪魔にならないよう1行の帯にする。
+        <div
+          role="alert"
+          style={{
+            height: WARN_H,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            overflow: 'hidden',
+            padding: '0 6px',
+            fontSize: 11,
+            color: theme.colors.warning.text,
+            background: theme.colors.warning.transparent,
+          }}
+        >
+          {model.warnings.map((w) => (
+            <span key={w} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {w}
+            </span>
+          ))}
+        </div>
+      )}
       <div
-        ref={scrollRef}
         style={{
           width,
           height: bodyH,
@@ -256,8 +322,14 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
           }
           const info = model.metricInfos.find((m) => m.refId === clickRefId);
           const v = hit.cell.values.get(clickRefId);
-          // Data Links優先: getLinksが存在するフィールドのみリンクを返す(config.links長ではなくgetLinksの有無が契約)
-          const links = getCellLinks(data.series, clickRefId, hit.cell.labels, v != null ? info?.processor(v) : undefined);
+          // Data Links優先: getLinksが存在するフィールドのみリンクを返す(config.links長ではなくgetLinksの有無が契約)。
+          // 抽出キー衝突を含めた全原値ラベル組で探索する。
+          const links = getCellLinks(
+            data.series,
+            clickRefId,
+            hit.cell.labelSets ?? hit.cell.labels,
+            v != null ? info?.processor(v) : undefined
+          );
           if (links.length === 1) {
             followLink(links[0], e);
             return;
@@ -267,8 +339,8 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
           const maxX = minX + width;
           const maxY = minY + bodyH;
           if (links.length > 1) {
-            // 複数リンクは選択メニューを出す
-            setLinkMenu({ links, x: cx, y: cy });
+            // 複数リンクは選択メニューを出す(ポップオーバーと同じ可視範囲でクランプする)
+            setLinkMenu({ links, x: cx, y: cy, minX, minY, maxX, maxY });
             setPopover(null);
             return;
           }
@@ -293,15 +365,17 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
             metricInfos={model.metricInfos}
             // まず手元rangeデータで合成し、無ければ再クエリ済みフレーム(instantクエリ時)で合成する
             seriesFor={(refId) => {
-              const local = drilldownSeries(data.series, refId, popover.cell.labels, options.spatialAggregation);
+              const cellLabels = popover.cell.labelSets ?? popover.cell.labels;
+              const local = drilldownSeries(data.series, refId, cellLabels, options.spatialAggregation);
               if (local.frame) {
                 return local;
               }
               return drillFrames
-                ? drilldownSeries(drillFrames, refId, popover.cell.labels, options.spatialAggregation)
+                ? drilldownSeries(drillFrames, refId, cellLabels, options.spatialAggregation)
                 : { frame: null, seriesCount: 0, aggregated: false };
             }}
             loading={drillLoading}
+            error={drillError}
             x={popover.x}
             y={popover.y}
             minX={popover.minX}
@@ -311,40 +385,60 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
             onClose={() => setPopover(null)}
           />
         )}
-        {linkMenu && (
-          <div
-            onPointerDown={(e) => e.stopPropagation()}
-            // メニュー内クリックがコンテナのonClickに伝播してヒットテスト→再オープンするのを防ぐ
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              position: 'absolute',
-              left: linkMenu.x,
-              top: linkMenu.y,
-              zIndex: 30,
-              background: 'rgba(24,27,31,0.98)',
-              borderRadius: 4,
-              padding: 4,
-            }}
-          >
-            {linkMenu.links.map((l, i) => (
-              <a
-                // 意味の異なる同一hrefリンクを保持しうるためindexを含めて一意化する
-                key={`${i}-${l.href}`}
-                href={l.href}
-                target={l.target}
-                // onClickを保持するリンク(SPA遷移等)も単一リンクと同様にfollowLinkで実行する
-                onClick={(e) => {
-                  e.preventDefault();
-                  followLink(l, e);
-                  setLinkMenu(null);
+        {linkMenu &&
+          (() => {
+            // ポップオーバーと同じ反転+可視範囲クランプで右端・下端のはみ出しを防ぐ
+            const menuH = linkMenu.links.length * LINK_MENU_ROW_H + 8;
+            const { left, top } = placeOverlay(linkMenu.x, linkMenu.y, LINK_MENU_W, menuH, linkMenu);
+            return (
+              <div
+                role="menu"
+                onPointerDown={(e) => e.stopPropagation()}
+                // メニュー内クリックがコンテナのonClickに伝播してヒットテスト→再オープンするのを防ぐ
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  position: 'absolute',
+                  left,
+                  top,
+                  width: LINK_MENU_W,
+                  zIndex: 30,
+                  // 固定暗色ではなくテーマ由来の配色にし、ライト/ダーク双方で読めるようにする
+                  background: theme.colors.background.elevated ?? theme.colors.background.secondary,
+                  color: theme.colors.text.primary,
+                  border: `1px solid ${theme.colors.border.medium}`,
+                  borderRadius: 4,
+                  padding: 4,
+                  boxShadow: theme.shadows.z3,
                 }}
-                style={{ display: 'block', padding: '4px 8px', color: 'inherit', textDecoration: 'none' }}
               >
-                {l.title || l.href}
-              </a>
-            ))}
-          </div>
-        )}
+                {linkMenu.links.map((l, i) => (
+                  <a
+                    // 意味の異なる同一hrefリンクを保持しうるためindexを含めて一意化する
+                    key={`${i}-${l.href}`}
+                    href={l.href}
+                    target={l.target}
+                    // onClickを保持するリンク(SPA遷移等)も単一リンクと同様にfollowLinkで実行する
+                    onClick={(e) => {
+                      e.preventDefault();
+                      followLink(l, e);
+                      setLinkMenu(null);
+                    }}
+                    style={{
+                      display: 'block',
+                      padding: '4px 8px',
+                      color: theme.colors.text.primary,
+                      textDecoration: 'none',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {l.title || l.href}
+                  </a>
+                ))}
+              </div>
+            );
+          })()}
       </div>
     </div>
   );

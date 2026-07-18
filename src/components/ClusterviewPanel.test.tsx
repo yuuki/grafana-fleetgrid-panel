@@ -113,6 +113,35 @@ describe('ClusterviewPanel', () => {
     expect(screen.getByText('B')).toBeInTheDocument(); // BはmetricInfoが無いのでrefId表示
   });
 
+  it('shows a warning banner while still rendering cells when only some rows match', () => {
+    const twoLevel = (zone: string, gpu?: string) =>
+      toDataFrame({
+        refId: 'A',
+        name: 'power',
+        fields: [
+          { name: 'Time', type: FieldType.time, values: [1000] },
+          { name: 'Value', type: FieldType.number, values: [1], labels: gpu ? { zone, gpu } : { zone } },
+        ],
+      });
+    const p = makeProps([twoLevel('zone-a', '0'), twoLevel('zone-b')]); // 2件目は gpu 欠落 → 除外
+    p.options.levels = [{ ...DEFAULT_LEVEL, label: 'zone' }, { ...DEFAULT_LEVEL, label: 'gpu' }];
+    render(<ClusterviewPanel {...p} />);
+    expect(document.querySelector('canvas')).toBeInTheDocument(); // マッチ行のセルは描画される
+    expect(screen.getByRole('alert')).toBeInTheDocument(); // かつ警告帯も同時に出る
+    expect(screen.getByText(/1\/2/)).toBeInTheDocument();
+  });
+
+  it('shows an explicit data error when queries return no numeric cells (not a silent empty canvas)', () => {
+    const stringOnly = toDataFrame({
+      refId: 'A',
+      fields: [{ name: 'zone', type: FieldType.string, values: ['zone-a'] }], // 数値フィールド無し
+    });
+    render(<ClusterviewPanel {...makeProps([stringOnly])} />);
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(screen.getByText(/数値セル/)).toBeInTheDocument();
+    expect(document.querySelector('canvas')).not.toBeInTheDocument();
+  });
+
   // 横並び2セル(zone-a:[0,40))を持つフレーム。clientX=10でzone-aをヒットする。
   const clickable = () => [series('A', 'power', 'zone-a'), series('A', 'power', 'zone-b')];
   const containerOf = () => document.querySelector('canvas')!.parentElement as HTMLElement;
@@ -140,6 +169,23 @@ describe('ClusterviewPanel', () => {
     expect(screen.getByText('Link A')).toBeInTheDocument();
     expect(screen.getByText('Link B')).toBeInTheDocument();
     expect(screen.queryByLabelText('閉じる')).not.toBeInTheDocument();
+  });
+
+  it('renders the link menu with theme colors (not a hardcoded dark background) and a bounded position', () => {
+    const frames = clickable();
+    frames[0].fields[1].getLinks = (() => [
+      { href: 'https://example.com/a', title: 'Link A', target: '_blank', origin: {} },
+      { href: 'https://example.com/b', title: 'Link B', target: '_blank', origin: {} },
+    ]) as any;
+    render(<ClusterviewPanel {...makeProps(frames)} />);
+    fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
+    const menu = screen.getByRole('menu');
+    // 旧実装の固定暗色ではなくテーマ由来の配色にする(ライトテーマでも読める)
+    expect(menu.style.background).not.toBe('rgba(24,27,31,0.98)');
+    expect(menu.style.background).toBeTruthy();
+    // 位置は数値でクランプ範囲内(左上端は 0 以上)
+    expect(parseFloat(menu.style.left)).toBeGreaterThanOrEqual(0);
+    expect(parseFloat(menu.style.top)).toBeGreaterThanOrEqual(0);
   });
 
   it('opens the drilldown popover when there are no data links, then closes it on Escape', () => {
@@ -225,6 +271,60 @@ describe('ClusterviewPanel', () => {
       });
       expect(screen.getByTestId('sparkline')).toBeInTheDocument();
       expect(screen.queryByText('読み込み中…')).not.toBeInTheDocument();
+    });
+
+    it('does not surface a stale rejection as an error, then shows the fresh success', async () => {
+      // Q1 を reject、Q2 を resolve
+      let reject1!: (e: unknown) => void;
+      let resolve2!: (v: unknown) => void;
+      mockFetch
+        .mockReturnValueOnce(new Promise((_, r) => (reject1 = r)))
+        .mockReturnValueOnce(new Promise((r) => (resolve2 = r)));
+
+      const instantTargets = [{ refId: 'A', instant: true }];
+      const p1 = makeProps(clickable());
+      p1.data.request.targets = instantTargets;
+      const { rerender } = render(<ClusterviewPanel {...p1} />);
+      fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(screen.getByText('読み込み中…')).toBeInTheDocument();
+
+      // requestId が Q2 へ更新 → 世代が進む
+      const p2 = makeProps(clickable());
+      p2.data.request.requestId = 'Q2';
+      p2.data.request.targets = instantTargets;
+      await act(async () => {
+        rerender(<ClusterviewPanel {...p2} />);
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+
+      // 遅れて届いた Q1 の失敗は staleガードで drillError に混入しない
+      await act(async () => {
+        reject1(new Error('boom'));
+      });
+      expect(screen.queryByText('再取得に失敗しました')).not.toBeInTheDocument();
+      expect(screen.getByText('読み込み中…')).toBeInTheDocument(); // Q2 継続中
+
+      // Q2 成功 → スパークライン
+      await act(async () => {
+        resolve2([sparkFrame(1)]);
+      });
+      expect(screen.getByTestId('sparkline')).toBeInTheDocument();
+      expect(screen.queryByText('再取得に失敗しました')).not.toBeInTheDocument();
+    });
+
+    it('shows a failure message when the current instant re-query rejects', async () => {
+      let reject1!: (e: unknown) => void;
+      mockFetch.mockReturnValueOnce(new Promise((_, r) => (reject1 = r)));
+      const p = makeProps(clickable());
+      p.data.request.targets = [{ refId: 'A', instant: true }];
+      render(<ClusterviewPanel {...p} />);
+      fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        reject1(new Error('boom'));
+      });
+      expect(screen.getByText('再取得に失敗しました')).toBeInTheDocument();
     });
   });
 });

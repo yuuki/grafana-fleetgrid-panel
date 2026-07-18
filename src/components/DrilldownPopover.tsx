@@ -3,11 +3,10 @@ import { FieldType, formattedValueToString } from '@grafana/data';
 import { Sparkline, useTheme2 } from '@grafana/ui';
 import { CellModel } from '../types';
 import { MetricInfo } from '../data/display';
+import { placeOverlay } from './overlay';
 
 const W = 300;
 const ROW_H = 34;
-
-const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
 
 export interface DrilldownPopoverProps {
   cell: CellModel;
@@ -18,6 +17,8 @@ export interface DrilldownPopoverProps {
     aggregated: boolean;
   };
   loading: boolean;
+  /** instantクエリの再クエリが失敗したか。手元に時系列が無い行に失敗メッセージを出す */
+  error?: boolean;
   x: number;
   y: number;
   /** クリック時点の可視範囲(コンテンツ座標)。反転配置を可視範囲の両端にクランプするのに使う */
@@ -32,8 +33,7 @@ export const DrilldownPopover: React.FC<DrilldownPopoverProps> = (props) => {
   const theme = useTheme2();
   const h = 40 + props.metricInfos.length * ROW_H;
   // セル近傍の空いている側に反転配置し、可視範囲(min..max)の両端にクランプする
-  const left = props.x + W + 16 > props.maxX ? clamp(props.x - W - 8, props.minX, props.maxX - W) : props.x + 8;
-  const top = props.y + h + 16 > props.maxY ? clamp(props.y - h - 8, props.minY, props.maxY - h) : props.y + 8;
+  const { left, top } = placeOverlay(props.x, props.y, W, h, props);
 
   return (
     <div
@@ -80,6 +80,9 @@ export const DrilldownPopover: React.FC<DrilldownPopoverProps> = (props) => {
                 <Sparkline width={120} height={ROW_H - 8} sparkline={{ y: yField, x: xField }} theme={theme} />
               ) : props.loading ? (
                 <span style={{ opacity: 0.7 }}>読み込み中…</span>
+              ) : props.error ? (
+                // 再クエリ失敗。データ更新で自動リトライされるため恒久エラーではない
+                <span style={{ opacity: 0.7, color: theme.colors.warning.text }}>再取得に失敗しました</span>
               ) : (
                 <span style={{ opacity: 0.7 }}>時系列なし</span>
               )}

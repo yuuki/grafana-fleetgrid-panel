@@ -38,6 +38,22 @@ describe('DrilldownPopover', () => {
     );
     expect(screen.getByText('読み込み中…')).toBeInTheDocument();
   });
+  it('shows a re-query failure message when error is set and no series is available', () => {
+    const infos = buildMetricInfos([rangeFrame], theme, 'browser');
+    render(
+      <DrilldownPopover cell={cell} metricInfos={infos} seriesFor={() => ({ frame: null, seriesCount: 0, aggregated: false })} loading={false} error={true} x={0} y={0} {...bounds} onClose={() => {}} />
+    );
+    expect(screen.getByText('再取得に失敗しました')).toBeInTheDocument();
+    expect(screen.queryByText('時系列なし')).not.toBeInTheDocument();
+  });
+  it('prefers loading over error while a fetch is in flight', () => {
+    const infos = buildMetricInfos([rangeFrame], theme, 'browser');
+    render(
+      <DrilldownPopover cell={cell} metricInfos={infos} seriesFor={() => ({ frame: null, seriesCount: 0, aggregated: false })} loading={true} error={true} x={0} y={0} {...bounds} onClose={() => {}} />
+    );
+    expect(screen.getByText('読み込み中…')).toBeInTheDocument();
+    expect(screen.queryByText('再取得に失敗しました')).not.toBeInTheDocument();
+  });
   it('labels aggregated multi-series rows', () => {
     const infos = buildMetricInfos([rangeFrame], theme, 'browser');
     render(
