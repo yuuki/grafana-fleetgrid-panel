@@ -54,16 +54,18 @@ describe('buildHierarchy', () => {
 
   it('warns when a label is missing from all rows', () => {
     const { warnings } = buildHierarchy(rows, [level({ label: 'rack' })]);
-    expect(warnings.length).toBe(1);
-    expect(warnings[0]).toContain('rack');
-    expect(warnings[0]).toContain('zone'); // 検出済みラベルの提示
+    // ラベル欠落警告(検出済みラベル zone を提示)に加え、全行除外(3/3)も出る
+    expect(warnings.some((w) => w.includes('rack') && w.includes('zone'))).toBe(true);
+    expect(warnings.some((w) => w.includes('3/3'))).toBe(true);
   });
 
-  it('warns when regex matches no rows', () => {
+  it('warns when regex matches no rows (extraction warning + full exclusion)', () => {
     const { warnings } = buildHierarchy(rows, [
       level({ label: 'zone', extract: 'regex', regex: 'nomatch-(\\d+)' }),
     ]);
-    expect(warnings.length).toBe(1);
+    // 抽出アンマッチ警告に加え、全行が除外された旨(3/3)も出す(matched===0でも黙らない)
+    expect(warnings.some((w) => w.includes('マッチしません'))).toBe(true);
+    expect(warnings.some((w) => w.includes('3/3'))).toBe(true);
   });
 
   it('round-trips pathKey', () => {
@@ -87,10 +89,25 @@ describe('buildHierarchy', () => {
     ]);
     // (a) gpu は全行に存在するため「クエリ結果にありません」の誤警告は出ない
     expect(warnings.some((w) => w.includes('"gpu"') && w.includes('クエリ結果にありません'))).toBe(false);
-    // (b) level 0 のアンマッチ警告のみが出る(誤警告で件数が増えない)
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain('マッチしません');
-    expect(warnings[0]).toContain('zone');
+    // (b) level 0 のアンマッチ警告が出る(gpu の誤警告は増えない)
+    expect(warnings.some((w) => w.includes('マッチしません') && w.includes('zone'))).toBe(true);
+    // (c) 全行が除外されたので 3/3 の除外警告も出る(matched===0 でも黙らない)
+    expect(warnings.some((w) => w.includes('3/3'))).toBe(true);
+  });
+
+  it('warns when no row completes a full path even though every level has hits (matched === 0)', () => {
+    // 各レベルは別々の行にラベルを持つため per-level 警告は出ないが、全レベルを満たす行は0。
+    // 黙って空表示にせず「全行除外」を必ず警告する(I3-b)。
+    const cfg = [level({ label: 'zone' }), level({ label: 'gpu' })];
+    const rows2: NormalizedRow[] = [
+      { labels: { zone: 'zone-a' }, value: 1, refId: 'A' }, // gpu 欠落
+      { labels: { gpu: '0' }, value: 2, refId: 'A' }, // zone 欠落
+    ];
+    const { root, warnings } = buildHierarchy(rows2, cfg);
+    expect(warnings.some((w) => w.includes('クエリ結果にありません'))).toBe(false);
+    expect(warnings.some((w) => w.includes('マッチしません'))).toBe(false);
+    expect(warnings).toContain('2/2 行が階層にマッチせず除外されました');
+    expect(root.children).toHaveLength(0);
   });
 
   it('excludes non-matching rows from leafPaths and tree with a full warning message', () => {

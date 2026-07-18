@@ -82,7 +82,9 @@ export function buildHierarchy(rows: NormalizedRow[], levels: LevelDef[]): Build
     }
   }
 
-  if (rows.length > 0 && matched > 0 && matched < rows.length) {
+  // 完全pathが1件も成立しない(matched===0)場合も含めて警告する。
+  // 各レベルにヒットがあっても全レベルを満たす行が無ければ黙って空表示になるのを防ぐ(仕様: 黙って空にしない)。
+  if (rows.length > 0 && matched < rows.length) {
     warnings.push(`${rows.length - matched}/${rows.length} 行が階層にマッチせず除外されました`);
   }
 
