@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { PanelProps } from '@grafana/data';
+import { Field, LinkModel, PanelProps } from '@grafana/data';
 import { PanelDataErrorView } from '@grafana/runtime';
 import { RadioButtonGroup, useTheme2 } from '@grafana/ui';
 import { CellModel, ClusterviewOptions } from '../types';
@@ -7,7 +7,10 @@ import { buildModel } from '../data/model';
 import { computeLayout } from '../layout/layout';
 import { renderCanvas } from '../render/renderer';
 import { hitTest } from '../render/hitTest';
+import { splitRects } from '../render/split';
+import { drilldownSeries, getCellLinks } from '../drilldown/series';
 import { CellTooltip } from './CellTooltip';
+import { DrilldownPopover } from './DrilldownPopover';
 
 const HEADER_H = 32;
 
@@ -19,6 +22,12 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
   const [scrollTop, setScrollTop] = useState(0);
   const [selected, setSelected] = useState<string | undefined>(options.defaultMetric || undefined);
   const [hover, setHover] = useState<{ cell: CellModel; x: number; y: number } | null>(null);
+  // ポップオーバー/リンクメニューはコンテンツ座標(x/y)で保持し、スクロールに追従させる。
+  // maxX/maxYはクリック時点の可視領域右下端(コンテンツ座標)で、反転配置の判定に使う。
+  const [popover, setPopover] = useState<{ cell: CellModel; x: number; y: number; maxX: number; maxY: number } | null>(
+    null
+  );
+  const [linkMenu, setLinkMenu] = useState<{ links: Array<LinkModel<Field>>; x: number; y: number } | null>(null);
 
   const targetRefIds = useMemo(
     () => (data.request?.targets ?? []).map((t) => t.refId).filter((r): r is string => Boolean(r)),
@@ -31,6 +40,7 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
 
   // displayModeはTask 14まで未登録のため実行時は undefined になりうる。single を既定に正規化する
   const displayMode = options.displayMode ?? 'single';
+  const isSplit = displayMode === 'split';
   const showHeader = model.refIds.length > 1 && displayMode === 'single';
   const bodyH = height - (showHeader ? HEADER_H : 0);
 
@@ -56,6 +66,34 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
       });
     }
   }, [layout, model, selectedRefId, displayMode, options, theme, scrollTop, bodyH]);
+
+  // Esc・外側ポインタダウンでポップオーバー/メニューを閉じる(ポップオーバー側はstopPropagationで防御)
+  useEffect(() => {
+    const close = () => {
+      setPopover(null);
+      setLinkMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        close();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    document.addEventListener('pointerdown', close);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.removeEventListener('pointerdown', close);
+    };
+  }, []);
+
+  // リンク実行: LinkModel.onClickを保持しているリンク(パネル内SPA遷移等)はそれを優先する
+  const followLink = (link: LinkModel<Field>, e: React.MouseEvent) => {
+    if (link.onClick) {
+      link.onClick(e);
+      return;
+    }
+    window.open(link.href, link.target ?? '_self');
+  };
 
   if (data.series.length === 0) {
     return <PanelDataErrorView panelId={props.id} data={data} />;
@@ -99,7 +137,12 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
           // S_MINでも幅に収まらない設定(列数過多など)では横スクロールで切れを防ぐ
           overflowX: layout.contentWidth > width ? 'auto' : 'hidden',
         }}
-        onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+        onScroll={(e) => {
+          setScrollTop(e.currentTarget.scrollTop);
+          // スクロールすると保持済み座標が実体とずれるため閉じる
+          setPopover(null);
+          setLinkMenu(null);
+        }}
         onMouseMove={(e) => {
           const rect = e.currentTarget.getBoundingClientRect();
           // hitTestもツールチップも、スクロールコンテナのコンテンツ座標系で扱う。
@@ -111,6 +154,47 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
           setHover(hit ? { cell: hit.cell, x: cx, y: cy } : null);
         }}
         onMouseLeave={() => setHover(null)}
+        onClick={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          // クリックもホバーと同じコンテンツ座標系(scrollLeft/scrollTop込み)でヒットテストする
+          const cx = e.clientX - rect.left + e.currentTarget.scrollLeft;
+          const cy = e.clientY - rect.top + e.currentTarget.scrollTop;
+          const hit = hitTest(layout, cx, cy);
+          if (!hit) {
+            setPopover(null);
+            setLinkMenu(null);
+            return;
+          }
+          // 分割モードではクリックした区画のメトリクスをリンク対象にする
+          let clickRefId = selectedRefId;
+          if (isSplit) {
+            const rects = splitRects(model.metricInfos.length);
+            const rel = { x: (cx - hit.x) / hit.w, y: (cy - hit.y) / hit.h };
+            const idx = rects.findIndex((r) => rel.x >= r.x && rel.x < r.x + r.w && rel.y >= r.y && rel.y < r.y + r.h);
+            if (idx >= 0 && model.metricInfos[idx]) {
+              clickRefId = model.metricInfos[idx].refId;
+            }
+          }
+          const info = model.metricInfos.find((m) => m.refId === clickRefId);
+          const v = hit.cell.values.get(clickRefId);
+          // Data Links優先: getLinksが存在するフィールドのみリンクを返す(config.links長ではなくgetLinksの有無が契約)
+          const links = getCellLinks(data.series, clickRefId, hit.cell.labels, v != null ? info?.processor(v) : undefined);
+          if (links.length === 1) {
+            followLink(links[0], e);
+            return;
+          }
+          const maxX = e.currentTarget.scrollLeft + width;
+          const maxY = e.currentTarget.scrollTop + bodyH;
+          if (links.length > 1) {
+            // 複数リンクは選択メニューを出す
+            setLinkMenu({ links, x: cx, y: cy });
+            setPopover(null);
+            return;
+          }
+          // リンクが無ければ手元rangeデータのスパークライン付きポップオーバー
+          setLinkMenu(null);
+          setPopover({ cell: hit.cell, x: cx, y: cy, maxX, maxY });
+        }}
       >
         <canvas ref={canvasRef} />
         {hover && (
@@ -121,6 +205,53 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
             x={hover.x}
             y={hover.y}
           />
+        )}
+        {popover && (
+          <DrilldownPopover
+            cell={popover.cell}
+            metricInfos={model.metricInfos}
+            // 手元rangeデータのみで合成(instantクエリ時の再クエリはTask 13)
+            seriesFor={(refId) => drilldownSeries(data.series, refId, popover.cell.labels, options.spatialAggregation)}
+            loading={false}
+            x={popover.x}
+            y={popover.y}
+            panelWidth={popover.maxX}
+            panelHeight={popover.maxY}
+            onClose={() => setPopover(null)}
+          />
+        )}
+        {linkMenu && (
+          <div
+            onPointerDown={(e) => e.stopPropagation()}
+            // メニュー内クリックがコンテナのonClickに伝播してヒットテスト→再オープンするのを防ぐ
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'absolute',
+              left: linkMenu.x,
+              top: linkMenu.y,
+              zIndex: 30,
+              background: 'rgba(24,27,31,0.98)',
+              borderRadius: 4,
+              padding: 4,
+            }}
+          >
+            {linkMenu.links.map((l) => (
+              <a
+                key={l.href}
+                href={l.href}
+                target={l.target}
+                // onClickを保持するリンク(SPA遷移等)も単一リンクと同様にfollowLinkで実行する
+                onClick={(e) => {
+                  e.preventDefault();
+                  followLink(l, e);
+                  setLinkMenu(null);
+                }}
+                style={{ display: 'block', padding: '4px 8px', color: 'inherit', textDecoration: 'none' }}
+              >
+                {l.title || l.href}
+              </a>
+            ))}
+          </div>
         )}
       </div>
     </div>
