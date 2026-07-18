@@ -62,6 +62,21 @@ async function frameHash(canvas: Locator): Promise<number> {
   });
 }
 
+/** 初回描画が落ち着くまで待ち、安定した frameHash を返す(未描画フレームを基準に取る誤りを防ぐ) */
+async function stableHash(canvas: Locator): Promise<number> {
+  await expect.poll(() => isPainted(canvas)).toBe(true);
+  let prev = await frameHash(canvas);
+  await expect
+    .poll(async () => {
+      const h = await frameHash(canvas);
+      const same = h === prev;
+      prev = h;
+      return same;
+    })
+    .toBe(true);
+  return prev;
+}
+
 interface CellPath {
   zone: string;
   host: string;
@@ -69,13 +84,34 @@ interface CellPath {
   text: string;
 }
 
-/** canvas の (x,y) にホバーし、表示されたツールチップの階層パスを返す。セル外なら null。 */
+const PATH_RE = /(zone-[a-z0-9]+)\s*\/\s*(node-[a-z0-9]+)\s*\/\s*(gpu\d+)/i;
+
+/**
+ * canvas の (x,y) にホバーし、表示されたツールチップの階層パスを返す。セル外なら null。
+ * 固定 sleep ではなくツールチップ内容が現れるまで短時間ポーリングする(遅い環境での取りこぼし対策)。
+ */
 async function readPath(canvas: Locator, panel: Locator, x: number, y: number): Promise<CellPath | null> {
   await canvas.hover({ position: { x, y } });
-  await canvas.page().waitForTimeout(60);
-  const text = await panel.innerText();
-  const m = text.match(/(zone-[a-z0-9]+)\s*\/\s*(node-[a-z0-9]+)\s*\/\s*(gpu\d+)/i);
-  return m ? { zone: m[1], host: m[2], gpu: m[3], text } : null;
+  const deadline = Date.now() + 300;
+  do {
+    const text = await panel.innerText();
+    const m = text.match(PATH_RE);
+    if (m) {
+      return { zone: m[1], host: m[2], gpu: m[3], text };
+    }
+    await canvas.page().waitForTimeout(30);
+  } while (Date.now() < deadline);
+  return null;
+}
+
+/** 指定列(x)を上から探ってセルが当たる y を返す */
+async function findCellY(canvas: Locator, panel: Locator, x: number): Promise<number> {
+  for (let y = 30; y <= 150; y += 5) {
+    if (await readPath(canvas, panel, x, y)) {
+      return y;
+    }
+  }
+  throw new Error('no cell found while probing the column');
 }
 
 test('main panel renders the canvas with painted pixels', async ({ gotoDashboardPage, readProvisionedDashboard }) => {
@@ -101,7 +137,8 @@ test('metric selector exposes two options and switching re-renders', async ({
   await expect(radios).toHaveCount(2);
   await expect(radios.first()).toBeChecked();
 
-  const before = await frameHash(canvas);
+  // 初回描画が安定してから基準ハッシュを取る(未描画フレームを「切替による再描画」と誤認しない)
+  const before = await stableHash(canvas);
   // radio input 自体(最前面要素)を role+name で直接クリックする。ラベルをクリックすると
   // 上に重なる不可視 input に pointer が奪われるため、force なしで input を狙う。
   const optionB = panel.locator.getByRole('radio', { name: 'B' });
@@ -171,6 +208,19 @@ test('hosts are ordered by natural sort (a2 before a9, a10 wraps to next row)', 
   // grid 3列の1行目 = natural sort 順。辞書順なら [node-a1, node-a10, node-a2] になる。
   expect(order.slice(0, 3)).toEqual(['node-a1', 'node-a2', 'node-a9']);
   expect(order).not.toContain('node-a10');
+
+  // node-a10 は次のグリッド行(col0, node-a1 の真下)に存在する。欠落・消失でないことを確認する。
+  let a10Y: number | null = null;
+  for (let y = rowY + 20; y <= rowY + 140 && a10Y === null; y += 5) {
+    const p = await readPath(canvas, panel.locator, 25, y);
+    if (p?.host === 'node-a10') {
+      a10Y = y;
+    }
+  }
+  if (a10Y === null) {
+    throw new Error('node-a10 was not found on the row below the first');
+  }
+  expect(a10Y).toBeGreaterThan(rowY);
 });
 
 test('clicking a cell opens the drilldown popover', async ({ gotoDashboardPage, readProvisionedDashboard }) => {
@@ -219,18 +269,22 @@ test('threshold color mode renders discrete colors', async ({ gotoDashboardPage,
   // 連続配色(main)は値ごとに多数の色、閾値配色は帯ごとの少数の色になる
   const main = await dashboardPage.getPanelByTitle('ClusterView');
   await main.scrollIntoView();
-  await expect(main.locator.locator('canvas')).toBeVisible();
-  const continuousColors = await dominantColorCount(main.locator.locator('canvas'), 15);
+  const mainCanvas = main.locator.locator('canvas');
+  await expect(mainCanvas).toBeVisible();
+  // 低速環境で 0 色を掴まないよう、描画完了(連続配色は多色)を待ってから確定値を取る
+  await expect.poll(() => dominantColorCount(mainCanvas, 15)).toBeGreaterThan(4);
+  const continuousColors = await dominantColorCount(mainCanvas, 15);
 
   const threshold = await dashboardPage.getPanelByTitle('Threshold Mode');
   await threshold.scrollIntoView();
   const canvas = threshold.locator.locator('canvas');
   await expect(canvas).toBeVisible();
   await expect.poll(() => isPainted(canvas)).toBe(true);
+  // 12個の異なる値が3つの閾値帯に畳まれる(離散)。描画完了まで待って確定値を取る。
+  await expect.poll(() => dominantColorCount(canvas, 15)).toBeGreaterThanOrEqual(2);
   const thresholdColors = await dominantColorCount(canvas, 15);
 
-  // 12個の異なる値が3つの閾値帯に畳まれる(離散)。連続配色より必ず少ない。
-  expect(thresholdColors).toBeGreaterThanOrEqual(2);
+  // 離散配色は連続配色より必ず少なく、帯数(3)前後に収束する。
   expect(thresholdColors).toBeLessThanOrEqual(4);
   expect(thresholdColors).toBeLessThan(continuousColors);
 });
@@ -247,7 +301,32 @@ test('panel keeps rendering after the viewport shrinks', async ({ gotoDashboardP
   await expect.poll(() => isPainted(canvas)).toBe(true);
 });
 
-test('a data link on a cell navigates on click', async ({ gotoDashboardPage, readProvisionedDashboard }) => {
+test('query-A cell navigates via its per-query data-link override', async ({
+  gotoDashboardPage,
+  readProvisionedDashboard,
+}) => {
+  const dashboard = await readProvisionedDashboard({ fileName: FILE });
+  const dashboardPage = await gotoDashboardPage({ uid: dashboard.uid });
+  const panel = await dashboardPage.getPanelByTitle('Data Links');
+  await panel.scrollIntoView();
+  const canvas = panel.locator.locator('canvas');
+  await expect(canvas).toBeVisible();
+  // 既定は refId A 選択。A には byFrameRefID=A の links override があり click で遷移する。
+  await expect(panel.locator.getByRole('radio', { name: 'A' })).toBeChecked();
+
+  const cellY = await findCellY(canvas, panel.locator, 22);
+  const page = canvas.page();
+  await Promise.all([
+    page.waitForURL(/from=celllink/, { timeout: 15000 }),
+    canvas.click({ position: { x: 22, y: cellY } }),
+  ]);
+  expect(page.url()).toContain('from=celllink');
+});
+
+test('query-B cell has no link and opens the popover instead of navigating', async ({
+  gotoDashboardPage,
+  readProvisionedDashboard,
+}) => {
   const dashboard = await readProvisionedDashboard({ fileName: FILE });
   const dashboardPage = await gotoDashboardPage({ uid: dashboard.uid });
   const panel = await dashboardPage.getPanelByTitle('Data Links');
@@ -255,19 +334,17 @@ test('a data link on a cell navigates on click', async ({ gotoDashboardPage, rea
   const canvas = panel.locator.locator('canvas');
   await expect(canvas).toBeVisible();
 
-  let cellY: number | null = null;
-  for (let y = 30; y <= 130 && cellY === null; y += 5) {
-    if (await readPath(canvas, panel.locator, 22, y)) {
-      cellY = y;
-    }
-  }
-  if (cellY === null) {
-    throw new Error('no cell found in the Data Links panel');
-  }
+  // refId B へ切替。override は A のみのため B のセルはリンクを持たず、click でポップオーバーになる。
+  const optionB = panel.locator.getByRole('radio', { name: 'B' });
+  await optionB.click();
+  await expect(optionB).toBeChecked();
+
+  const cellY = await findCellY(canvas, panel.locator, 22);
   const page = canvas.page();
-  await Promise.all([
-    page.waitForURL(/from=celllink/, { timeout: 15000 }),
-    canvas.click({ position: { x: 22, y: cellY } }),
-  ]);
-  expect(page.url()).toContain('from=celllink');
+  const urlBefore = page.url();
+  await canvas.click({ position: { x: 22, y: cellY } });
+  await expect(panel.locator.getByRole('button', { name: '閉じる' })).toBeVisible();
+  // 遷移していない(URL 不変・リンククエリなし)
+  expect(page.url()).toBe(urlBefore);
+  expect(page.url()).not.toContain('from=celllink');
 });
