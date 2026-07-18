@@ -42,7 +42,9 @@ export function renderCanvas(canvas: HTMLCanvasElement, rc: RenderContext): void
   const infoByRef = new Map(rc.metricInfos.map((m) => [m.refId, m]));
   // 選択refIdにMetricInfoが無い場合(0系列クエリ等)はフォールバックせず欠損描画に落とす
   const selected = infoByRef.get(rc.selectedRefId);
-  const split = rc.displayMode === 'split' && rc.metricInfos.length > 1;
+  // split時はMetricInfoが1件でも区画描画に入る(1件なら全区画=全面)。これにより選択refIdが
+  // 0系列でも選択に依らずMetricInfoの色で描き、凡例(metricInfos基準)・クリック判定と一致させる
+  const split = rc.displayMode === 'split' && rc.metricInfos.length > 0;
   const rects = split ? splitRects(rc.metricInfos.length) : null;
 
   for (const c of layout.cells) {

@@ -55,7 +55,8 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
 
   // displayModeはTask 14で登録済みだが、登録前に保存したダッシュボードはキーを持たない。single を既定に正規化する
   const displayMode = options.displayMode ?? 'single';
-  const isSplit = displayMode === 'split' && model.refIds.length > 1;
+  // split判定はrenderer(metricInfos>0で区画描画)と統一する。0系列refIdはMetricInfoを持たず区画・凡例から外れる
+  const isSplit = displayMode === 'split' && model.metricInfos.length > 0;
   // 複数クエリ時はヘッダを常設し、分割モードは凡例・単一モードはメトリクスセレクタを載せる
   const showHeader = model.refIds.length > 1;
   const bodyH = height - (showHeader ? HEADER_H : 0);

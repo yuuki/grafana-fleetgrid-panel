@@ -81,6 +81,15 @@ describe('ClusterviewPanel', () => {
     expect(screen.getAllByRole('radio')).toHaveLength(2);
   });
 
+  it('shows the split legend and hides the single-mode selector in split mode', () => {
+    const p = makeProps([series('A', 'power', 'zone-a'), series('B', 'temp', 'zone-a')]);
+    p.options.displayMode = 'split';
+    render(<ClusterviewPanel {...p} />);
+    expect(screen.getByText('1: power')).toBeInTheDocument(); // 凡例(区画位置ミニチュア + 番号:名)
+    expect(screen.getByText('2: temp')).toBeInTheDocument();
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument(); // 単一モードのセレクタは出さない
+  });
+
   it('uses content coordinates (incl. scrollLeft) for hover hit testing', () => {
     // 同一refId・2ゾーンで横並び2セル(flow, s=40 → zone-a:[0,40), zone-b:[41,81))。refIdは1つなのでヘッダー無し。
     render(<ClusterviewPanel {...makeProps([series('A', 'power', 'zone-a'), series('A', 'power', 'zone-b')])} />);
