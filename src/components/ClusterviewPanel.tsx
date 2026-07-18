@@ -26,7 +26,9 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
     [data.series, options, theme, timeZone, targetRefIds]
   );
 
-  const showHeader = model.refIds.length > 1 && options.displayMode === 'single';
+  // displayModeはTask 14まで未登録のため実行時は undefined になりうる。single を既定に正規化する
+  const displayMode = options.displayMode ?? 'single';
+  const showHeader = model.refIds.length > 1 && displayMode === 'single';
   const bodyH = height - (showHeader ? HEADER_H : 0);
 
   const layout = useMemo(
@@ -42,7 +44,7 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
         layout,
         metricInfos: model.metricInfos,
         selectedRefId,
-        displayMode: options.displayMode,
+        displayMode,
         showValues: options.showValues,
         missingColor: options.missingColor,
         theme,
@@ -50,7 +52,7 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
         viewportH: bodyH,
       });
     }
-  }, [layout, model, selectedRefId, options, theme, scrollTop, bodyH]);
+  }, [layout, model, selectedRefId, displayMode, options, theme, scrollTop, bodyH]);
 
   if (data.series.length === 0) {
     return <PanelDataErrorView panelId={props.id} data={data} />;
@@ -74,7 +76,11 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
         <div style={{ height: HEADER_H }}>
           <RadioButtonGroup
             size="sm"
-            options={model.metricInfos.map((m) => ({ value: m.refId, label: m.name }))}
+            // 選択肢はrefId基準。0系列クエリはmetricInfoが無いためrefIdを表示名にフォールバックする
+            options={model.refIds.map((refId) => ({
+              value: refId,
+              label: model.metricInfos.find((m) => m.refId === refId)?.name ?? refId,
+            }))}
             value={selectedRefId}
             onChange={setSelected}
           />

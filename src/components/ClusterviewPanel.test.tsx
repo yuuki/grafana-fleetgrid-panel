@@ -59,4 +59,21 @@ describe('ClusterviewPanel', () => {
     render(<ClusterviewPanel {...makeProps([])} />);
     expect(screen.getByText('No data')).toBeInTheDocument();
   });
+
+  it('shows the metric selector when displayMode is unset (defaults to single)', () => {
+    const p = makeProps([series('A', 'power', 'zone-a'), series('B', 'temp', 'zone-a')]);
+    delete p.options.displayMode;
+    render(<ClusterviewPanel {...p} />);
+    expect(screen.getAllByRole('radio')).toHaveLength(2);
+  });
+
+  it('lists refIds for configured queries that returned no series', () => {
+    const p = makeProps([series('A', 'power', 'zone-a')]);
+    // クエリBは設定済み(targets)だが0系列(seriesには無い)
+    p.data.request.targets = [{ refId: 'A' }, { refId: 'B' }];
+    render(<ClusterviewPanel {...p} />);
+    expect(screen.getAllByRole('radio')).toHaveLength(2);
+    expect(screen.getByText('power')).toBeInTheDocument(); // Aは系列名
+    expect(screen.getByText('B')).toBeInTheDocument(); // BはmetricInfoが無いのでrefId表示
+  });
 });

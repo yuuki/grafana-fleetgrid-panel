@@ -25,6 +25,17 @@ const frame = (refId: string, zone: string, gpu: string, value: number) =>
     ],
   });
 
+// 生履歴(過去の外れ値を含む)と reduce 後のセル値がずれるフィクスチャ
+const seriesFrame = (refId: string, gpu: string, values: number[]) =>
+  toDataFrame({
+    refId,
+    name: 'power',
+    fields: [
+      { name: 'Time', type: FieldType.time, values: values.map((_, i) => 1000 + i) },
+      { name: 'Value', type: FieldType.number, values, labels: { zone: 'zone-a', gpu } },
+    ],
+  });
+
 describe('buildModel', () => {
   it('produces tree, metric infos and refIds end to end', () => {
     const m = buildModel([frame('A', 'zone-a', '0', 503), frame('B', 'zone-a', '0', 61)], options, theme, 'browser');
@@ -44,5 +55,19 @@ describe('buildModel', () => {
     const m = buildModel([frame('A', 'zone-a', '0', 1)], options, theme, 'browser', ['A', 'B']);
     expect(m.refIds).toEqual(['A', 'B']);
     expect(m.root.children[0].children[0].cell!.values.get('B')).toBeNull();
+  });
+
+  it('derives the color range from reduced cell values, not raw history', () => {
+    // gpu 0: 現在値 503(生の peak 1000)、gpu 1: 現在値 480(生の trough 100)
+    // 生履歴由来なら min=100/max=1000 になるが、セル値由来なら min=480/max=503
+    const m = buildModel(
+      [seriesFrame('A', '0', [1000, 503]), seriesFrame('A', '1', [100, 480])],
+      options,
+      theme,
+      'browser'
+    );
+    const infoA = m.metricInfos.find((i) => i.refId === 'A')!;
+    expect(infoA.field.config.min).toBe(480);
+    expect(infoA.field.config.max).toBe(503);
   });
 });

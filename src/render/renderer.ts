@@ -40,7 +40,8 @@ export function renderCanvas(canvas: HTMLCanvasElement, rc: RenderContext): void
 
   // セル
   const infoByRef = new Map(rc.metricInfos.map((m) => [m.refId, m]));
-  const selected = infoByRef.get(rc.selectedRefId) ?? rc.metricInfos[0];
+  // 選択refIdにMetricInfoが無い場合(0系列クエリ等)はフォールバックせず欠損描画に落とす
+  const selected = infoByRef.get(rc.selectedRefId);
   const split = rc.displayMode === 'split' && rc.metricInfos.length > 1;
   const rects = split ? splitRects(rc.metricInfos.length) : null;
 
@@ -55,6 +56,9 @@ export function renderCanvas(canvas: HTMLCanvasElement, rc: RenderContext): void
       continue;
     }
     if (!selected) {
+      // 選択メトリクスが無い(0系列refId選択など) → 全セルを欠損色で描画する
+      ctx.fillStyle = rc.missingColor;
+      ctx.fillRect(c.x, c.y, c.w, c.h);
       continue;
     }
     const v = c.cell.values.get(selected.refId) ?? null;
