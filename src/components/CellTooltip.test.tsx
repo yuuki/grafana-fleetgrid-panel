@@ -37,8 +37,9 @@ describe('CellTooltip', () => {
     };
     render(<CellTooltip cell={cell} metricInfos={infos} missingColor="#444" x={0} y={0} />);
     expect(screen.getByText('zone-a / 0')).toBeInTheDocument();
-    expect(screen.getByText(/503/)).toBeInTheDocument();
+    expect(screen.getByText(/503\s*W/)).toBeInTheDocument(); // 単位付き整形結果(生値ではない)
     expect(screen.getByText('power')).toBeInTheDocument();
+    expect(screen.getByText('temp')).toBeInTheDocument(); // 2件目のメトリクス名
     expect(screen.getByText('欠損')).toBeInTheDocument();
   });
 

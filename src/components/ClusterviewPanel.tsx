@@ -102,11 +102,12 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
         onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
         onMouseMove={(e) => {
           const rect = e.currentTarget.getBoundingClientRect();
-          const cx = e.clientX - rect.left;
+          // hitTestもツールチップも、スクロールコンテナのコンテンツ座標系で扱う。
+          // absolute子のツールチップはコンテンツ座標に置かれ、hitTestの当たり判定もコンテンツ座標のため、
+          // 縦横スクロール量(scrollTop/scrollLeft)を加味しないとスクロール時に別セル判定・誤配置になる。
+          const cx = e.clientX - rect.left + e.currentTarget.scrollLeft;
           const cy = e.clientY - rect.top + e.currentTarget.scrollTop;
           const hit = hitTest(layout, cx, cy);
-          // 適応: ツールチップはスクロールコンテナのabsolute子でコンテンツ座標系に置かれるため、
-          // hitTestと同じコンテンツy(cy)を保存する。viewport-y保存だとスクロール時に誤配置する。
           setHover(hit ? { cell: hit.cell, x: cx, y: cy } : null);
         }}
         onMouseLeave={() => setHover(null)}
