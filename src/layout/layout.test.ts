@@ -1,5 +1,5 @@
 import { DEFAULT_LEVEL, LevelDef, HierarchyNode, CellModel } from '../types';
-import { computeLayout, S_MIN, S_MAX, CELL_GAP, LABEL_H } from './layout';
+import { computeLayout, S_MIN, S_MAX, CELL_GAP, GROUP_GAP, BORDER_PAD, LABEL_H } from './layout';
 
 const cell = (path: string[]): CellModel => ({ path, labels: {}, values: new Map([['A', 1]]) });
 
@@ -67,6 +67,49 @@ describe('computeLayout', () => {
     expect(r.cellSize).toBe(S_MIN);
     expect(r.scrollable).toBe(true);
     expect(r.contentHeight).toBeGreaterThan(100);
+  });
+
+  it('places children left-to-right in horizontal layout', () => {
+    const cfg: LevelDef[] = [
+      { ...DEFAULT_LEVEL, label: 'zone', layout: 'horizontal', showLabel: false },
+      { ...DEFAULT_LEVEL, label: 'gpu', layout: 'grid', gridColumns: 1, showLabel: false },
+    ];
+    const r = computeLayout(tree([['z1'], ['z2']], ['0']), cfg, 800, 800);
+    expect(r.cellSize).toBe(S_MAX);
+    const cells = [...r.cells].sort((a, b) => a.x - b.x);
+    expect(cells.map((c) => c.x)).toEqual([0, S_MAX + GROUP_GAP]); // グループ間は GROUP_GAP
+    expect(cells.every((c) => c.y === 0)).toBe(true); // 同一行
+  });
+
+  it('stacks children top-to-bottom in vertical layout with multiple children', () => {
+    const cfg: LevelDef[] = [
+      { ...DEFAULT_LEVEL, label: 'zone', layout: 'vertical', showLabel: false },
+      { ...DEFAULT_LEVEL, label: 'gpu', layout: 'grid', gridColumns: 1, showLabel: false },
+    ];
+    const r = computeLayout(tree([['z1'], ['z2'], ['z3']], ['0']), cfg, 800, 800);
+    const cells = [...r.cells].sort((a, b) => a.y - b.y);
+    expect(cells.map((c) => c.y)).toEqual([0, S_MAX + GROUP_GAP, 2 * (S_MAX + GROUP_GAP)]);
+    expect(cells.every((c) => c.x === 0)).toBe(true); // 同一列
+  });
+
+  it('emits a padded border box around a bordered group and insets its cell', () => {
+    const cfg: LevelDef[] = [
+      { ...DEFAULT_LEVEL, label: 'zone', layout: 'vertical', showBorder: true, showLabel: false },
+      { ...DEFAULT_LEVEL, label: 'gpu', layout: 'grid', gridColumns: 1, showLabel: false },
+    ];
+    const r = computeLayout(tree([['z1']], ['0']), cfg, 800, 800);
+    expect(r.cellSize).toBe(S_MAX);
+    expect(r.borders).toHaveLength(1);
+    // border は BORDER_PAD 分だけ内側セルを囲う(x,y,w,h,depth)
+    expect(r.borders[0]).toMatchObject({
+      x: 0,
+      y: 0,
+      w: S_MAX + BORDER_PAD * 2,
+      h: S_MAX + BORDER_PAD * 2,
+      depth: 1,
+    });
+    // セルは border 内側へ BORDER_PAD だけオフセットされる
+    expect(r.cells[0]).toMatchObject({ x: BORDER_PAD, y: BORDER_PAD, w: S_MAX, h: S_MAX });
   });
 
   it('wraps children in flow layout', () => {
