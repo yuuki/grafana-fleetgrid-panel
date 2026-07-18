@@ -22,6 +22,23 @@ describe('buildDrilldownRequest', () => {
     expect(req.requestId).toBe('Q100-drilldown');
     expect(req.targets[0]).toMatchObject({ instant: false, range: true });
   });
+
+  it('clamps intervalMs to the 15s floor for short ranges and converts every target', () => {
+    // 60s span / 100 = 600ms → 15000msの下限に丸める。全targetをinstant:false/range:trueへ変換する
+    const shortReq = {
+      ...baseRequest,
+      range: { from: dateTime(0), to: dateTime(60_000), raw: baseRequest.range.raw },
+      targets: [
+        { refId: 'A', datasource: { type: 'prometheus', uid: 'ds1' }, instant: true, range: false },
+        { refId: 'B', datasource: { type: 'prometheus', uid: 'ds1' }, instant: true, range: false },
+      ],
+    } as any;
+    const req = buildDrilldownRequest(shortReq);
+    expect(req.intervalMs).toBe(15000);
+    expect(req.interval).toBe('15s');
+    expect(req.targets).toHaveLength(2);
+    req.targets.forEach((t) => expect(t).toMatchObject({ instant: false, range: true }));
+  });
 });
 
 describe('fetchDrilldownFrames', () => {
@@ -40,5 +57,32 @@ describe('fetchDrilldownFrames', () => {
     const getMock = jest.fn().mockResolvedValue({ query: () => Promise.resolve({ data: frames }) });
     jest.spyOn(require('@grafana/runtime'), 'getDataSourceSrv').mockReturnValue({ get: getMock } as any);
     await expect(fetchDrilldownFrames(baseRequest)).resolves.toEqual(frames);
+  });
+
+  it('groups targets by datasource (Mixed) and queries each datasource once with its own targets', async () => {
+    const { of } = jest.requireActual('rxjs');
+    const query = jest.fn().mockReturnValue(of({ data: [] }));
+    const getMock = jest.fn().mockResolvedValue({ query });
+    jest.spyOn(require('@grafana/runtime'), 'getDataSourceSrv').mockReturnValue({ get: getMock } as any);
+    const mixed = {
+      ...baseRequest,
+      targets: [
+        { refId: 'A', datasource: { type: 'prometheus', uid: 'ds1' }, instant: true, range: false },
+        { refId: 'B', datasource: { type: 'prometheus', uid: 'ds1' }, instant: true, range: false },
+        { refId: 'C', datasource: { type: 'loki', uid: 'ds2' }, instant: true, range: false },
+      ],
+    } as any;
+    await fetchDrilldownFrames(mixed);
+    // 2つの異なるdatasource → get/queryは各1回(同一datasourceのtargetsは束ねる)
+    expect(getMock).toHaveBeenCalledTimes(2);
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(getMock).toHaveBeenCalledWith({ type: 'prometheus', uid: 'ds1' });
+    expect(getMock).toHaveBeenCalledWith({ type: 'loki', uid: 'ds2' });
+    // 各requestが自datasourceのtargetsのみを保持している(A,Bはds1、Cはds2)
+    const requests = query.mock.calls.map((c: any[]) => c[0]);
+    const ds1req = requests.find((r: any) => r.targets[0].datasource.uid === 'ds1');
+    const ds2req = requests.find((r: any) => r.targets[0].datasource.uid === 'ds2');
+    expect(ds1req.targets.map((t: any) => t.refId)).toEqual(['A', 'B']);
+    expect(ds2req.targets.map((t: any) => t.refId)).toEqual(['C']);
   });
 });

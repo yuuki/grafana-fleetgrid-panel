@@ -40,6 +40,8 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
   const [drillLoading, setDrillLoading] = useState(false);
   const [drillError, setDrillError] = useState(false);
   const drillCacheId = useRef<string | undefined>(undefined);
+  // 再クエリの世代トークン。requestIdが変わるたびに進め、進行中の古いリクエストの応答を捨てる判定に使う
+  const drillGen = useRef(0);
 
   const targetRefIds = useMemo(
     () => (data.request?.targets ?? []).map((t) => t.refId).filter((r): r is string => Boolean(r)),
@@ -79,18 +81,28 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
     }
   }, [layout, model, selectedRefId, displayMode, options, theme, scrollTop, bodyH]);
 
-  // パネルデータが更新されたらキャッシュとエラーを破棄(キャッシュはパネル単位・requestIdで無効化)
+  // パネルデータが更新されたらキャッシュ・エラー・取得中を破棄し世代を進める(キャッシュはパネル単位・requestIdで無効化)。
+  // 世代を進めることで、進行中だった古いリクエストの応答(成功/失敗/finally)を後段のガードで確実に捨てる。
+  // 取得中もリセットするため、古いリクエストのfinallyをガードで飛ばしても新しいloadingが残らずデッドロックしない。
   useEffect(() => {
     if (data.request?.requestId !== drillCacheId.current) {
+      drillGen.current += 1;
       setDrillFrames(null);
       setDrillError(false);
+      setDrillLoading(false);
     }
   }, [data.request?.requestId]);
 
-  // ポップオーバーを開いたとき、手元に時系列がないメトリクスがあれば再クエリ(1リフレッシュにつき1回)
-  // drillErrorガードで失敗時の再試行ループを防ぎ、requestId比較で古い応答を捨てる
+  // ポップオーバーを開いたとき、instantクエリで手元に時系列がないメトリクスがあれば再クエリ(1リフレッシュにつき1回)。
+  // range-only(手元にrangeデータがあり得る)では再クエリしない。drillErrorガードで失敗時の再試行ループを防ぐ。
+  // 応答は取得開始時の世代を捕捉し、届いた時点の世代と一致するときのみ反映して古い応答を捨てる。
   useEffect(() => {
     if (!popover || drillFrames || drillLoading || drillError || !data.request) {
+      return;
+    }
+    // 手元データがrangeクエリ由来なら再クエリ不要。instant targetがある場合のみ実行する
+    const hasInstant = (data.request.targets ?? []).some((t) => (t as { instant?: boolean }).instant);
+    if (!hasInstant) {
       return;
     }
     const missing = model.metricInfos.some(
@@ -99,20 +111,31 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
     if (!missing) {
       return;
     }
+    const gen = drillGen.current;
     const requestId = data.request.requestId;
     // ポップオーバー起点の意図的な非同期取得。loadingは取得中UIかつ再入ガードなので同期設定が必要
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setDrillLoading(true);
     fetchDrilldownFrames(data.request)
       .then((frames) => {
-        if (data.request?.requestId !== requestId) {
-          return; // 古い応答
+        if (drillGen.current !== gen) {
+          return; // requestIdが変わった後に届いた古い応答は捨てる
         }
         drillCacheId.current = requestId;
         setDrillFrames(frames);
       })
-      .catch(() => setDrillError(true))
-      .finally(() => setDrillLoading(false));
+      .catch(() => {
+        if (drillGen.current !== gen) {
+          return; // 古いリクエストの失敗を新しいエラーstateに反映しない
+        }
+        setDrillError(true);
+      })
+      .finally(() => {
+        if (drillGen.current !== gen) {
+          return; // 古いリクエストのfinallyで新しいloadingを消さない
+        }
+        setDrillLoading(false);
+      });
   }, [popover, drillFrames, drillLoading, drillError, data, model.metricInfos, options.spatialAggregation]);
 
   // Esc・外側ポインタダウンでポップオーバー/メニューを閉じる(ポップオーバー側はstopPropagationで防御)

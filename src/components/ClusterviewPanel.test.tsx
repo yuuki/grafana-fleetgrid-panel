@@ -1,13 +1,27 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { FieldType, LoadingState, getDefaultTimeRange, toDataFrame } from '@grafana/data';
 import { DEFAULT_LEVEL } from '../types';
 import { ClusterviewPanel } from './ClusterviewPanel';
+import { fetchDrilldownFrames } from '../drilldown/requery';
 
 jest.mock('@grafana/runtime', () => ({
   ...jest.requireActual('@grafana/runtime'),
   PanelDataErrorView: () => <div>No data</div>,
 }));
+
+// 再クエリはwiring(instant判定/staleガード/キャッシュ)を検証するためモックする
+jest.mock('../drilldown/requery', () => ({
+  fetchDrilldownFrames: jest.fn(),
+}));
+
+// SparklineはuPlot依存のためテスト用のプレースホルダに差し替える(描画有無だけを見る)
+jest.mock('@grafana/ui', () => ({
+  ...jest.requireActual('@grafana/ui'),
+  Sparkline: () => <div data-testid="sparkline" />,
+}));
+
+const mockFetch = fetchDrilldownFrames as jest.Mock;
 
 const series = (refId: string, name: string, zone: string) =>
   toDataFrame({
@@ -142,5 +156,66 @@ describe('ClusterviewPanel', () => {
     expect(screen.getByLabelText('閉じる')).toBeInTheDocument();
     fireEvent.scroll(container);
     expect(screen.queryByLabelText('閉じる')).not.toBeInTheDocument();
+  });
+
+  describe('on-demand requery for instant queries', () => {
+    beforeEach(() => mockFetch.mockReset());
+
+    const sparkFrame = (v: number) =>
+      toDataFrame({
+        refId: 'A',
+        fields: [
+          { name: 'Time', type: FieldType.time, values: [1000, 2000] },
+          { name: 'Value', type: FieldType.number, values: [v, v + 1], labels: { zone: 'zone-a' } },
+        ],
+      });
+
+    it('does not requery when the panel data has no instant targets (range-only)', () => {
+      // makePropsのtargetsはinstantフラグ無し(range-only)なので再クエリは走らない
+      render(<ClusterviewPanel {...makeProps(clickable())} />);
+      fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
+      expect(screen.getByLabelText('閉じる')).toBeInTheDocument(); // ポップオーバーは開く
+      expect(mockFetch).not.toHaveBeenCalled(); // range-only → 再クエリしない
+    });
+
+    it('requeries once for instant queries and discards a stale response after the requestId changes', async () => {
+      let resolve1!: (v: unknown) => void;
+      let resolve2!: (v: unknown) => void;
+      mockFetch
+        .mockReturnValueOnce(new Promise((r) => (resolve1 = r)))
+        .mockReturnValueOnce(new Promise((r) => (resolve2 = r)));
+
+      const instantTargets = [{ refId: 'A', instant: true }];
+      const p1 = makeProps(clickable());
+      p1.data.request.targets = instantTargets;
+      const { rerender } = render(<ClusterviewPanel {...p1} />);
+      fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
+      // instantで手元に時系列が無い → 再クエリ開始、取得中表示
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(screen.getByText('読み込み中…')).toBeInTheDocument();
+
+      // requestIdがQ2へ更新される(パネルデータ更新)
+      const p2 = makeProps(clickable());
+      p2.data.request.requestId = 'Q2';
+      p2.data.request.targets = instantTargets;
+      await act(async () => {
+        rerender(<ClusterviewPanel {...p2} />);
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(2); // 新しいrequestIdで再クエリが走る
+
+      // 古いQ1応答が遅れて届く → staleガードで破棄され、反映されない
+      await act(async () => {
+        resolve1([sparkFrame(90)]);
+      });
+      expect(screen.getByText('読み込み中…')).toBeInTheDocument(); // まだ取得中(Q1は捨てられた)
+      expect(screen.queryByTestId('sparkline')).not.toBeInTheDocument();
+
+      // 新しいQ2応答が届く → こちらは反映されてスパークラインが出る
+      await act(async () => {
+        resolve2([sparkFrame(1)]);
+      });
+      expect(screen.getByTestId('sparkline')).toBeInTheDocument();
+      expect(screen.queryByText('読み込み中…')).not.toBeInTheDocument();
+    });
   });
 });
