@@ -16,7 +16,18 @@ export const plugin = new PanelPlugin<ClusterviewOptions>(ClusterviewPanel).useF
       editor: LevelsEditor,
       defaultValue: [],
     })
-    // 表示モード(単一/分割)のオプションは分割描画と凡例が揃うTask 14で登録する
+    .addRadio({
+      path: 'displayMode',
+      name: '表示モード',
+      category: ['Display'],
+      defaultValue: 'single',
+      settings: {
+        options: [
+          { value: 'single', label: '単一' },
+          { value: 'split', label: '分割セル' },
+        ],
+      },
+    })
     .addTextInput({
       path: 'defaultMetric',
       name: '既定の表示メトリクス(refId)',

@@ -12,6 +12,7 @@ import { drilldownSeries, getCellLinks } from '../drilldown/series';
 import { fetchDrilldownFrames } from '../drilldown/requery';
 import { CellTooltip } from './CellTooltip';
 import { DrilldownPopover } from './DrilldownPopover';
+import { SplitLegend } from './SplitLegend';
 
 const HEADER_H = 32;
 
@@ -52,10 +53,11 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
     [data.series, options, theme, timeZone, targetRefIds]
   );
 
-  // displayModeはTask 14まで未登録のため実行時は undefined になりうる。single を既定に正規化する
+  // displayModeはTask 14で登録済みだが、登録前に保存したダッシュボードはキーを持たない。single を既定に正規化する
   const displayMode = options.displayMode ?? 'single';
-  const isSplit = displayMode === 'split';
-  const showHeader = model.refIds.length > 1 && displayMode === 'single';
+  const isSplit = displayMode === 'split' && model.refIds.length > 1;
+  // 複数クエリ時はヘッダを常設し、分割モードは凡例・単一モードはメトリクスセレクタを載せる
+  const showHeader = model.refIds.length > 1;
   const bodyH = height - (showHeader ? HEADER_H : 0);
 
   const layout = useMemo(
@@ -185,17 +187,22 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
   return (
     <div style={{ width, height, overflow: 'hidden' }}>
       {showHeader && (
-        <div style={{ height: HEADER_H }}>
-          <RadioButtonGroup
-            size="sm"
-            // 選択肢はrefId基準。0系列クエリはmetricInfoが無いためrefIdを表示名にフォールバックする
-            options={model.refIds.map((refId) => ({
-              value: refId,
-              label: model.metricInfos.find((m) => m.refId === refId)?.name ?? refId,
-            }))}
-            value={selectedRefId}
-            onChange={setSelected}
-          />
+        <div style={{ height: HEADER_H, display: 'flex', alignItems: 'center' }}>
+          {isSplit ? (
+            // 分割モードは単一モードのセレクタの代わりに区画位置の凡例を出す
+            <SplitLegend metricInfos={model.metricInfos} />
+          ) : (
+            <RadioButtonGroup
+              size="sm"
+              // 選択肢はrefId基準。0系列クエリはmetricInfoが無いためrefIdを表示名にフォールバックする
+              options={model.refIds.map((refId) => ({
+                value: refId,
+                label: model.metricInfos.find((m) => m.refId === refId)?.name ?? refId,
+              }))}
+              value={selectedRefId}
+              onChange={setSelected}
+            />
+          )}
         </div>
       )}
       <div
