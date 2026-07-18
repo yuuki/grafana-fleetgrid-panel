@@ -188,6 +188,81 @@ describe('ClusterviewPanel', () => {
     expect(parseFloat(menu.style.top)).toBeGreaterThanOrEqual(0);
   });
 
+  // コンテナの実可視内寸・スクロール量を差し替える(jsdomはレイアウトしないため明示設定する)
+  const setBox = (el: HTMLElement, box: { sl?: number; st?: number; cw: number; ch: number }) => {
+    Object.defineProperty(el, 'scrollLeft', { configurable: true, value: box.sl ?? 0 });
+    Object.defineProperty(el, 'scrollTop', { configurable: true, value: box.st ?? 0 });
+    Object.defineProperty(el, 'clientWidth', { configurable: true, value: box.cw });
+    Object.defineProperty(el, 'clientHeight', { configurable: true, value: box.ch });
+  };
+  const linksOf = (n: number) =>
+    (() => Array.from({ length: n }, (_, i) => ({ href: `https://l/${i}`, title: `L${i}`, target: '_blank', origin: {} }))) as any;
+
+  it('places the link menu in content coordinates using the scroll offset', () => {
+    const frames = clickable();
+    frames[1].fields[1].getLinks = linksOf(2); // zone-b セルに2リンク
+    render(<ClusterviewPanel {...makeProps(frames)} />);
+    const container = containerOf();
+    setBox(container, { sl: 50, cw: 400, ch: 300 });
+    // clientX=10 + scrollLeft=50 → cx=60(横スクロール込みで zone-b をヒット)
+    fireEvent.click(container, { clientX: 10, clientY: 5 });
+    const menu = screen.getByRole('menu');
+    expect(parseFloat(menu.style.left)).toBe(68); // cx(60)+8、コンテンツ座標(scrollLeft込み)
+    expect(parseFloat(menu.style.top)).toBe(13); // cy(5)+8
+  });
+
+  it('flips and clamps the link menu within the real inner width (excludes scrollbar area)', () => {
+    const frames = clickable();
+    frames[1].fields[1].getLinks = linksOf(2);
+    render(<ClusterviewPanel {...makeProps(frames)} />);
+    const container = containerOf();
+    // 実可視内寸を props.width(400) より狭い 300 にする。width を使うと右端をはみ出す。
+    setBox(container, { cw: 300, ch: 300 });
+    fireEvent.click(container, { clientX: 60, clientY: 5 }); // cx=60(zone-b)
+    const menu = screen.getByRole('menu');
+    const left = parseFloat(menu.style.left);
+    expect(left).toBeGreaterThanOrEqual(0);
+    expect(left + 240).toBeLessThanOrEqual(300); // 実可視内寸に収まる(clientWidth基準)
+    expect(left).toBeLessThan(60); // クリック位置より左へ反転している
+  });
+
+  it('caps a tall link menu to the visible height and enables internal scroll', () => {
+    const frames = clickable();
+    frames[0].fields[1].getLinks = linksOf(12); // 背の高いメニュー
+    render(<ClusterviewPanel {...makeProps(frames)} />);
+    const container = containerOf();
+    setBox(container, { cw: 400, ch: 100 }); // 可視高100pxより高い
+    fireEvent.click(container, { clientX: 10, clientY: 5 }); // cx=10(zone-a)
+    const menu = screen.getByRole('menu');
+    expect(menu.style.maxHeight).toBe('100px'); // 可視高にクランプ
+    expect(menu.style.overflowY).toBe('auto'); // 内部スクロール
+    expect(parseFloat(menu.style.top) + 100).toBeLessThanOrEqual(100); // 下端が可視範囲内
+  });
+
+  it('collects data links across colliding label sets when a cell is clicked', () => {
+    // node-a017 と node-b017 は trailingNumber で同じ "017" セルに畳まれる。
+    // クリック配線(getCellLinks(..., cell.labelSets))が両組のリンクを集めて選択メニューを出す。
+    const mk = (host: string, href: string) => {
+      const f = toDataFrame({
+        refId: 'A',
+        name: 'power',
+        fields: [
+          { name: 'Time', type: FieldType.time, values: [1000] },
+          { name: 'Value', type: FieldType.number, values: [1], labels: { host } },
+        ],
+      });
+      f.fields[1].getLinks = (() => [{ href, title: href, target: '_blank', origin: {} }]) as any;
+      return f;
+    };
+    const p = makeProps([mk('node-a017', 'https://a'), mk('node-b017', 'https://b')]);
+    p.options.levels = [{ ...DEFAULT_LEVEL, label: 'host', extract: 'trailingNumber' }];
+    render(<ClusterviewPanel {...p} />);
+    fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    expect(screen.getByText('https://a')).toBeInTheDocument();
+    expect(screen.getByText('https://b')).toBeInTheDocument();
+  });
+
   it('opens the drilldown popover when there are no data links, then closes it on Escape', () => {
     render(<ClusterviewPanel {...makeProps(clickable())} />);
     fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
@@ -273,8 +348,9 @@ describe('ClusterviewPanel', () => {
       expect(screen.queryByText('読み込み中…')).not.toBeInTheDocument();
     });
 
-    it('does not surface a stale rejection as an error, then shows the fresh success', async () => {
-      // Q1 を reject、Q2 を resolve
+    it('discards a stale rejection so a later empty-but-successful requery shows 時系列なし, not an error', async () => {
+      // Q1 を reject(stale)、Q2 を「時系列を含まない空フレーム」で成功させる。
+      // これにより loading/sparkline が消えた最終状態で、ガード有=「時系列なし」/ ガード無=「再取得に失敗しました」を判別できる。
       let reject1!: (e: unknown) => void;
       let resolve2!: (v: unknown) => void;
       mockFetch
@@ -298,18 +374,19 @@ describe('ClusterviewPanel', () => {
       });
       expect(mockFetch).toHaveBeenCalledTimes(2);
 
-      // 遅れて届いた Q1 の失敗は staleガードで drillError に混入しない
+      // 遅れて届いた Q1 の失敗。ガードが無いと setDrillError(true) が走り、Q2 成功後に「再取得に失敗しました」が残る。
       await act(async () => {
         reject1(new Error('boom'));
       });
-      expect(screen.queryByText('再取得に失敗しました')).not.toBeInTheDocument();
-      expect(screen.getByText('読み込み中…')).toBeInTheDocument(); // Q2 継続中
 
-      // Q2 成功 → スパークライン
+      // Q2 は空フレーム(refId不一致=一致系列なし)で成功 → loading 解除、drillFrames セット、sparkline は出ない
       await act(async () => {
-        resolve2([sparkFrame(1)]);
+        resolve2([toDataFrame({ refId: 'ZZ', fields: [{ name: 'Value', type: FieldType.number, values: [] }] })]);
       });
-      expect(screen.getByTestId('sparkline')).toBeInTheDocument();
+      expect(screen.queryByText('読み込み中…')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('sparkline')).not.toBeInTheDocument();
+      // ガードが効いていれば drillError は false のまま → 「時系列なし」。混入していれば「再取得に失敗しました」。
+      expect(screen.getAllByText('時系列なし').length).toBeGreaterThan(0);
       expect(screen.queryByText('再取得に失敗しました')).not.toBeInTheDocument();
     });
 

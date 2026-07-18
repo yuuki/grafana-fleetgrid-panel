@@ -21,6 +21,9 @@ const HEADER_H = 32;
 const WARN_H = 20;
 const LINK_MENU_W = 240;
 const LINK_MENU_ROW_H = 28;
+// メニュー高さを決定論的に算出するための固定寸法(box-sizing: border-box 前提)
+const LINK_MENU_PAD = 4;
+const LINK_MENU_BORDER = 1;
 
 export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props) => {
   const { data, width, height, options, timeZone } = props;
@@ -334,10 +337,12 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
             followLink(links[0], e);
             return;
           }
+          // 可視範囲はスクロール量 + 実可視内寸(clientWidth/clientHeight)。
+          // width/bodyH ではなくスクロールバー占有分を除いた実DOM内寸を使い、オーバーレイの右下端を実体に合わせる。
           const minX = e.currentTarget.scrollLeft;
           const minY = e.currentTarget.scrollTop;
-          const maxX = minX + width;
-          const maxY = minY + bodyH;
+          const maxX = minX + e.currentTarget.clientWidth;
+          const maxY = minY + e.currentTarget.clientHeight;
           if (links.length > 1) {
             // 複数リンクは選択メニューを出す(ポップオーバーと同じ可視範囲でクランプする)
             setLinkMenu({ links, x: cx, y: cy, minX, minY, maxX, maxY });
@@ -387,8 +392,12 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
         )}
         {linkMenu &&
           (() => {
+            // border-box前提でメニュー高さを決定論的に算出する(行高・padding・borderを固定)。
+            const contentH = linkMenu.links.length * LINK_MENU_ROW_H + LINK_MENU_PAD * 2 + LINK_MENU_BORDER * 2;
+            // 可視範囲より高いメニューは可視高にクランプし、内部スクロールで全リンクへ到達可能にする。
+            const availH = Math.max(0, linkMenu.maxY - linkMenu.minY);
+            const menuH = Math.min(contentH, availH);
             // ポップオーバーと同じ反転+可視範囲クランプで右端・下端のはみ出しを防ぐ
-            const menuH = linkMenu.links.length * LINK_MENU_ROW_H + 8;
             const { left, top } = placeOverlay(linkMenu.x, linkMenu.y, LINK_MENU_W, menuH, linkMenu);
             return (
               <div
@@ -401,13 +410,16 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
                   left,
                   top,
                   width: LINK_MENU_W,
+                  maxHeight: menuH,
+                  overflowY: contentH > menuH ? 'auto' : 'hidden',
+                  boxSizing: 'border-box',
                   zIndex: 30,
                   // 固定暗色ではなくテーマ由来の配色にし、ライト/ダーク双方で読めるようにする
                   background: theme.colors.background.elevated ?? theme.colors.background.secondary,
                   color: theme.colors.text.primary,
-                  border: `1px solid ${theme.colors.border.medium}`,
+                  border: `${LINK_MENU_BORDER}px solid ${theme.colors.border.medium}`,
                   borderRadius: 4,
-                  padding: 4,
+                  padding: LINK_MENU_PAD,
                   boxShadow: theme.shadows.z3,
                 }}
               >
@@ -424,8 +436,12 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
                       setLinkMenu(null);
                     }}
                     style={{
+                      // 行高を固定してメニュー高の算出と一致させる(単一行・省略表示)
                       display: 'block',
-                      padding: '4px 8px',
+                      height: LINK_MENU_ROW_H,
+                      lineHeight: `${LINK_MENU_ROW_H}px`,
+                      boxSizing: 'border-box',
+                      padding: '0 8px',
                       color: theme.colors.text.primary,
                       textDecoration: 'none',
                       overflow: 'hidden',
