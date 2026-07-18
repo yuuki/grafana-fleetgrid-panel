@@ -33,7 +33,9 @@ export function normalizeFrames(frames: DataFrame[], reduceCalc: string): Normal
           labels[f.name] = String(f.values[i]);
         }
         const raw = valueField.values[i];
-        rows.push({ labels, value: raw == null ? null : Number(raw), refId });
+        // 数値化できない/非有限(NaN/Infinity)な値は欠損として null に正規化する
+        const num = raw == null ? null : Number(raw);
+        rows.push({ labels, value: num != null && Number.isFinite(num) ? num : null, refId });
       }
       continue;
     }

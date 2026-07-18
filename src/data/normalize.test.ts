@@ -1,5 +1,25 @@
 import { toDataFrame, FieldType } from '@grafana/data';
-import { normalizeFrames } from './normalize';
+import { isTableFrame, normalizeFrames } from './normalize';
+
+describe('isTableFrame', () => {
+  const strField = { name: 'zone', type: FieldType.string, values: ['zone-a'] };
+  it('is table when a string column exists and no numeric field carries labels', () => {
+    const frame = toDataFrame({ refId: 'A', fields: [strField, { name: 'Value', type: FieldType.number, values: [1] }] });
+    expect(isTableFrame(frame)).toBe(true);
+  });
+  it('is NOT table when a numeric field carries labels, even alongside a string column', () => {
+    // AND条件: hasStringColumn は真でも hasLabeledNumber が真なら time_series 扱い(単独検証)
+    const frame = toDataFrame({
+      refId: 'A',
+      fields: [strField, { name: 'Value', type: FieldType.number, values: [1], labels: { host: 'node-a001' } }],
+    });
+    expect(isTableFrame(frame)).toBe(false);
+  });
+  it('is NOT table when there is no string column', () => {
+    const frame = toDataFrame({ refId: 'A', fields: [{ name: 'Value', type: FieldType.number, values: [1] }] });
+    expect(isTableFrame(frame)).toBe(false);
+  });
+});
 
 describe('normalizeFrames', () => {
   it('extracts labels and last non-null value from time series frames', () => {
@@ -54,6 +74,18 @@ describe('normalizeFrames', () => {
     const rows = normalizeFrames([frame], 'lastNotNull');
     expect(rows).toHaveLength(2);
     expect(rows[0].labels).toEqual({ zone: 'zone-a' });
+  });
+
+  it('normalizes non-finite table values (NaN/Infinity) to null', () => {
+    const frame = toDataFrame({
+      refId: 'B',
+      fields: [
+        { name: 'zone', type: FieldType.string, values: ['zone-a', 'zone-b', 'zone-c'] },
+        { name: 'Value', type: FieldType.number, values: [NaN, Infinity, 55] },
+      ],
+    });
+    const rows = normalizeFrames([frame], 'lastNotNull');
+    expect(rows.map((r) => r.value)).toEqual([null, null, 55]);
   });
 
   it('returns null value when a series is all null', () => {
