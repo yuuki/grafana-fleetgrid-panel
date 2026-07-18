@@ -23,6 +23,23 @@ describe('buildDrilldownRequest', () => {
     expect(req.targets[0]).toMatchObject({ instant: false, range: true });
   });
 
+  it('rewrites format:table targets to time_series so range re-query yields time series', () => {
+    // instant+table のtargetをそのままrange化すると range table 形式が返り、
+    // 時系列抽出(collectSeries)が空になる。format を time_series に上書きして時系列を得る。
+    const withFormat = {
+      ...baseRequest,
+      targets: [
+        { refId: 'A', datasource: { type: 'prometheus', uid: 'ds1' }, instant: true, range: false, format: 'table' },
+        { refId: 'B', datasource: { type: 'prometheus', uid: 'ds1' }, instant: true, range: false, format: 'time_series' },
+        { refId: 'C', datasource: { type: 'prometheus', uid: 'ds1' }, instant: true, range: false },
+      ],
+    } as any;
+    const req = buildDrilldownRequest(withFormat) as any;
+    expect(req.targets[0].format).toBe('time_series'); // table → time_series へ上書き
+    expect(req.targets[1].format).toBe('time_series'); // 既に time_series はそのまま
+    expect(req.targets[2].format).toBeUndefined(); // 未設定は触らない(データソース既定に委ねる)
+  });
+
   it('clamps intervalMs to the 15s floor for short ranges and converts every target', () => {
     // 60s span / 100 = 600ms → 15000msの下限に丸める。全targetをinstant:false/range:trueへ変換する
     const shortReq = {

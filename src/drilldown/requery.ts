@@ -13,7 +13,15 @@ export function buildDrilldownRequest(base: DataQueryRequest): DataQueryRequest 
     maxDataPoints: MAX_POINTS,
     intervalMs,
     interval: `${Math.round(intervalMs / 1000)}s`,
-    targets: base.targets.map((t) => ({ ...t, instant: false, range: true })),
+    targets: base.targets.map((t) => {
+      const next = { ...t, instant: false, range: true } as typeof t & { format?: string };
+      // instant+table を素朴に range 化すると range table 形式が返り、collectSeries が時系列を拾えない。
+      // format:'table' のときだけ 'time_series' へ上書きする(他の値・未設定はデータソース既定に委ねる)。
+      if (next.format === 'table') {
+        next.format = 'time_series';
+      }
+      return next;
+    }),
   };
 }
 
