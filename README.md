@@ -1,117 +1,153 @@
-# Grafana panel plugin template
+# ClusterView
 
-This template is a starting point for building a panel plugin for Grafana.
+A Grafana panel plugin that renders nested physical topologies — such as zones, hosts, and GPUs — as a hierarchical grid, and colors each cell by a Prometheus / VictoriaMetrics metric. It is designed for a bird's-eye view of large AI / HPC clusters, where hundreds of nodes and thousands of cells need to be scanned at a glance.
 
-## What are Grafana panel plugins?
+The panel draws every cell on a single `<canvas>` and overlays the tooltip, drilldown popover, legend, and metric selector as React DOM, so it stays responsive even at cluster scale (a few thousand cells, up to ~15,000 sub-regions in split mode).
 
-Panel plugins allow you to add new types of visualizations to your dashboard, such as maps, clocks, pie charts, lists, and more.
+## Features
 
-Use panel plugins when you want to do things like visualize data returned by data source queries, navigate between dashboards, or control external systems (such as smart home devices).
+- **Hierarchical grid** — Define an arbitrary number of nesting levels from your query labels (e.g. `zone` → `host` → `gpu`). Each level chooses its own layout (stack, row, flow-wrap, or grid) and sort order.
+- **Standard Grafana coloring** — Color scheme (continuous gradient), Thresholds, Unit, Decimals, Min/Max, and Data Links are all configured through Grafana's native **Field** and **Overrides** tabs. There is no custom color DSL; only numeric values are colored.
+- **Auto-fitted cells** — Cell size is computed from the panel dimensions. Numbers are drawn only when the formatted text fits; the exact value is always available on hover.
+- **Natural sort** — Numeric segments inside labels are compared as numbers (`node-a2 < node-a10`), ascending by default (descending and "data order" are also selectable).
+- **Multiple metrics** — Show one metric at a time with an in-panel selector (default), or opt in to split each cell into sub-regions to compare all queries side by side. The tooltip and popover always list every metric.
+- **Drilldown** — Click a cell to open a popover with a per-metric sparkline and current value. If the field has Data Links, navigation takes priority over the popover.
 
-## Getting started
+## Compatibility
 
-### Frontend
+| Requirement | Value |
+| --- | --- |
+| Grafana | `>= 11.6.0` |
+| Data source | Prometheus / VictoriaMetrics |
+| Query type | Instant (recommended) or Range |
 
-1. Install dependencies
+Coloring, units, and drilldown rely on Grafana's standard field config, so any data source that produces labeled numeric series works, but the plugin is designed and tested against Prometheus / VictoriaMetrics.
 
-   ```bash
-   npm install
-   ```
+## Quick start
 
-2. Build plugin in development mode and run in watch mode
+### 1. Add queries
 
-   ```bash
-   npm run dev
-   ```
+Add one or more numeric queries. Instant queries are recommended because the panel only needs the current value, which minimizes transfer. A range query is folded to a single current value per series (see [Reduce calculation](#data)).
 
-3. Build plugin in production mode
+```promql
+# Query A — one series per (zone, host, gpu)
+max by (zone, host, gpu) (gpu_power_watts)
 
-   ```bash
-   npm run build
-   ```
+# Query B — a second metric over the same topology
+max by (zone, host, gpu) (gpu_temperature_celsius)
+```
 
-4. Run the tests (using Jest)
+Every cell is built from the **union** of all queries, so a node present in only one query still appears in the grid; cells with no sample for the displayed query are painted with the missing color.
 
-   ```bash
-   # Runs the tests and watches for changes, requires git init first
-   npm run test
+### 2. Configure hierarchy levels
 
-   # Exits after running all the tests
-   npm run test:ci
-   ```
+Open the panel editor and add hierarchy levels under **Hierarchy**. The editor lists the label keys found in your query results and, for each level, shows the detected group count and sample values so misconfiguration is visible immediately.
 
-5. Spin up a Grafana instance and run the plugin inside it (using Docker)
+| Level | Label | Extract | Layout |
+| --- | --- | --- | --- |
+| 1 | `zone` | As is | Stack |
+| 2 | `host` | Trailing number | Grid (columns: 20) |
+| 3 | `gpu` | As is | Grid (columns: 2) |
 
-   ```bash
-   npm run server
-   ```
+Levels are reorderable and there is no fixed depth limit (about 8 levels is a practical maximum).
 
-6. Run the E2E tests (using Playwright)
+### 3. Choose a color scheme
 
-   ```bash
-   # Spins up a Grafana instance first that we tests against
-   npm run server
+On the **Field** tab, set a **Color scheme** such as `Green-Yellow-Red (by value)` for a continuous gradient, or configure **Thresholds** for discrete colors. Set **Unit**, **Decimals**, and **Min/Max** as needed. Per-query settings (for example a different unit for temperature) go through **Overrides → Fields with name matching a query (by refId)**.
 
-   # If you wish to start a certain Grafana version. If not specified will use latest by default
-   GRAFANA_VERSION=11.3.0 npm run server
+Each query's color scale is independent: a query with no explicit Min/Max is auto-scaled to its own data range, so a power metric (600–1000 W) and a temperature metric (30–90 °C) are not flattened onto one shared scale.
 
-   # Starts the tests
-   npm run e2e
-   ```
+## Options reference
 
-7. Run the linter
+### Hierarchy
 
-   ```bash
-   npm run lint
+Configured through the **Hierarchy levels** editor. Each level has:
 
-   # or
+| Setting | Values | Notes |
+| --- | --- | --- |
+| Label | any detected label key | The label to group by at this level |
+| Extract | `As is` / `Trailing number` / `Custom regex` | How to derive the level key from the label value. `Trailing number` turns `node-a004` into `004`; `Custom regex` uses the first capture group (e.g. `node-.+(\d\d\d)`) |
+| Sort | `Natural (asc)` / `Natural (desc)` / `None` | `None` keeps data appearance order |
+| Layout | `Stack` / `Row` / `Flow` / `Grid` | Grid requires a column count |
+| Grid columns | number | Only for the grid layout |
+| Border | on / off | Draw a border around each group |
+| Group label | on / off | Show the group label |
 
-   npm run lint:fix
-   ```
+### Display
 
-# Distributing your plugin
+| Option | Default | Description |
+| --- | --- | --- |
+| Display mode | `Single` | `Single` shows one metric with a selector; `Split` divides each cell into per-query sub-regions |
+| Default metric (refId) | first query | Which query the selector starts on in single mode |
+| Show values | on | Draw numbers when they fit; hover still shows the value when off or when text does not fit |
+| Missing color | `rgb(70,70,70)` | Fill for cells with no sample for the displayed query |
 
-When distributing a Grafana plugin either within the community or privately the plugin must be signed so the Grafana application can verify its authenticity. This can be done with the `@grafana/sign-plugin` package.
+### Data
 
-_Note: It's not necessary to sign a plugin during development. The docker development environment that is scaffolded with `@grafana/create-plugin` caters for running the plugin without a signature._
+| Option | Default | Description |
+| --- | --- | --- |
+| Spatial aggregation | `Max` | Combines multiple series that fall on the same cell (e.g. when the hierarchy stops above the series granularity). `Max` / `Mean` / `Min` / `Sum` |
+| Reduce calculation | `Last (not null)` | Folds a range query into one current value per series. Limited to reducers that return a number |
 
-## Initial steps
+## Multiple metrics
 
-Before signing a plugin please read the Grafana [plugin publishing and signing criteria](https://grafana.com/legal/plugins/#plugin-publishing-and-signing-criteria) documentation carefully.
+The cell model always holds every query's value; only the drawing mode changes.
 
-`@grafana/create-plugin` has added the necessary commands and workflows to make signing and distributing a plugin via the grafana plugins catalog as straightforward as possible.
+- **Single mode (default)** — Each cell is filled with the color of the selected metric. A selector at the top of the panel switches metrics with one click. The selection is viewer-local state and is not saved as a dashboard change; the initial metric is the **Default metric** option (or the first query).
+- **Split mode (opt-in)** — Each cell is auto-divided by the number of queries: 2 = left/right, 3 = three columns, 4 = 2×2, 5–6 = 3×2, 7–9 = 3×3. Regions are capped at 9; with 10+ queries only the first 9 are drawn and the legend notes the remainder. A legend at the top maps each region position to its query. Values are not drawn inside split regions because they are inherently too small to read.
 
-Before signing a plugin for the first time please consult the Grafana [plugin signature levels](https://grafana.com/legal/plugins/#what-are-the-different-classifications-of-plugins) documentation to understand the differences between the types of signature level.
+The tooltip (on hover) and the drilldown popover always list all metrics regardless of mode.
 
-1. Create a [Grafana Cloud account](https://grafana.com/signup).
-2. Make sure that the first part of the plugin ID matches the slug of your Grafana Cloud account.
-   - _You can find the plugin ID in the `plugin.json` file inside your plugin directory. For example, if your account slug is `acmecorp`, you need to prefix the plugin ID with `acmecorp-`._
-3. Create a Grafana Cloud API key with the `PluginPublisher` role.
-4. Keep a record of this API key as it will be required for signing a plugin
+## Drilldown
 
-## Signing a plugin
+Clicking a cell resolves in this order:
 
-### Using Github actions release workflow
+1. **Data Links** — If the field has Grafana Data Links configured, the click navigates (multiple links open the standard context menu). Data Links always take priority.
+2. **Popover** — Otherwise a card-style popover opens next to the cell, showing the hierarchy path and, per metric, a sparkline plus the current value. It auto-flips to stay inside the panel and closes on outside-click or `Esc`.
 
-If the plugin is using the github actions supplied with `@grafana/create-plugin` signing a plugin is included out of the box. The [release workflow](./.github/workflows/release.yml) can prepare everything to make submitting your plugin to Grafana as easy as possible. Before being able to sign the plugin however a secret needs adding to the Github repository.
+**Instant query note** — When the panel's queries are instant (no time series in the received frames), clicking re-runs the panel's queries as range over the dashboard time range via the data source, capped at ~100 data points, then extracts the series matching the clicked cell. The result is cached per panel until the next data update, so opening additional cells does not trigger another fetch. When the panel already runs range queries, no re-query happens. If re-querying feels slow at your scale, switch to range queries to remove it entirely.
 
-1. Please navigate to "settings > secrets > actions" within your repo to create secrets.
-2. Click "New repository secret"
-3. Name the secret "GRAFANA_API_KEY"
-4. Paste your Grafana Cloud API key in the Secret field
-5. Click "Add secret"
+## Layout notes
 
-#### Push a version tag
+Cell size is auto-fitted between **6 px** and **40 px** by scanning candidate sizes from large to small and taking the largest that fits the panel. If cells would fall below 6 px, the size is pinned to 6 px and the panel switches to vertical scrolling with group labels kept at the top.
 
-To trigger the workflow we need to push a version tag to github. This can be achieved with the following steps:
+## Development
 
-1. Run `npm version <major|minor|patch>`
-2. Run `git push origin main --follow-tags`
+```bash
+npm install
 
-## Learn more
+# Build in watch mode
+npm run dev
 
-Below you can find source code for existing app plugins and other related documentation.
+# Production build
+npm run build
 
-- [Basic panel plugin example](https://github.com/grafana/grafana-plugin-examples/tree/master/examples/panel-basic#readme)
-- [`plugin.json` documentation](https://grafana.com/developers/plugin-tools/reference/plugin-json)
-- [How to sign a plugin?](https://grafana.com/developers/plugin-tools/publish-a-plugin/sign-a-plugin)
+# Type check and lint
+npm run typecheck
+npm run lint
+
+# Unit tests (Jest)
+npm run test:ci
+
+# Run a local Grafana with the plugin (Docker)
+npm run server
+
+# Pin a Grafana version for the dev server / e2e
+GRAFANA_VERSION=11.6.0 npm run server
+
+# End-to-end tests (Playwright, @grafana/plugin-e2e) — needs a running server
+npm run e2e
+```
+
+The build uses the webpack configuration provided in `.config/`. Data transformation (`src/data`), layout (`src/layout`), and hit testing (`src/render`) are pure functions verified directly with Jest; the canvas render layer is intentionally thin.
+
+## Screenshots
+
+<!-- Add screenshots under src/img/ and reference them here, and register them in
+     plugin.json (info.screenshots) before publishing to the Grafana catalog. -->
+
+_Screenshots are not yet included. Add them under `src/img/` and list them in `plugin.json` before publishing._
+
+## License
+
+Apache-2.0. See [LICENSE](./LICENSE).
