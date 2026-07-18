@@ -1,0 +1,134 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {
+        "type": "grafana-testdata-datasource",
+        "uid": "trlxrdZVk"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
+          "unit": "watt"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "celsius"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 18,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "levels": [
+          {
+            "label": "zone",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "vertical",
+            "showBorder": true,
+            "showLabel": true
+          },
+          {
+            "label": "host",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "grid",
+            "gridColumns": 3,
+            "showBorder": true,
+            "showLabel": true
+          },
+          {
+            "label": "gpu",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "grid",
+            "gridColumns": 2,
+            "showBorder": false,
+            "showLabel": true
+          }
+        ],
+        "displayMode": "single",
+        "defaultMetric": "",
+        "showValues": true,
+        "missingColor": "rgb(70,70,70)",
+        "spatialAggregation": "max",
+        "reduceCalc": "lastNotNull"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "trlxrdZVk"
+          },
+          "refId": "A",
+          "scenarioId": "csv_content",
+          "csvContent": "zone,host,gpu,power\nzone-a,node-a001,gpu0,210\nzone-a,node-a001,gpu1,195\nzone-a,node-a002,gpu0,320\nzone-a,node-a002,gpu1,140\nzone-a,node-a003,gpu0,120\nzone-a,node-a003,gpu1,250\nzone-b,node-b001,gpu0,180\nzone-b,node-b001,gpu1,300\nzone-b,node-b002,gpu0,160\nzone-b,node-b002,gpu1,230\nzone-b,node-b003,gpu0,275\nzone-b,node-b003,gpu1,205"
+        },
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "trlxrdZVk"
+          },
+          "refId": "B",
+          "scenarioId": "csv_content",
+          "csvContent": "zone,host,gpu,temp\nzone-a,node-a001,gpu0,72\nzone-a,node-a001,gpu1,68\nzone-a,node-a002,gpu0,88\nzone-a,node-a002,gpu1,60\nzone-a,node-a003,gpu0,55\nzone-a,node-a003,gpu1,79\nzone-b,node-b001,gpu0,65\nzone-b,node-b001,gpu1,85\nzone-b,node-b002,gpu0,62\nzone-b,node-b002,gpu1,76\nzone-b,node-b003,gpu0,82\nzone-b,node-b003,gpu1,70"
+        }
+      ],
+      "title": "ClusterView",
+      "type": "yuuk1-clusterview-panel"
+    }
+  ],
+  "preload": false,
+  "refresh": "",
+  "schemaVersion": 39,
+  "tags": ["clusterview", "e2e"],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "ClusterView E2E",
+  "uid": "clusterview-e2e",
+  "version": 1,
+  "weekStart": ""
+}
