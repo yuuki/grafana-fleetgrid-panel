@@ -48,8 +48,8 @@
         ]
       },
       "gridPos": {
-        "h": 18,
-        "w": 24,
+        "h": 13,
+        "w": 16,
         "x": 0,
         "y": 0
       },
@@ -98,7 +98,7 @@
           },
           "refId": "A",
           "scenarioId": "csv_content",
-          "csvContent": "zone,host,gpu,power\nzone-a,node-a001,gpu0,210\nzone-a,node-a001,gpu1,195\nzone-a,node-a002,gpu0,320\nzone-a,node-a002,gpu1,140\nzone-a,node-a003,gpu0,120\nzone-a,node-a003,gpu1,250\nzone-b,node-b001,gpu0,180\nzone-b,node-b001,gpu1,300\nzone-b,node-b002,gpu0,160\nzone-b,node-b002,gpu1,230\nzone-b,node-b003,gpu0,275\nzone-b,node-b003,gpu1,205"
+          "csvContent": "zone,host,gpu,power\nzone-a,node-a1,gpu0,110\nzone-a,node-a1,gpu1,130\nzone-a,node-a2,gpu0,205\nzone-a,node-a2,gpu1,175\nzone-a,node-a9,gpu0,320\nzone-a,node-a9,gpu1,260\nzone-a,node-a10,gpu0,150\nzone-a,node-a10,gpu1,290\nzone-b,node-b1,gpu0,100\nzone-b,node-b1,gpu1,140\nzone-b,node-b2,gpu0,230\nzone-b,node-b2,gpu1,185\nzone-b,node-b9,gpu0,300\nzone-b,node-b9,gpu1,270\nzone-b,node-b10,gpu0,160\nzone-b,node-b10,gpu1,210"
         },
         {
           "datasource": {
@@ -107,10 +107,269 @@
           },
           "refId": "B",
           "scenarioId": "csv_content",
-          "csvContent": "zone,host,gpu,temp\nzone-a,node-a001,gpu0,72\nzone-a,node-a001,gpu1,68\nzone-a,node-a002,gpu0,88\nzone-a,node-a002,gpu1,60\nzone-a,node-a003,gpu0,55\nzone-a,node-a003,gpu1,79\nzone-b,node-b001,gpu0,65\nzone-b,node-b001,gpu1,85\nzone-b,node-b002,gpu0,62\nzone-b,node-b002,gpu1,76\nzone-b,node-b003,gpu0,82\nzone-b,node-b003,gpu1,70"
+          "csvContent": "zone,host,gpu,temp\nzone-a,node-a1,gpu0,60\nzone-a,node-a1,gpu1,64\nzone-a,node-a2,gpu0,72\nzone-a,node-a2,gpu1,68\nzone-a,node-a9,gpu0,88\nzone-a,node-a9,gpu1,82\nzone-a,node-a10,gpu0,66\nzone-a,node-a10,gpu1,85\nzone-b,node-b1,gpu0,58\nzone-b,node-b1,gpu1,63\nzone-b,node-b2,gpu0,76\nzone-b,node-b2,gpu1,70\nzone-b,node-b9,gpu0,86\nzone-b,node-b9,gpu1,80\nzone-b,node-b10,gpu0,65\nzone-b,node-b10,gpu1,74"
         }
       ],
       "title": "ClusterView",
+      "type": "yuuk1-clusterview-panel"
+    },
+    {
+      "datasource": {
+        "type": "grafana-testdata-datasource",
+        "uid": "trlxrdZVk"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
+          "unit": "watt",
+          "links": [
+            {
+              "title": "drilldown",
+              "url": "/d/clusterview-e2e/clusterview-e2e?from=celllink",
+              "targetBlank": false
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 13,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "id": 4,
+      "options": {
+        "levels": [
+          {
+            "label": "zone",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "vertical",
+            "showBorder": true,
+            "showLabel": true
+          },
+          {
+            "label": "host",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "grid",
+            "gridColumns": 2,
+            "showBorder": true,
+            "showLabel": true
+          },
+          {
+            "label": "gpu",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "grid",
+            "gridColumns": 2,
+            "showBorder": false,
+            "showLabel": true
+          }
+        ],
+        "displayMode": "single",
+        "defaultMetric": "",
+        "showValues": true,
+        "missingColor": "rgb(70,70,70)",
+        "spatialAggregation": "max",
+        "reduceCalc": "lastNotNull"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "trlxrdZVk"
+          },
+          "refId": "A",
+          "scenarioId": "csv_content",
+          "csvContent": "zone,host,gpu,power\nzone-a,node-a1,gpu0,120\nzone-a,node-a1,gpu1,200\nzone-b,node-b1,gpu0,150\nzone-b,node-b1,gpu1,280"
+        }
+      ],
+      "title": "Data Links",
+      "type": "yuuk1-clusterview-panel"
+    },
+    {
+      "datasource": {
+        "type": "grafana-testdata-datasource",
+        "uid": "trlxrdZVk"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "id": 2,
+      "options": {
+        "levels": [
+          {
+            "label": "zone",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "vertical",
+            "showBorder": true,
+            "showLabel": true
+          },
+          {
+            "label": "host",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "grid",
+            "gridColumns": 3,
+            "showBorder": true,
+            "showLabel": true
+          },
+          {
+            "label": "gpu",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "grid",
+            "gridColumns": 2,
+            "showBorder": false,
+            "showLabel": true
+          }
+        ],
+        "displayMode": "single",
+        "defaultMetric": "",
+        "showValues": false,
+        "missingColor": "rgb(70,70,70)",
+        "spatialAggregation": "max",
+        "reduceCalc": "lastNotNull"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "trlxrdZVk"
+          },
+          "refId": "A",
+          "scenarioId": "csv_content",
+          "csvContent": "zone,host,gpu,power\nzone-a,node-a1,gpu0,10\nzone-a,node-a1,gpu1,20\nzone-a,node-a2,gpu0,30\nzone-a,node-a2,gpu1,40\nzone-a,node-a3,gpu0,55\nzone-a,node-a3,gpu1,65\nzone-b,node-b1,gpu0,75\nzone-b,node-b1,gpu1,85\nzone-b,node-b2,gpu0,100\nzone-b,node-b2,gpu1,120\nzone-b,node-b3,gpu0,140\nzone-b,node-b3,gpu1,160"
+        }
+      ],
+      "title": "Threshold Mode",
+      "type": "yuuk1-clusterview-panel"
+    },
+    {
+      "datasource": {
+        "type": "grafana-testdata-datasource",
+        "uid": "trlxrdZVk"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
+          "unit": "watt"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "celsius"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
+      "id": 3,
+      "options": {
+        "levels": [
+          {
+            "label": "zone",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "vertical",
+            "showBorder": true,
+            "showLabel": true
+          },
+          {
+            "label": "host",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "grid",
+            "gridColumns": 2,
+            "showBorder": true,
+            "showLabel": true
+          },
+          {
+            "label": "gpu",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "grid",
+            "gridColumns": 2,
+            "showBorder": false,
+            "showLabel": true
+          }
+        ],
+        "displayMode": "split",
+        "defaultMetric": "",
+        "showValues": true,
+        "missingColor": "rgb(70,70,70)",
+        "spatialAggregation": "max",
+        "reduceCalc": "lastNotNull"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "trlxrdZVk"
+          },
+          "refId": "A",
+          "scenarioId": "csv_content",
+          "csvContent": "zone,host,gpu,power\nzone-a,node-a1,gpu0,120\nzone-a,node-a1,gpu1,140\nzone-a,node-a2,gpu0,220\nzone-a,node-a2,gpu1,180\nzone-b,node-b1,gpu0,110\nzone-b,node-b1,gpu1,160\nzone-b,node-b2,gpu0,240\nzone-b,node-b2,gpu1,190"
+        },
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "trlxrdZVk"
+          },
+          "refId": "B",
+          "scenarioId": "csv_content",
+          "csvContent": "zone,host,gpu,temp\nzone-a,node-a1,gpu0,62\nzone-a,node-a1,gpu1,66\nzone-a,node-a2,gpu0,74\nzone-a,node-a2,gpu1,70\nzone-b,node-b1,gpu0,60\nzone-b,node-b1,gpu1,64\nzone-b,node-b2,gpu0,78\nzone-b,node-b2,gpu1,72"
+        }
+      ],
+      "title": "Split Mode",
       "type": "yuuk1-clusterview-panel"
     }
   ],
