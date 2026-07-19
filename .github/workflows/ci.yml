@@ -240,8 +240,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          # required for playwright-gh-pages
-          persist-credentials: true
+          # Must be false: the deploy-report-pages action runs its own authenticated
+          # actions/checkout (ref: gh-pages) and peaceiris/actions-gh-pages pushes with its
+          # own github_token. Persisting credentials here leaves a second http.extraheader
+          # Authorization in .git/config, so the action's inner checkout fetch sends duplicate
+          # Authorization headers and GitHub rejects it with HTTP 400 (Duplicate header).
+          persist-credentials: false
       - name: Publish report
         uses: grafana/plugin-actions/playwright-gh-pages/deploy-report-pages@deploy-report-pages/v1.1.0
         with:
