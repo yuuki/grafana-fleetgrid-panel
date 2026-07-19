@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
+  "type": "panel",
+  "name": "ClusterView",
+  "id": "yuuk1-clusterview-panel",
+  "info": {
+    "keywords": ["panel"],
+    "description": "Visualize nested cluster topologies (zones, hosts, GPUs) as a hierarchical grid colored by Prometheus / VictoriaMetrics metrics, with hover tooltips, click drilldown, and multi-metric comparison.",
+    "author": {
+      "name": "Yuuk1"
+    },
+    "logos": {
+      "small": "img/logo.svg",
+      "large": "img/logo.svg"
+    },
+    "links": [],
+    "screenshots": [],
+    "version": "%VERSION%",
+    "updated": "%TODAY%"
+  },
+  "dependencies": {
+    "grafanaDependency": ">=11.6.0",
+    "plugins": []
+  }
+}

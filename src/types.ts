@@ -1,0 +1,63 @@
+export type ExtractPreset = 'raw' | 'trailingNumber' | 'regex';
+export type SortOrder = 'natural' | 'naturalDesc' | 'none';
+export type LevelLayout = 'vertical' | 'horizontal' | 'flow' | 'grid';
+export type SpatialAggregation = 'max' | 'mean' | 'min' | 'sum';
+export type DisplayMode = 'single' | 'split';
+
+export interface LevelDef {
+  label: string;
+  extract: ExtractPreset;
+  regex?: string;
+  sort: SortOrder;
+  layout: LevelLayout;
+  gridColumns?: number;
+  showBorder: boolean;
+  showLabel: boolean;
+}
+
+export interface ClusterviewOptions {
+  levels: LevelDef[];
+  displayMode: DisplayMode;
+  defaultMetric?: string;
+  showValues: boolean;
+  missingColor: string;
+  spatialAggregation: SpatialAggregation;
+  /** ReducerID (e.g. 'lastNotNull') — reduce along the time axis */
+  reduceCalc: string;
+}
+
+export const DEFAULT_LEVEL: LevelDef = {
+  label: '',
+  extract: 'raw',
+  sort: 'natural',
+  layout: 'flow',
+  showBorder: false,
+  showLabel: true,
+};
+
+export interface NormalizedRow {
+  labels: Record<string, string>;
+  value: number | null;
+  refId: string;
+}
+
+export interface CellModel {
+  path: string[];
+  /** The representative original value of the label key used for the hierarchy (for display/backward compatibility; matches the first labelSet) */
+  labels: Record<string, string>;
+  /**
+   * All original label sets collapsed into this cell. Holds every distinct original value whose
+   * extraction key collides (e.g. both node-a017 and node-b017 mapping to "017"), so drilldown
+   * can search the same series set as the cell value.
+   * Always set on the production path (attachCells). May be omitted for display-only/lightweight fixtures.
+   */
+  labelSets?: Array<Record<string, string>>;
+  values: Map<string, number | null>;
+}
+
+export interface HierarchyNode {
+  key: string;
+  path: string[];
+  children: HierarchyNode[];
+  cell?: CellModel;
+}

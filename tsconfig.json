@@ -1,0 +1,17 @@
+{
+  "extends": "./.config/tsconfig.json",
+  // ts-node compiles .config/webpack/webpack.config.ts. The scaffold's
+  // .config/tsconfig.json ts-node block sets module:commonjs but no moduleResolution,
+  // so @grafana/tsconfig@2.2.0's moduleResolution:bundler leaks in and TypeScript rejects
+  // the combo (TS5095). Pin nodenext here (mirrors create-plugin 7.x) — root tsconfig is
+  // the only editable extension point since .config/ must not be hand-edited.
+  "ts-node": {
+    "compilerOptions": {
+      "module": "nodenext",
+      "moduleResolution": "nodenext",
+      "target": "es2022",
+      "esModuleInterop": true
+    },
+    "transpileOnly": true
+  }
+}
