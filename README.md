@@ -111,6 +111,47 @@ Clicking a cell resolves in this order:
 
 Cell size is auto-fitted between **6 px** and **40 px** by scanning candidate sizes from large to small and taking the largest that fits the panel. If even 6 px cells do not fit, the size is pinned to 6 px. The panel then scrolls **vertically** when the content is taller than the panel and **horizontally** when it is wider. While scrolling vertically, the current top-most level's group label stays pinned to the top — but only when that top level has its **Group label** enabled, since otherwise there is no label to pin.
 
+## Deployment
+
+The plugin is not yet published to the Grafana catalog and its release builds are unsigned, so it must be installed manually.
+
+### 1. Get the build
+
+- **From a GitHub Release** — download the `yuuk1-clusterview-panel-<version>.zip` asset attached to the release (built by `.github/workflows/release.yml` whenever a `v*` tag is pushed).
+- **From source** — run `npm install && npm run build`; the output is written to `dist/`.
+
+### 2. Install into Grafana
+
+Copy (or extract) the build into Grafana's plugin directory as a folder named after the plugin ID:
+
+```bash
+cp -r dist "$GF_PATHS_PLUGINS/yuuk1-clusterview-panel"
+```
+
+Because the plugin is unsigned, Grafana refuses to load it unless it is explicitly allow-listed. Set the following on the Grafana server (or in `grafana.ini` under `[plugins]` as `allow_loading_unsigned_plugins`) before starting/restarting it:
+
+```bash
+GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=yuuk1-clusterview-panel
+```
+
+### 3. Docker / docker-compose example
+
+```yaml
+services:
+  grafana:
+    image: grafana/grafana:11.6.0
+    ports:
+      - '3000:3000'
+    environment:
+      - GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=yuuk1-clusterview-panel
+    volumes:
+      - ./dist:/var/lib/grafana/plugins/yuuk1-clusterview-panel
+```
+
+### 4. Verify
+
+Restart Grafana, then add a panel and confirm **ClusterView** appears in the visualization picker. Check **Administration → Plugins** to confirm the plugin loaded without errors if it does not appear.
+
 ## Development
 
 **Prerequisites:** Node.js `>= 22` (see `.nvmrc`) and Docker (for `npm run server` and the e2e Grafana instance). Before the first `npm run e2e`, install the Playwright browser once with `npx playwright install chromium`.
