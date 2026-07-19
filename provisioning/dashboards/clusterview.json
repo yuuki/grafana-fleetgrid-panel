@@ -137,7 +137,7 @@
                 "value": [
                   {
                     "title": "drilldown",
-                    "url": "/d/clusterview-e2e/clusterview-e2e?from=celllink",
+                    "url": "/d/clusterview-e2e/clusterview-e2e?drilldown=celllink",
                     "targetBlank": false
                   }
                 ]

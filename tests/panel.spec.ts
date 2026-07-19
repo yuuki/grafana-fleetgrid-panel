@@ -24,22 +24,53 @@ async function isPainted(canvas: Locator): Promise<boolean> {
   });
 }
 
-/** The number of distinct colors that dominate as cell fill colors (sample count >= minCount). Colors are quantized to 5 bits to collapse AA noise. */
-async function dominantColorCount(canvas: Locator, minCount: number): Promise<number> {
+/**
+ * The number of distinct cell-fill colors on the canvas (each seen at >= minCount sampled points).
+ * Only counts points sitting inside a locally uniform region: a point is kept solely when its 8 neighbors
+ * (radius r) share its 5-bit-quantized color. That structurally excludes chrome that isn't a cell fill —
+ * thin borders, glyph text, and anti-aliased cell edges are never locally flat — so the count reflects fill
+ * colors alone. Counting the whole canvas instead is version-fragile: theme border/label colors differ per
+ * Grafana version and leak into a naive dominant-color tally (observed on grafana-enterprise 13.1).
+ */
+async function cellFillColorCount(canvas: Locator, minCount: number): Promise<number> {
   return canvas.evaluate((el, min) => {
     const c = el as HTMLCanvasElement;
     const ctx = c.getContext('2d');
     if (!ctx) {
       return 0;
     }
-    const data = ctx.getImageData(0, 0, c.width, c.height).data;
-    const counts: Record<string, number> = {};
-    for (let i = 0; i < data.length; i += 4 * 5) {
-      if (data[i + 3] < 200) {
-        continue;
+    const w = c.width;
+    const h = c.height;
+    const img = ctx.getImageData(0, 0, w, h).data;
+    const quant = (x: number, y: number): string | null => {
+      const p = (y * w + x) * 4;
+      if (img[p + 3] < 200) {
+        return null; // transparent background (canvas is cleared, not filled)
       }
-      const key = `${data[i] >> 3},${data[i + 1] >> 3},${data[i + 2] >> 3}`;
-      counts[key] = (counts[key] ?? 0) + 1;
+      return `${img[p] >> 3},${img[p + 1] >> 3},${img[p + 2] >> 3}`;
+    };
+    const counts: Record<string, number> = {};
+    const step = 6;
+    const r = 3; // neighborhood radius (px); cells are far larger than 2r, borders/glyphs are not
+    for (let y = r; y < h - r; y += step) {
+      for (let x = r; x < w - r; x += step) {
+        const center = quant(x, y);
+        if (center === null) {
+          continue;
+        }
+        if (
+          quant(x - r, y) === center &&
+          quant(x + r, y) === center &&
+          quant(x, y - r) === center &&
+          quant(x, y + r) === center &&
+          quant(x - r, y - r) === center &&
+          quant(x + r, y + r) === center &&
+          quant(x + r, y - r) === center &&
+          quant(x - r, y + r) === center
+        ) {
+          counts[center] = (counts[center] ?? 0) + 1;
+        }
+      }
     }
     return Object.values(counts).filter((n) => n >= min).length;
   }, minCount);
@@ -276,8 +307,8 @@ test('threshold color mode renders discrete colors', async ({ gotoDashboardPage,
   const mainCanvas = main.locator.locator('canvas');
   await expect(mainCanvas).toBeVisible();
   // To avoid capturing 0 colors on a slow environment, wait for rendering to complete (continuous coloring = many colors) before taking the final value
-  await expect.poll(() => dominantColorCount(mainCanvas, 15)).toBeGreaterThan(4);
-  const continuousColors = await dominantColorCount(mainCanvas, 15);
+  await expect.poll(() => cellFillColorCount(mainCanvas, 15)).toBeGreaterThan(4);
+  const continuousColors = await cellFillColorCount(mainCanvas, 15);
 
   const threshold = await dashboardPage.getPanelByTitle('Threshold Mode');
   await threshold.scrollIntoView();
@@ -285,8 +316,8 @@ test('threshold color mode renders discrete colors', async ({ gotoDashboardPage,
   await expect(canvas).toBeVisible();
   await expect.poll(() => isPainted(canvas)).toBe(true);
   // 12 distinct values collapse into 3 threshold bands (discrete). Wait for rendering to complete before taking the final value.
-  await expect.poll(() => dominantColorCount(canvas, 15)).toBeGreaterThanOrEqual(2);
-  const thresholdColors = await dominantColorCount(canvas, 15);
+  await expect.poll(() => cellFillColorCount(canvas, 15)).toBeGreaterThanOrEqual(2);
+  const thresholdColors = await cellFillColorCount(canvas, 15);
 
   // Discrete coloring is always fewer than continuous coloring, converging to around the band count (3).
   expect(thresholdColors).toBeLessThanOrEqual(4);
@@ -321,10 +352,13 @@ test('query-A cell navigates via its per-query data-link override', async ({
   const cellY = await findCellY(canvas, panel.locator, 22);
   const page = canvas.page();
   await Promise.all([
-    page.waitForURL(/from=celllink/, { timeout: 15000 }),
+    page.waitForURL(/drilldown=celllink/, { timeout: 15000 }),
     canvas.click({ position: { x: 22, y: cellY } }),
   ]);
-  expect(page.url()).toContain('from=celllink');
+  // Assert the marker persists (not just briefly present): `drilldown` is a non-reserved query param, so
+  // Grafana's dashboard URL reconcile leaves it intact. A reserved time param like `from` would be
+  // overwritten by the time-range sync (invalid value -> default) on some versions (e.g. 12.0.x).
+  expect(page.url()).toContain('drilldown=celllink');
 });
 
 test('query-B cell has no link and opens the popover instead of navigating', async ({
@@ -350,5 +384,5 @@ test('query-B cell has no link and opens the popover instead of navigating', asy
   await expect(panel.locator.getByRole('button', { name: 'Close' })).toBeVisible();
   // No navigation occurred (URL unchanged, no link query)
   expect(page.url()).toBe(urlBefore);
-  expect(page.url()).not.toContain('from=celllink');
+  expect(page.url()).not.toContain('drilldown=celllink');
 });
