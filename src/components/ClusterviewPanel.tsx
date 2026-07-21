@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { DataFrame, Field, LinkModel, PanelProps } from '@grafana/data';
 import { PanelDataErrorView } from '@grafana/runtime';
 import { RadioButtonGroup, useTheme2 } from '@grafana/ui';
@@ -13,7 +13,7 @@ import { fetchDrilldownFrames } from '../drilldown/requery';
 import { CellTooltip } from './CellTooltip';
 import { DrilldownPopover } from './DrilldownPopover';
 import { SplitLegend } from './SplitLegend';
-import { placeOverlay } from './overlay';
+import { placeOverlay, VisibleBounds } from './overlay';
 
 // Header height fallback for when showHeader is on (the actual height is measured after layout and overwrites this)
 const HEADER_H = 32;
@@ -25,34 +25,44 @@ const LINK_MENU_ROW_H = 28;
 const LINK_MENU_PAD = 4;
 const LINK_MENU_BORDER = 1;
 
+const measureVisibleBounds = (el: HTMLElement): VisibleBounds => {
+  const minX = el.scrollLeft;
+  const minY = el.scrollTop;
+  return { minX, minY, maxX: minX + el.clientWidth, maxY: minY + el.clientHeight };
+};
+
+const sameVisibleBounds = (a: VisibleBounds, b: VisibleBounds): boolean =>
+  a.minX === b.minX && a.minY === b.minY && a.maxX === b.maxX && a.maxY === b.maxY;
+
 export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props) => {
   const { data, width, height, options, timeZone } = props;
   const theme = useTheme2();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
+  const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null);
+  const setScrollRef = useCallback((element: HTMLDivElement | null) => {
+    setScrollElement((current) => (current === element ? current : element));
+  }, []);
   const [scrollTop, setScrollTop] = useState(0);
   const [selected, setSelected] = useState<string | undefined>(options.defaultMetric || undefined);
   const [hover, setHover] = useState<{ cell: CellModel; x: number; y: number } | null>(null);
-  // Popover/link menu positions are kept in content coordinates (x/y) so they follow scrolling.
-  // min/max are the top-left/bottom-right corners of the visible area (content coordinates) at click time, used to clamp both ends of the flipped placement.
+  // Popover/link menu origins are kept in content coordinates. Visible bounds are measured separately so an open overlay follows panel resizes.
   const [popover, setPopover] = useState<{
     cell: CellModel;
     x: number;
     y: number;
-    minX: number;
-    minY: number;
-    maxX: number;
-    maxY: number;
   } | null>(null);
   const [linkMenu, setLinkMenu] = useState<{
     links: Array<LinkModel<Field>>;
     x: number;
     y: number;
-    minX: number;
-    minY: number;
-    maxX: number;
-    maxY: number;
   } | null>(null);
+  const [visibleBounds, setVisibleBounds] = useState<VisibleBounds>({ minX: 0, minY: 0, maxX: 0, maxY: 0 });
+  const updateVisibleBounds = useCallback((el: HTMLElement) => {
+    const measured = measureVisibleBounds(el);
+    setVisibleBounds((current) => (sameVisibleBounds(current, measured) ? current : measured));
+    return measured;
+  }, []);
   // Range frames fetched on demand for drilldown during instant queries (cached per panel)
   const [drillFrames, setDrillFrames] = useState<DataFrame[] | null>(null);
   const [drillLoading, setDrillLoading] = useState(false);
@@ -96,6 +106,20 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
   // If there's a warning (e.g. partial exclusion), also subtract the banner height
   const warnH = model.warnings.length > 0 ? WARN_H : 0;
   const bodyH = height - headerH - warnH;
+
+  useLayoutEffect(() => {
+    if (!scrollElement) {
+      return undefined;
+    }
+    const measure = () => updateVisibleBounds(scrollElement);
+    measure();
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(measure);
+      observer.observe(scrollElement);
+      return () => observer.disconnect();
+    }
+    return undefined;
+  }, [scrollElement, width, bodyH, updateVisibleBounds]);
 
   const layout = useMemo(
     () => computeLayout(model.root, options.levels, width, bodyH),
@@ -278,6 +302,7 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
         </div>
       )}
       <div
+        ref={setScrollRef}
         style={{
           width,
           height: bodyH,
@@ -338,21 +363,17 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
             followLink(links[0], e);
             return;
           }
-          // The visible range is the scroll amount + the actual visible inner size (clientWidth/clientHeight).
-          // Use the real DOM inner size (excluding scrollbar space) rather than width/bodyH, so the overlay's bottom-right edge matches reality.
-          const minX = e.currentTarget.scrollLeft;
-          const minY = e.currentTarget.scrollTop;
-          const maxX = minX + e.currentTarget.clientWidth;
-          const maxY = minY + e.currentTarget.clientHeight;
+          // Measure now for immediate first placement; subsequent commits and ResizeObserver callbacks keep these shared bounds current.
+          updateVisibleBounds(e.currentTarget);
           if (links.length > 1) {
             // Show a selection menu for multiple links (clamped to the same visible range as the popover)
-            setLinkMenu({ links, x: cx, y: cy, minX, minY, maxX, maxY });
+            setLinkMenu({ links, x: cx, y: cy });
             setPopover(null);
             return;
           }
           // If there are no links, show a popover with a sparkline from the range data on hand
           setLinkMenu(null);
-          setPopover({ cell: hit.cell, x: cx, y: cy, minX, minY, maxX, maxY });
+          setPopover({ cell: hit.cell, x: cx, y: cy });
         }}
       >
         <canvas ref={canvasRef} />
@@ -384,10 +405,10 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
             error={drillError}
             x={popover.x}
             y={popover.y}
-            minX={popover.minX}
-            minY={popover.minY}
-            maxX={popover.maxX}
-            maxY={popover.maxY}
+            minX={visibleBounds.minX}
+            minY={visibleBounds.minY}
+            maxX={visibleBounds.maxX}
+            maxY={visibleBounds.maxY}
             onClose={() => setPopover(null)}
           />
         )}
@@ -396,15 +417,15 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
             // Deterministically compute the menu height assuming border-box (fixing row height, padding, and border).
             const contentH = linkMenu.links.length * LINK_MENU_ROW_H + LINK_MENU_PAD * 2 + LINK_MENU_BORDER * 2;
             // Clamp a menu taller than the visible range to the visible height, and make all links reachable via internal scroll.
-            const availH = Math.max(0, linkMenu.maxY - linkMenu.minY);
+            const availH = Math.max(0, visibleBounds.maxY - visibleBounds.minY);
             const menuH = Math.min(contentH, availH);
-            const availableWidth = Math.max(0, linkMenu.maxX - linkMenu.minX);
+            const availableWidth = Math.max(0, visibleBounds.maxX - visibleBounds.minX);
             const menuW = Math.min(LINK_MENU_W, availableWidth);
             const fitsHorizontalChrome = menuW >= (LINK_MENU_PAD + LINK_MENU_BORDER) * 2;
             const horizontalBorder = fitsHorizontalChrome ? LINK_MENU_BORDER : 0;
             const horizontalPadding = fitsHorizontalChrome ? LINK_MENU_PAD : 0;
             // Prevent right/bottom overflow with the same flip + visible-range clamp as the popover
-            const { left, top } = placeOverlay(linkMenu.x, linkMenu.y, menuW, menuH, linkMenu);
+            const { left, top } = placeOverlay(linkMenu.x, linkMenu.y, menuW, menuH, visibleBounds);
             return (
               <div
                 role="menu"

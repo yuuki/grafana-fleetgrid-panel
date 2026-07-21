@@ -21,7 +21,7 @@ export interface DrilldownPopoverProps {
   error?: boolean;
   x: number;
   y: number;
-  /** The visible range at click time (content coordinates). Used to clamp the flipped placement to both ends of the visible range */
+  /** The current visible range in content coordinates. Used to clamp the flipped placement to both ends of the visible range */
   minX: number;
   minY: number;
   maxX: number;
@@ -31,9 +31,15 @@ export interface DrilldownPopoverProps {
 
 export const DrilldownPopover: React.FC<DrilldownPopoverProps> = (props) => {
   const theme = useTheme2();
-  const h = 40 + props.metricInfos.length * ROW_H;
+  const contentH = 40 + props.metricInfos.length * ROW_H;
+  const availableH = Math.max(0, props.maxY - props.minY);
+  const popoverH = Math.min(contentH, availableH);
+  // Fractional borders may round up per edge, so omit chrome until its full integer height fits.
+  const hasChrome = popoverH >= (8 + 1) * 2;
+  const borderWidth = hasChrome ? 1 : 0;
+  const padding = hasChrome ? 8 : 0;
   // Flip-place near the open side of the cell, clamped to both ends of the visible range (min..max)
-  const { left, top } = placeOverlay(props.x, props.y, W, h, props);
+  const { left, top } = placeOverlay(props.x, props.y, W, popoverH, props);
 
   return (
     <div
@@ -43,11 +49,14 @@ export const DrilldownPopover: React.FC<DrilldownPopoverProps> = (props) => {
         left,
         top,
         width: W,
+        maxHeight: `${popoverH}px`,
+        overflowY: contentH > popoverH ? 'auto' : undefined,
+        boxSizing: 'border-box',
         zIndex: 20,
-        padding: 8,
+        padding: `${padding}px`,
         borderRadius: 4,
         background: theme.colors.background.elevated ?? theme.colors.background.secondary,
-        border: `1px solid ${theme.colors.border.medium}`,
+        border: `${borderWidth}px solid ${theme.colors.border.medium}`,
         boxShadow: theme.shadows.z3,
       }}
       onClick={(e) => e.stopPropagation()}

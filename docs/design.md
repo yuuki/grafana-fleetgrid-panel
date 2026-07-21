@@ -117,6 +117,9 @@ Cell value text is drawn only when it fits: font size `clamp(cellHeight × 0.38,
 
 Hit testing maps content coordinates (including `scrollLeft`/`scrollTop`) to a cell by linear scan over the laid-out rectangles; the tooltip shows the hierarchy path and every metric's formatted value (`formattedValueToString`), listing zero-series refIds with a missing indication.
 
+**Decision: use Grafana theme tokens for the tooltip surface, text, border, and shadow.**
+*Rationale:* the tooltip is a panel overlay, so fixed dark colors would become unreadable or visually inconsistent in light themes. Standard theme tokens keep it aligned with the rest of the panel without changing its content or interaction behavior.
+
 **Decision: linear-scan hit test, no spatial index.**
 *Rationale:* at thousands of cells a linear scan costs microseconds per mouse event; an R-tree or grid index would be premature complexity. This was proposed in external review and consciously declined.
 
@@ -128,7 +131,10 @@ Hit testing maps content coordinates (including `scrollLeft`/`scrollTop`) to a c
 **Decision: prefer a 240 px link-menu width, shrinking to the current visible width when necessary.**
 *Rationale:* a fixed menu clips in narrow panels. Placement and the rendered border box share the same width, while tiny widths omit horizontal chrome whose device-pixel rounding could otherwise exceed the visible bounds.
 
-Without links, a click opens the **drilldown popover**: per-metric sparklines built from the time-series data already at hand, the current value, and the series count. When one cell aggregates several series and their timestamps align, the sparkline aggregates **per timestamp with the same spatial aggregation as the cell value** (missing samples excluded; all-missing timestamps become `null`), so the sparkline is the time-resolved version of the number the user clicked. If timestamps do not align, the popover falls back to the first series and says so explicitly instead of mislabeling it as an aggregate. The popover flips and clamps within the visible scroll area and closes on Esc, outside pointer-down, or scroll.
+Without links, a click opens the **drilldown popover**: per-metric sparklines built from the time-series data already at hand, the current value, and the series count. When one cell aggregates several series and their timestamps align, the sparkline aggregates **per timestamp with the same spatial aggregation as the cell value** (missing samples excluded; all-missing timestamps become `null`), so the sparkline is the time-resolved version of the number the user clicked. If timestamps do not align, the popover falls back to the first series and says so explicitly instead of mislabeling it as an aggregate. The popover flips and clamps within the visible scroll area and closes on Esc, outside pointer-down, or scroll. Both click overlays retain their content-coordinate origin while open, but use visible bounds measured from the current scroll container: the click path measures immediately, and panel resize commits remeasure after DOM layout so an open overlay is repositioned rather than closed or left outside the viewport.
+
+**Decision: cap the drilldown popover's rendered outer height to the visible panel height and enable internal vertical scrolling only when its content is taller.**
+*Rationale:* placement must use the same capped height as the rendered border box so the bottom edge remains in bounds, while normal-height content should not gain an unnecessary scroll container. Padding and borders are included in that outer height.
 
 ### Instant queries: on-demand range requery
 
@@ -180,7 +186,4 @@ Deliberately not implemented (YAGNI, confirmed during design): Conditions-style 
 
 ## 14. Known limitations / future work
 
-- Tooltip colors are fixed dark values (readable, but not theme-following); the link menu already follows the theme.
-- The drilldown popover clamps its position but has no internal scrolling if its content exceeds the panel height.
 - Verification against a live Prometheus/VictoriaMetrics (including instant→range requery behavior) is still outstanding; README states this.
-- Overlay positions are computed at click time and are not recomputed if the panel is resized while an overlay is open (scrolling closes overlays, which covers the common case).
