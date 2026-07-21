@@ -136,7 +136,37 @@ describe('DrilldownPopover', () => {
     expect(parseFloat(popover.style.top) + availableH).toBeLessThanOrEqual(shortBounds.maxY);
   });
 
-  it('collapses safely when the visible height is zero', () => {
+  it.each([0, 1, 17])('removes chrome when the visible height is %dpx', (availableH) => {
+    const infos = buildMetricInfos([rangeFrame], theme, 'browser');
+    const minY = 100;
+    const maxY = minY + availableH;
+    render(
+      <DrilldownPopover
+        cell={cell}
+        metricInfos={infos}
+        seriesFor={() => ({ frame: rangeFrame, seriesCount: 1, aggregated: false })}
+        loading={false}
+        x={0}
+        y={maxY}
+        minX={0}
+        minY={minY}
+        maxX={800}
+        maxY={maxY}
+        onClose={() => {}}
+      />
+    );
+
+    const popover = screen.getByText('zone-a').parentElement!.parentElement as HTMLElement;
+    const top = parseFloat(popover.style.top);
+    const outerHeight = parseFloat(popover.style.maxHeight);
+    expect(popover.style.maxHeight).toBe(`${availableH}px`);
+    expect(popover.style.padding).toBe('0px');
+    expect(popover.style.borderWidth).toBe('0px');
+    expect(top).toBeGreaterThanOrEqual(minY);
+    expect(top + outerHeight).toBeLessThanOrEqual(maxY);
+  });
+
+  it('restores normal chrome at an 18px visible height', () => {
     const infos = buildMetricInfos([rangeFrame], theme, 'browser');
     render(
       <DrilldownPopover
@@ -145,18 +175,17 @@ describe('DrilldownPopover', () => {
         seriesFor={() => ({ frame: rangeFrame, seriesCount: 1, aggregated: false })}
         loading={false}
         x={0}
-        y={100}
+        y={118}
         minX={0}
         minY={100}
         maxX={800}
-        maxY={100}
+        maxY={118}
         onClose={() => {}}
       />
     );
 
     const popover = screen.getByText('zone-a').parentElement!.parentElement as HTMLElement;
-    expect(popover.style.maxHeight).toBe('0px');
-    expect(popover.style.padding).toBe('0px');
-    expect(popover.style.borderWidth).toBe('0px');
+    expect(popover.style.padding).toBe('8px');
+    expect(popover.style.borderWidth).toBe('1px');
   });
 });
