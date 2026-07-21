@@ -12,6 +12,7 @@ import { drilldownSeries, getCellLinks } from '../drilldown/series';
 import { fetchDrilldownFrames } from '../drilldown/requery';
 import { CellTooltip } from './CellTooltip';
 import { DrilldownPopover } from './DrilldownPopover';
+import { RangeLegend } from './RangeLegend';
 import { SplitLegend } from './SplitLegend';
 import { placeOverlay, VisibleBounds } from './overlay';
 
@@ -84,8 +85,8 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
   const displayMode = options.displayMode ?? 'single';
   // Align the split determination with renderer (draws zones when metricInfos>0). A refId with 0 series has no MetricInfo and is excluded from zones/legend
   const isSplit = displayMode === 'split' && model.metricInfos.length > 0;
-  // Always show the header when there are multiple queries; put the legend in split mode and the metric selector in single mode
-  const showHeader = model.refIds.length > 1;
+  // The range is part of the panel's visual encoding, so reserve header space even when only one metric is available.
+  const showHeader = true;
   // Measure the actual header height and subtract it from the canvas area. Prevents overlap even when the legend wraps past 32px with many metrics.
   // In environments where measurement isn't possible (jsdom), fall back to HEADER_H. Track changes with ResizeObserver since wrapping changes with width.
   const [headerH, setHeaderH] = useState(0);
@@ -105,7 +106,7 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
   }, [showHeader, model, width]);
   // If there's a warning (e.g. partial exclusion), also subtract the banner height
   const warnH = model.warnings.length > 0 ? WARN_H : 0;
-  const bodyH = height - headerH - warnH;
+  const bodyH = Math.max(0, height - headerH - warnH);
 
   useLayoutEffect(() => {
     if (!scrollElement) {
@@ -127,6 +128,7 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
   );
 
   const selectedRefId = selected && model.refIds.includes(selected) ? selected : model.refIds[0] ?? 'A';
+  const selectedMetricInfo = model.metricInfos.find((info) => info.refId === selectedRefId);
 
   useEffect(() => {
     if (canvasRef.current) {
@@ -260,21 +262,29 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
   return (
     <div style={{ width, height, overflow: 'hidden' }}>
       {showHeader && (
-        <div ref={headerRef} style={{ minHeight: HEADER_H, display: 'flex', alignItems: 'center' }}>
+        <div
+          ref={headerRef}
+          style={{ minHeight: HEADER_H, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}
+        >
           {isSplit ? (
-            // In split mode, show the zone-position legend instead of the single-mode selector
+            // In split mode, each position entry carries its own metric range.
             <SplitLegend metricInfos={model.metricInfos} />
           ) : (
-            <RadioButtonGroup
-              size="sm"
-              // Choices are based on refId. A 0-series query has no metricInfo, so it falls back to using the refId as the display name
-              options={model.refIds.map((refId) => ({
-                value: refId,
-                label: model.metricInfos.find((m) => m.refId === refId)?.name ?? refId,
-              }))}
-              value={selectedRefId}
-              onChange={setSelected}
-            />
+            <>
+              {model.refIds.length > 1 && (
+                <RadioButtonGroup
+                  size="sm"
+                  // Choices are based on refId. A 0-series query has no metricInfo, so it falls back to using the refId as the display name
+                  options={model.refIds.map((refId) => ({
+                    value: refId,
+                    label: model.metricInfos.find((m) => m.refId === refId)?.name ?? refId,
+                  }))}
+                  value={selectedRefId}
+                  onChange={setSelected}
+                />
+              )}
+              <RangeLegend metricInfo={selectedMetricInfo} metricName={selectedRefId} width={width} />
+            </>
           )}
         </div>
       )}

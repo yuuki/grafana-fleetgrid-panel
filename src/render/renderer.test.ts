@@ -9,6 +9,10 @@ const theme = createTheme();
 const makeInfo = (refId: string, spy: jest.Mock): MetricInfo => ({
   refId,
   name: refId === 'A' ? 'power' : refId,
+  effectiveMin: 0,
+  effectiveMax: 1,
+  minConfigured: false,
+  maxConfigured: false,
   processor: spy as unknown as MetricInfo['processor'],
   field: {} as MetricInfo['field'],
   frame: {} as MetricInfo['frame'],

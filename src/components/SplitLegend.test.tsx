@@ -1,18 +1,23 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { createTheme, toDataFrame, FieldType } from '@grafana/data';
-import { buildMetricInfos } from '../data/display';
+import { buildMetricInfos, MetricInfo } from '../data/display';
 import { splitRects } from '../render/split';
 import { SplitLegend } from './SplitLegend';
 
 const theme = createTheme();
-const frame = (refId: string, name: string) =>
+let mockTheme = theme;
+jest.mock('@grafana/ui', () => ({
+  ...jest.requireActual('@grafana/ui'),
+  useTheme2: () => mockTheme,
+}));
+const frame = (refId: string, name: string, config = {}) =>
   toDataFrame({
     refId,
     name,
     fields: [
       { name: 'Time', type: FieldType.time, values: [1] },
-      { name: 'Value', type: FieldType.number, values: [1], labels: {} },
+      { name: 'Value', type: FieldType.number, values: [1], config, labels: {} },
     ],
   });
 
@@ -46,5 +51,41 @@ describe('SplitLegend', () => {
       expect(el.style.width).toBe(`${rects[i].w * 100}%`);
       expect(el.style.height).toBe(`${rects[i].h * 100}%`);
     });
+  });
+
+  it('shows each metric range and fixed state using its display formatting', () => {
+    const infos = buildMetricInfos(
+      [frame('A', 'power', { min: 0, max: 100, unit: 'percent', decimals: 1 }), frame('B', 'temp')],
+      theme,
+      'browser'
+    );
+    render(<SplitLegend metricInfos={infos} />);
+    expect(screen.getByText('Fixed')).toBeInTheDocument();
+    expect(screen.getByText('0.0%–100.0%')).toBeInTheDocument();
+    expect(screen.getByText('Auto')).toBeInTheDocument();
+  });
+
+  it.each(['light', 'dark'] as const)('uses Grafana %s theme tokens for range badges', (mode) => {
+    mockTheme = createTheme({ colors: { mode } } as any);
+    const infos = buildMetricInfos([frame('A', 'power', { min: 0, max: 100 })], mockTheme, 'browser');
+    render(<SplitLegend metricInfos={infos} />);
+    const badge = screen.getByTestId('split-range-badge-A');
+    expect(badge).toHaveStyle({
+      color: mockTheme.colors.text.primary,
+      background: mockTheme.colors.background.secondary,
+      border: `1px solid ${mockTheme.colors.border.medium}`,
+    });
+    expect(within(badge).getByText('Fixed')).toHaveStyle({ color: mockTheme.colors.text.secondary });
+  });
+
+  it('does not process endpoints again when rerendered with the same metricInfos reference', () => {
+    const infos = buildMetricInfos([frame('A', 'power', { min: 0, max: 100 })], theme, 'browser');
+    infos[0].processor = jest.fn(infos[0].processor) as MetricInfo['processor'];
+    const { rerender } = render(<SplitLegend metricInfos={infos} />);
+    const callsAfterFirstRender = (infos[0].processor as jest.Mock).mock.calls.length;
+
+    rerender(<SplitLegend metricInfos={infos} />);
+
+    expect((infos[0].processor as jest.Mock).mock.calls).toHaveLength(callsAfterFirstRender);
   });
 });
