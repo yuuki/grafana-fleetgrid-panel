@@ -1,6 +1,6 @@
 {
   "name": "clusterview",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "scripts": {
     "build": "webpack -c ./.config/webpack/webpack.config.ts --env production",
     "deploy:grafana:ssh": "bash scripts/deploy-plugin-ssh.sh",
