@@ -245,6 +245,52 @@ describe('ClusterviewPanel', () => {
     expect(parseFloat(menu.style.left) + 240).toBeLessThanOrEqual(300);
   });
 
+  it('observes a replacement scroll container after an early return', () => {
+    const originalResizeObserver = global.ResizeObserver;
+    const observers: MockResizeObserver[] = [];
+    class MockResizeObserver {
+      observe = jest.fn();
+      unobserve = jest.fn();
+      disconnect = jest.fn();
+
+      constructor(readonly callback: ResizeObserverCallback) {
+        observers.push(this);
+      }
+    }
+    global.ResizeObserver = MockResizeObserver as unknown as typeof ResizeObserver;
+
+    try {
+      const frames = clickable();
+      frames[1].fields[1].getLinks = linksOf(2);
+      const props = makeProps(frames);
+      const { rerender } = render(<ClusterviewPanel {...props} />);
+      const oldContainer = containerOf();
+      setBox(oldContainer, { cw: 400, ch: 300 });
+
+      rerender(<ClusterviewPanel {...makeProps([])} />);
+      rerender(<ClusterviewPanel {...props} />);
+      const newContainer = containerOf();
+      expect(newContainer).not.toBe(oldContainer);
+      setBox(newContainer, { cw: 400, ch: 300 });
+      fireEvent.click(newContainer, { clientX: 60, clientY: 5 });
+      const menu = screen.getByRole('menu');
+      expect(parseFloat(menu.style.left)).toBe(68);
+
+      setBox(newContainer, { cw: 300, ch: 180 });
+      act(() => {
+        observers.forEach((observer) => observer.callback([], observer as unknown as ResizeObserver));
+      });
+
+      expect(parseFloat(menu.style.left)).toBeLessThan(68);
+      expect(parseFloat(menu.style.left) + 240).toBeLessThanOrEqual(300);
+      expect(observers).toHaveLength(2);
+      expect(observers[0].disconnect).toHaveBeenCalled();
+      expect(observers[1].observe).toHaveBeenCalledWith(newContainer);
+    } finally {
+      global.ResizeObserver = originalResizeObserver;
+    }
+  });
+
   it('caps a tall link menu to the visible height and enables internal scroll', () => {
     const frames = clickable();
     frames[0].fields[1].getLinks = linksOf(12); // A tall menu

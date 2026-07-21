@@ -39,7 +39,10 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
   const theme = useTheme2();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null);
+  const setScrollRef = useCallback((element: HTMLDivElement | null) => {
+    setScrollElement((current) => (current === element ? current : element));
+  }, []);
   const [scrollTop, setScrollTop] = useState(0);
   const [selected, setSelected] = useState<string | undefined>(options.defaultMetric || undefined);
   const [hover, setHover] = useState<{ cell: CellModel; x: number; y: number } | null>(null);
@@ -105,18 +108,18 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
   const bodyH = height - headerH - warnH;
 
   useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (!el) {
+    if (!scrollElement) {
       return undefined;
     }
-    updateVisibleBounds(el);
+    const measure = () => updateVisibleBounds(scrollElement);
+    measure();
     if (typeof ResizeObserver !== 'undefined') {
-      const observer = new ResizeObserver(() => updateVisibleBounds(el));
-      observer.observe(el);
+      const observer = new ResizeObserver(measure);
+      observer.observe(scrollElement);
       return () => observer.disconnect();
     }
     return undefined;
-  }, [width, bodyH, updateVisibleBounds]);
+  }, [scrollElement, width, bodyH, updateVisibleBounds]);
 
   const layout = useMemo(
     () => computeLayout(model.root, options.levels, width, bodyH),
@@ -299,7 +302,7 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
         </div>
       )}
       <div
-        ref={scrollRef}
+        ref={setScrollRef}
         style={{
           width,
           height: bodyH,
