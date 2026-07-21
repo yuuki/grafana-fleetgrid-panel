@@ -121,7 +121,9 @@ export const RangeLegend: React.FC<{ metricInfo?: MetricInfo; metricName?: strin
         fontSize: 11,
       }}
     >
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{metricInfo.name}</span>
+      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {metricInfo.name}
+      </span>
       {isConfigured && <span aria-hidden>🔒</span>}
       <span style={{ color: theme.colors.text.secondary, whiteSpace: 'nowrap' }}>{state}</span>
       <span style={{ whiteSpace: 'nowrap' }}>{min}</span>

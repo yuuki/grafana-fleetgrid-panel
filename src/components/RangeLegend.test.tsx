@@ -47,6 +47,19 @@ describe('RangeLegend', () => {
     expect(gradient.match(/rgb\(/g)).toHaveLength(33);
   });
 
+  it('allows a long metric name to shrink and ellipsize in the full-width flex row', () => {
+    const info = metricInfo(true, true);
+    info.name = 'A very long metric name that must not expand the range legend';
+    render(<RangeLegend metricInfo={info} width={480} />);
+
+    expect(screen.getByText(info.name)).toHaveStyle({
+      minWidth: 0,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+    });
+  });
+
   it('renders a compact accessible badge below 480px', () => {
     render(<RangeLegend metricInfo={metricInfo(true, false)} width={479} />);
     expect(screen.getByLabelText('GPU Utilization range, Min fixed, 0.0% to 100.0%')).toHaveTextContent('0.0%–100.0%');
