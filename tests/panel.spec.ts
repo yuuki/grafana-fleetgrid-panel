@@ -125,7 +125,21 @@ const PATH_RE = /(zone-[a-z0-9]+)\s*\/\s*(node-[a-z0-9]+)\s*\/\s*(gpu\d+)/i;
  */
 async function readPath(canvas: Locator, panel: Locator, x: number, y: number): Promise<CellPath | null> {
   await canvas.hover({ position: { x, y } });
-  // Right after hover, the previous cell's tooltip may still linger. Wait one frame before reading the content (prevents misreading the old tooltip).
+  return readCurrentPath(canvas, panel);
+}
+
+/** Reads a path for structural layout probing even when Grafana's sticky navigation overlaps the canvas point. */
+async function probePath(canvas: Locator, panel: Locator, x: number, y: number): Promise<CellPath | null> {
+  const box = await canvas.boundingBox();
+  if (!box) {
+    return null;
+  }
+  await canvas.dispatchEvent('mousemove', { clientX: box.x + x, clientY: box.y + y });
+  return readCurrentPath(canvas, panel);
+}
+
+async function readCurrentPath(canvas: Locator, panel: Locator): Promise<CellPath | null> {
+  // Right after a pointer event, the previous cell's tooltip may still linger. Wait one frame before reading the content (prevents misreading the old tooltip).
   await canvas.page().evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => r())));
   const deadline = Date.now() + 300;
   do {
@@ -206,7 +220,7 @@ test('hover tooltip lists every metric with its configured unit', async ({
   expect(hit.text).toContain('°C');
 });
 
-test('hosts are ordered by natural sort (a2 before a9, a10 wraps to next row)', async ({
+test('renders the provisioned 2 / 8 / 2 grid in row-major order', async ({
   gotoDashboardPage,
   readProvisionedDashboard,
 }) => {
@@ -223,7 +237,7 @@ test('hosts are ordered by natural sort (a2 before a9, a10 wraps to next row)', 
   // Identify the y of zone-a's first cell row
   let rowY: number | null = null;
   for (let y = 40; y <= 140 && rowY === null; y += 5) {
-    const p = await readPath(canvas, panel.locator, 25, y);
+    const p = await probePath(canvas, panel.locator, 25, y);
     if (p?.zone === 'zone-a') {
       rowY = y;
     }
@@ -232,30 +246,32 @@ test('hosts are ordered by natural sort (a2 before a9, a10 wraps to next row)', 
     throw new Error('could not locate the first cell row of zone-a');
   }
 
-  // Scan that row left to right and collect the appearance order of hosts
+  // Scan the first row left to right and collect each cell path once.
   const order: string[] = [];
-  for (let x = 4; x <= box.width; x += 10) {
-    const p = await readPath(canvas, panel.locator, x, rowY);
-    if (p?.zone === 'zone-a' && order[order.length - 1] !== p.host) {
-      order.push(p.host);
+  for (let x = 2; x <= box.width; x += 5) {
+    const p = await probePath(canvas, panel.locator, x, rowY);
+    const key = p && `${p.zone}/${p.host}/${p.gpu}`;
+    if (key && order[order.length - 1] !== key) {
+      order.push(key);
     }
   }
-  // Row 1 of a 3-column grid = natural sort order. Lexicographic order would give [node-a1, node-a10, node-a2].
-  expect(order.slice(0, 3)).toEqual(['node-a1', 'node-a2', 'node-a9']);
-  expect(order).not.toContain('node-a10');
 
-  // node-a10 is on the next grid row (col0, directly below node-a1). Confirms it isn't missing or dropped.
-  let a10Y: number | null = null;
-  for (let y = rowY + 20; y <= rowY + 140 && a10Y === null; y += 5) {
-    const p = await readPath(canvas, panel.locator, 25, y);
-    if (p?.host === 'node-a10') {
-      a10Y = y;
+  const zoneAFirstRow = Array.from({ length: 8 }, (_, host) =>
+    ['gpu0', 'gpu1'].map((gpu) => `zone-a/node-a${host + 1}/${gpu}`)
+  ).flat();
+  expect(order.slice(0, zoneAFirstRow.length)).toEqual(zoneAFirstRow);
+  expect(order).toContain('zone-b/node-b1/gpu0');
+  expect(order).not.toContain('zone-a/node-a9/gpu0');
+
+  // Eight host columns force node-a9 onto the next host row.
+  let secondRow: CellPath | null = null;
+  for (let y = rowY + 5; y <= 220 && secondRow === null; y += 5) {
+    const p = await probePath(canvas, panel.locator, 25, y);
+    if (p?.host === 'node-a9') {
+      secondRow = p;
     }
   }
-  if (a10Y === null) {
-    throw new Error('node-a10 was not found on the row below the first');
-  }
-  expect(a10Y).toBeGreaterThan(rowY);
+  expect(secondRow).toMatchObject({ zone: 'zone-a', host: 'node-a9' });
 });
 
 test('clicking a cell opens the drilldown popover', async ({ gotoDashboardPage, readProvisionedDashboard }) => {
@@ -307,8 +323,9 @@ test('threshold color mode renders discrete colors', async ({ gotoDashboardPage,
   const mainCanvas = main.locator.locator('canvas');
   await expect(mainCanvas).toBeVisible();
   // To avoid capturing 0 colors on a slow environment, wait for rendering to complete (continuous coloring = many colors) before taking the final value
-  await expect.poll(() => cellFillColorCount(mainCanvas, 15)).toBeGreaterThan(4);
-  const continuousColors = await cellFillColorCount(mainCanvas, 15);
+  // Continuous colors are mostly unique per cell, so count each locally uniform color once; threshold bands repeat across many cells below.
+  await expect.poll(() => cellFillColorCount(mainCanvas, 1)).toBeGreaterThan(4);
+  const continuousColors = await cellFillColorCount(mainCanvas, 1);
 
   const threshold = await dashboardPage.getPanelByTitle('Threshold Mode');
   await threshold.scrollIntoView();

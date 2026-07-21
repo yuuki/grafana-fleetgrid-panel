@@ -53,6 +53,13 @@ interface Size {
   h: number;
 }
 
+export function normalizeGridColumns(value: number | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 1) {
+    return 1;
+  }
+  return Math.floor(value);
+}
+
 export function computeLayout(
   root: HierarchyNode,
   levels: LevelDef[],
@@ -166,7 +173,7 @@ function layoutNode(
       return { w: maxW, h: cy + rowH };
     }
     case 'grid': {
-      const cols = Math.max(1, childDef.gridColumns ?? 1);
+      const cols = normalizeGridColumns(childDef.gridColumns);
       let cellW = 0;
       let cellH = 0;
       for (const c of node.children) {

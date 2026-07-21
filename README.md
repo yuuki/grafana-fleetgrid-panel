@@ -45,11 +45,11 @@ Open the panel editor and add hierarchy levels under **Hierarchy**. The editor l
 
 | Level | Label | Extract | Layout |
 | --- | --- | --- | --- |
-| 1 | `zone` | As is | Stack |
-| 2 | `host` | Trailing number | Grid (columns: 20) |
+| 1 | `zone` | As is | Grid (columns: 2) |
+| 2 | `host` | Trailing number | Grid (columns: 8) |
 | 3 | `gpu` | As is | Grid (columns: 2) |
 
-Levels are reorderable and there is no fixed depth limit (about 8 levels is a practical maximum).
+This `2 / 8 / 2` configuration reproduces a two-column top level, eight hosts per row within each top-level group, and two GPUs per row within each host. Levels are reorderable and there is no fixed depth limit (about 8 levels is a practical maximum).
 
 ### 3. Choose a color scheme
 
@@ -108,6 +108,8 @@ Clicking a cell resolves in this order:
 **Instant query note** — When **any** of the panel's queries is instant (no time series in the received frames), clicking re-runs **all** of the panel's queries as range over the dashboard time range via the data source — a query configured as `format: table` is re-issued as `time_series` to request a time series, though whether a matching series actually comes back depends on the query and data source — capped at ~100 data points, then extracts the series matching the clicked cell. The result is cached per panel, so opening additional cells does not trigger another fetch. A failed re-query shows a short message in the popover; that error state is cleared only when the panel's query `requestId` changes (for example on the next dashboard refresh), which is what allows a retry. When the panel already runs range queries, no re-query happens. If re-querying feels slow at your scale, switch to range queries to remove it entirely. This instant-query drilldown path has not yet been verified against a live Prometheus / VictoriaMetrics data source.
 
 ## Layout notes
+
+Grid layouts fill groups in row-major order within each parent: with two columns, items `0` and `1` occupy the first row, followed by `2` and `3` on the next row. Configure each hierarchy level independently; for example, the Quick start's `2 / 8 / 2` column counts produce the fixed nested layout described above.
 
 Cell size is auto-fitted between **6 px** and **40 px** by scanning candidate sizes from large to small and taking the largest that fits the panel. If even 6 px cells do not fit, the size is pinned to 6 px. The panel then scrolls **vertically** when the content is taller than the panel and **horizontally** when it is wider. While scrolling vertically, the current top-most level's group label stays pinned to the top — but only when that top level has its **Group label** enabled, since otherwise there is no label to pin.
 
