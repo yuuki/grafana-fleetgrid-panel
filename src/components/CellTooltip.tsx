@@ -1,5 +1,6 @@
 import React from 'react';
 import { formattedValueToString } from '@grafana/data';
+import { useTheme2 } from '@grafana/ui';
 import { CellModel } from '../types';
 import { MetricInfo } from '../data/display';
 
@@ -12,6 +13,7 @@ export interface CellTooltipProps {
 }
 
 export const CellTooltip: React.FC<CellTooltipProps> = ({ cell, metricInfos, missingColor, x, y }) => {
+  const theme = useTheme2();
   const infoByRef = new Map(metricInfos.map((info) => [info.refId, info]));
   // Adaptation: since choices are based on model.refIds, a refId with 0 series has no MetricInfo.
   // Prioritize metricInfos order, while also listing refIds that exist only in cell.values (0 series) at the end and showing them as missing.
@@ -29,8 +31,10 @@ export const CellTooltip: React.FC<CellTooltipProps> = ({ cell, metricInfos, mis
         pointerEvents: 'none',
         padding: '6px 8px',
         borderRadius: 3,
-        background: 'rgba(24,27,31,0.95)',
-        color: '#d8d9da',
+        background: theme.colors.background.elevated ?? theme.colors.background.secondary,
+        color: theme.colors.text.primary,
+        border: `1px solid ${theme.colors.border.medium}`,
+        boxShadow: theme.shadows.z3,
         fontSize: 12,
         whiteSpace: 'nowrap',
       }}

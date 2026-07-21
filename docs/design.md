@@ -177,7 +177,7 @@ Deliberately not implemented (YAGNI, confirmed during design): Conditions-style 
 
 ## 14. Known limitations / future work
 
-- Tooltip colors are fixed dark values (readable, but not theme-following); the link menu already follows the theme.
+- **Decision:** Tooltip surface, text, border, and shadow follow Grafana theme tokens, matching the link menu across light and dark themes.
 - The link menu has a fixed 240 px width; panels narrower than that would clip it.
 - The drilldown popover clamps its position but has no internal scrolling if its content exceeds the panel height.
 - Verification against a live Prometheus/VictoriaMetrics (including instant→range requery behavior) is still outstanding; README states this.

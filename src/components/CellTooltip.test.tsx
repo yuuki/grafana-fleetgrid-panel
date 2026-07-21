@@ -1,10 +1,17 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { createTheme, toDataFrame, FieldType } from '@grafana/data';
+import { useTheme2 } from '@grafana/ui';
 import { buildMetricInfos } from '../data/display';
 import { CellTooltip } from './CellTooltip';
 
+jest.mock('@grafana/ui', () => ({
+  ...jest.requireActual('@grafana/ui'),
+  useTheme2: jest.fn(),
+}));
+
 const theme = createTheme();
+const mockUseTheme2 = jest.mocked(useTheme2);
 const frames = [
   toDataFrame({
     refId: 'A',
@@ -25,6 +32,27 @@ const frames = [
 ];
 
 describe('CellTooltip', () => {
+  beforeEach(() => {
+    mockUseTheme2.mockReturnValue(theme);
+  });
+
+  it('uses the current theme for its surface', () => {
+    const infos = buildMetricInfos([frames[0]], theme, 'browser');
+    const cell = {
+      path: ['zone-a', '0'],
+      labels: { zone: 'zone-a' },
+      values: new Map<string, number | null>([['A', 503]]),
+    };
+    render(<CellTooltip cell={cell} metricInfos={infos} missingColor="#444" x={0} y={0} />);
+
+    expect(screen.getByText('zone-a / 0').parentElement).toHaveStyle({
+      background: theme.colors.background.elevated ?? theme.colors.background.secondary,
+      color: theme.colors.text.primary,
+      border: `1px solid ${theme.colors.border.medium}`,
+      boxShadow: theme.shadows.z3,
+    });
+  });
+
   it('shows path and all metric values including missing', () => {
     const infos = buildMetricInfos(frames, theme, 'browser');
     const cell = {
