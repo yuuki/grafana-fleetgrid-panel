@@ -222,6 +222,10 @@ describe('ClusterviewPanel', () => {
     const menu = screen.getByRole('menu');
     const left = parseFloat(menu.style.left);
     expect(menu.style.width).toBe('240px');
+    expect(menu.style.paddingLeft).toBe('4px');
+    expect(menu.style.paddingRight).toBe('4px');
+    expect(menu.style.borderLeftWidth).toBe('1px');
+    expect(menu.style.borderRightWidth).toBe('1px');
     expect(left).toBeGreaterThanOrEqual(0);
     expect(left + 240).toBeLessThanOrEqual(300); // Fits within the actual visible inner size (based on clientWidth)
     expect(left).toBeLessThan(60); // Flipped to the left of the click position
@@ -239,6 +243,26 @@ describe('ClusterviewPanel', () => {
     const right = parseFloat(menu.style.left) + menuWidth;
     expect(menuWidth).toBe(180);
     expect(right).toBeLessThanOrEqual(180);
+  });
+
+  it.each([0, 1, 5])('keeps the link menu chrome within a %dpx visible width', (visibleWidth) => {
+    const frames = clickable();
+    frames[1].fields[1].getLinks = linksOf(2);
+    render(<ClusterviewPanel {...makeProps(frames)} />);
+    const container = containerOf();
+    setBox(container, { cw: visibleWidth, ch: 300 });
+    fireEvent.click(container, { clientX: 60, clientY: 5 });
+    const menu = screen.getByRole('menu');
+    const menuWidth = parseFloat(menu.style.width);
+    const horizontalChrome =
+      parseFloat(menu.style.paddingLeft) +
+      parseFloat(menu.style.paddingRight) +
+      parseFloat(menu.style.borderLeftWidth) +
+      parseFloat(menu.style.borderRightWidth);
+    const minimumOuterWidth = Math.max(menuWidth, horizontalChrome);
+    expect(menuWidth).toBe(visibleWidth);
+    expect(horizontalChrome).toBeLessThanOrEqual(menuWidth);
+    expect(parseFloat(menu.style.left) + minimumOuterWidth).toBeLessThanOrEqual(visibleWidth);
   });
 
   it('caps a tall link menu to the visible height and enables internal scroll', () => {

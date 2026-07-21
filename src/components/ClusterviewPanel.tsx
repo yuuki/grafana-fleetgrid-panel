@@ -400,6 +400,8 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
             const menuH = Math.min(contentH, availH);
             const availableWidth = Math.max(0, linkMenu.maxX - linkMenu.minX);
             const menuW = Math.min(LINK_MENU_W, availableWidth);
+            const horizontalBorder = Math.min(LINK_MENU_BORDER, menuW / 2);
+            const horizontalPadding = Math.min(LINK_MENU_PAD, Math.max(0, menuW / 2 - horizontalBorder));
             // Prevent right/bottom overflow with the same flip + visible-range clamp as the popover
             const { left, top } = placeOverlay(linkMenu.x, linkMenu.y, menuW, menuH, linkMenu);
             return (
@@ -421,8 +423,10 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
                   background: theme.colors.background.elevated ?? theme.colors.background.secondary,
                   color: theme.colors.text.primary,
                   border: `${LINK_MENU_BORDER}px solid ${theme.colors.border.medium}`,
+                  borderLeftWidth: horizontalBorder,
+                  borderRightWidth: horizontalBorder,
                   borderRadius: 4,
-                  padding: LINK_MENU_PAD,
+                  padding: `${LINK_MENU_PAD}px ${horizontalPadding}px`,
                   boxShadow: theme.shadows.z3,
                 }}
               >
