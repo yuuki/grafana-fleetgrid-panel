@@ -1,4 +1,4 @@
-# ClusterView
+# FleetGrid
 
 A Grafana panel plugin that renders nested physical topologies — such as zones, hosts, and GPUs — as a hierarchical grid, and colors each cell by a Prometheus / VictoriaMetrics metric. It is designed for a bird's-eye view of large AI / HPC clusters, where hundreds of nodes and thousands of cells need to be scanned at a glance.
 
@@ -167,7 +167,7 @@ services:
 
 ### 4. Verify
 
-Restart Grafana, then add a panel and confirm **ClusterView** appears in the visualization picker. Check **Administration → Plugins** to confirm the plugin loaded without errors if it does not appear.
+Restart Grafana, then add a panel and confirm **FleetGrid** appears in the visualization picker. Check **Administration → Plugins** to confirm the plugin loaded without errors if it does not appear.
 
 ## Development
 

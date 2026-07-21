@@ -1,7 +1,7 @@
 apiVersion: 1
 
 providers:
-  - name: 'clusterview'
+  - name: 'fleetgrid'
     type: file
     options:
       path: /etc/grafana/provisioning/dashboards

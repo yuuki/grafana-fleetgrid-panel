@@ -1,11 +1,11 @@
-# ClusterView Panel — Design
+# FleetGrid Panel — Design
 
 Status: implemented (branch `design-spec`).
-This document describes the design of the ClusterView Grafana panel plugin and, for each significant choice, records why it was selected over the alternatives that were considered. It replaces the Japanese working documents (design spec and implementation plan) that guided the initial build; where the implementation deliberately diverged from the original plan during review, this document describes the final, confirmed behavior.
+This document describes the design of the FleetGrid Grafana panel plugin and, for each significant choice, records why it was selected over the alternatives that were considered. It replaces the Japanese working documents (design spec and implementation plan) that guided the initial build; where the implementation deliberately diverged from the original plan during review, this document describes the final, confirmed behavior.
 
 ## 1. Background and goals
 
-ClusterView is a hierarchical cell-grid panel for monitoring large AI/HPC clusters (typically GPU nodes) with Prometheus or VictoriaMetrics as the data source. It replaces the HewlettPackard `hpe-grafana-clusterview-panel`, which the team used in production and whose limitations motivated this plugin. Six concrete problems drove the design:
+FleetGrid is a hierarchical cell-grid panel for monitoring large AI/HPC clusters (typically GPU nodes) with Prometheus or VictoriaMetrics as the data source. It replaces the HewlettPackard `hpe-grafana-clusterview-panel`, which the team used in production and whose limitations motivated this plugin. Six concrete problems drove the design:
 
 1. **Manual color conditions** — the HPE panel colors cells only through hand-written per-threshold "Conditions" expressions; there is no value-gradient coloring.
 2. **Poor number legibility** — numeric values inside small cells are hard to read or absent.
@@ -172,7 +172,7 @@ Custom options are intentionally few; everything color/unit/link-related lives i
 
 ## 11. Plugin metadata and toolchain
 
-- id `yuuk1-clusterview-panel`, name `ClusterView`, `grafanaDependency: ">=11.6.0"`.
+- id `yuuk1-clusterview-panel`, name `FleetGrid`, `grafanaDependency: ">=11.6.0"`.
 - Scaffold: `@grafana/create-plugin@7.0.5` (pinned). **Rationale:** reproducibility of regeneration, and 7.0.5 builds against `@grafana/* ^12.x` — closer to the supported minimum (11.6) than newer scaffolds targeting 13.x, reducing the risk of accidentally depending on 13-only APIs.
 - The pinned scaffold conflicts with the floating `@grafana/tsconfig@2.2.0` (`moduleResolution: "bundler"` vs. the scaffold's ts-node `module: "commonjs"` → TS5095). Fixed by overriding `moduleResolution: "nodenext"` in the ts-node block of the **root** `tsconfig.json` (mirroring upstream create-plugin 7.x), because `.config/` is tool-managed and must not be edited.
 - `jest-canvas-mock` is imported from the root `jest-setup.js` **after** `.config/jest-setup` — the scaffold's setup (run in `setupFilesAfterEnv`) overwrites `getContext`, so the plan's original `setupFiles` placement produced a silently non-functional mock. Load order is the constraint; a comment in the file records it.
@@ -181,7 +181,7 @@ Custom options are intentionally few; everything color/unit/link-related lives i
 
 - **Unit (Jest + jest-canvas-mock):** every pipeline stage TDD-tested as a pure function; renderer tested through the canvas mock (split regions, missing-color path, contrast text).
 - **Component (React Testing Library):** option editors (add/remove/reorder levels, preset switching, live preview, reducer allowlist), panel wiring (selector, tooltip coordinates incl. scroll, data-link priority, link menu, popover close paths, requery race with deferred promises).
-- **E2E (`@grafana/plugin-e2e` + Playwright):** a provisioned TestData dashboard (`uid: clusterview-e2e`, generic zone/host/gpu data with unpadded host numbers so natural order differs from lexicographic order) exercised against the default Grafana image **and** `GRAFANA_VERSION=11.6.0`. Canvas assertions use polling plus color quantization/dominant-color counts rather than screenshot equality, to tolerate cross-version anti-aliasing differences.
+- **E2E (`@grafana/plugin-e2e` + Playwright):** a provisioned TestData dashboard (`uid: fleetgrid-e2e`, generic zone/host/gpu data with unpadded host numbers so natural order differs from lexicographic order) exercised against the default Grafana image **and** `GRAFANA_VERSION=11.6.0`. Canvas assertions use polling plus color quantization/dominant-color counts rather than screenshot equality, to tolerate cross-version anti-aliasing differences.
 - Checks that genuinely require human eyes or a live Prometheus (visual sparkline quality, in-cell unit suffix at various widths, instant requery against a real datasource, split-region visuals, minimum-cell-size boundary) are explicitly listed as manual follow-ups rather than silently claimed.
 
 ## 13. Out of scope

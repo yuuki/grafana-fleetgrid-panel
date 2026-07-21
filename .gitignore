@@ -8,6 +8,10 @@ yarn-error.log*
 
 node_modules/
 
+# Assets
+*.zip
+/.cache
+
 # yarn
 .yarn/cache
 .yarn/unplugged

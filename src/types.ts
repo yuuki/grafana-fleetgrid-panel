@@ -15,7 +15,7 @@ export interface LevelDef {
   showLabel: boolean;
 }
 
-export interface ClusterviewOptions {
+export interface FleetGridOptions {
   levels: LevelDef[];
   displayMode: DisplayMode;
   defaultMetric?: string;

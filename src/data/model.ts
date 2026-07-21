@@ -1,5 +1,5 @@
 import { DataFrame, GrafanaTheme2 } from '@grafana/data';
-import { ClusterviewOptions, HierarchyNode } from '../types';
+import { FleetGridOptions, HierarchyNode } from '../types';
 import { normalizeFrames } from './normalize';
 import { buildHierarchy } from './hierarchy';
 import { attachCells, collectRefIds } from './values';
@@ -14,7 +14,7 @@ export interface PanelModel {
 
 export function buildModel(
   frames: DataFrame[],
-  options: ClusterviewOptions,
+  options: FleetGridOptions,
   theme: GrafanaTheme2,
   timeZone: string,
   targetRefIds: string[] = []

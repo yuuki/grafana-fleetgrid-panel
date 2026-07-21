@@ -1,6 +1,6 @@
-# ClusterView
+# FleetGrid
 
-ClusterView is a Grafana panel plugin that renders nested physical topologies — such as zones, hosts, and GPUs — as a hierarchical grid, and colors each cell by a Prometheus / VictoriaMetrics metric. It is built for a bird's-eye view of large AI / HPC clusters, where hundreds of nodes and thousands of cells need to be scanned at a glance.
+FleetGrid is a Grafana panel plugin that renders nested physical topologies — such as zones, hosts, and GPUs — as a hierarchical grid, and colors each cell by a Prometheus / VictoriaMetrics metric. It is built for a bird's-eye view of large AI / HPC clusters, where hundreds of nodes and thousands of cells need to be scanned at a glance.
 
 All cells are drawn on a single `<canvas>`, with the tooltip, drilldown popover, legend, and metric selector overlaid as React DOM. Keeping the cells off the DOM keeps the node count constant regardless of cell count, which is what makes the design target of a few thousand cells (up to ~15,000 sub-regions in split mode) practical.
 

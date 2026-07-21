@@ -1,12 +1,12 @@
 import { PanelPlugin } from '@grafana/data';
-import { ClusterviewOptions } from './types';
-import { ClusterviewPanel } from './components/ClusterviewPanel';
+import { FleetGridOptions } from './types';
+import { FleetGridPanel } from './components/FleetGridPanel';
 import { LevelsEditor } from './options/LevelsEditor';
 import { ReduceCalcEditor } from './options/ReduceCalcEditor';
 
 // useFieldConfig() enables the standard Field settings (Color scheme / Thresholds / Unit / Min-Max / Data Links / Overrides).
 // Without this, this plugin's entire color/unit design would not function.
-export const plugin = new PanelPlugin<ClusterviewOptions>(ClusterviewPanel).useFieldConfig().setPanelOptions((builder) =>
+export const plugin = new PanelPlugin<FleetGridOptions>(FleetGridPanel).useFieldConfig().setPanelOptions((builder) =>
   builder
     .addCustomEditor({
       id: 'levels',
