@@ -123,25 +123,20 @@ const PATH_RE = /(zone-[a-z0-9]+)\s*\/\s*(node-[a-z0-9]+)\s*\/\s*(gpu\d+)/i;
  * Hovers over (x,y) on the canvas and returns the hierarchy path from the displayed tooltip. null if outside a cell.
  * Polls briefly for the tooltip content to appear rather than using a fixed sleep (a safeguard against missed detection on slow environments).
  */
-async function readPath(canvas: Locator, panel: Locator, x: number, y: number): Promise<CellPath | null> {
+async function readPath(canvas: Locator, panel: Locator, x: number, y: number, timeout = 300): Promise<CellPath | null> {
   await canvas.hover({ position: { x, y } });
-  return readCurrentPath(canvas, panel);
+  return readCurrentPath(canvas, panel, timeout);
 }
 
-/** Reads a path for structural layout probing even when Grafana's sticky navigation overlaps the canvas point. */
+/** Reads a path for structural layout probing using the same browser event as an end-user hover. */
 async function probePath(canvas: Locator, panel: Locator, x: number, y: number): Promise<CellPath | null> {
-  const box = await canvas.boundingBox();
-  if (!box) {
-    return null;
-  }
-  await canvas.dispatchEvent('mousemove', { clientX: box.x + x, clientY: box.y + y });
-  return readCurrentPath(canvas, panel);
+  return readPath(canvas, panel, x, y, 120);
 }
 
-async function readCurrentPath(canvas: Locator, panel: Locator): Promise<CellPath | null> {
+async function readCurrentPath(canvas: Locator, panel: Locator, timeout = 300): Promise<CellPath | null> {
   // Right after a pointer event, the previous cell's tooltip may still linger. Wait one frame before reading the content (prevents misreading the old tooltip).
   await canvas.page().evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => r())));
-  const deadline = Date.now() + 300;
+  const deadline = Date.now() + timeout;
   do {
     const text = await panel.innerText();
     const m = text.match(PATH_RE);
@@ -155,12 +150,33 @@ async function readCurrentPath(canvas: Locator, panel: Locator): Promise<CellPat
 
 /** Scans a given column (x) from the top and returns the y where a cell is hit */
 async function findCellY(canvas: Locator, panel: Locator, x: number): Promise<number> {
-  for (let y = 30; y <= 150; y += 5) {
-    if (await readPath(canvas, panel, x, y)) {
+  const box = await canvas.boundingBox();
+  if (!box) {
+    throw new Error('canvas has no bounding box');
+  }
+  for (let y = 0; y <= box.height; y += 5) {
+    if (await readPath(canvas, panel, x, y, 120)) {
       return y;
     }
   }
   throw new Error('no cell found while probing the column');
+}
+
+/** Finds a cell without assuming a particular panel padding or canvas offset. */
+async function findCellPoint(canvas: Locator, panel: Locator): Promise<{ x: number; y: number }> {
+  const box = await canvas.boundingBox();
+  if (!box) {
+    throw new Error('canvas has no bounding box');
+  }
+  const xCandidates = [12, 25, box.width / 4, box.width / 2, (box.width * 3) / 4].map(Math.floor);
+  for (const x of xCandidates) {
+    for (let y = 0; y <= box.height; y += 5) {
+      if (await readPath(canvas, panel, x, y, 120)) {
+        return { x, y };
+      }
+    }
+  }
+  throw new Error('no cell found while probing the canvas');
 }
 
 test('main panel renders the canvas with painted pixels', async ({ gotoDashboardPage, readProvisionedDashboard }) => {
@@ -207,13 +223,9 @@ test('hover tooltip lists every metric with its configured unit', async ({
   const canvas = panel.locator.locator('canvas');
   await expect(canvas).toBeVisible();
 
-  let hit: CellPath | null = null;
-  for (let y = 40; y <= 140 && hit === null; y += 6) {
-    hit = await readPath(canvas, panel.locator, 25, y);
-  }
-  if (hit === null) {
-    throw new Error('no cell tooltip found while probing the first row');
-  }
+  const point = await findCellPoint(canvas, panel.locator);
+  const hit = await readPath(canvas, panel.locator, point.x, point.y);
+  expect(hit).not.toBeNull();
   expect(hit.text).toMatch(/zone-a\s*\/\s*node-a\d+\s*\/\s*gpu\d/);
   // Query A = watt, query B = celsius (override). Both appear in the tooltip with units.
   expect(hit.text).toMatch(/\d+(\.\d+)?\s*W\b/);
@@ -234,17 +246,11 @@ test('renders the provisioned 2 / 8 / 2 grid in row-major order', async ({
     throw new Error('canvas has no bounding box');
   }
 
-  // Identify the y of zone-a's first cell row
-  let rowY: number | null = null;
-  for (let y = 40; y <= 140 && rowY === null; y += 5) {
-    const p = await probePath(canvas, panel.locator, 25, y);
-    if (p?.zone === 'zone-a') {
-      rowY = y;
-    }
-  }
-  if (rowY === null) {
-    throw new Error('could not locate the first cell row of zone-a');
-  }
+  // Identify the y of zone-a's first cell row without assuming Grafana's panel padding.
+  const firstPoint = await findCellPoint(canvas, panel.locator);
+  const firstCell = await probePath(canvas, panel.locator, firstPoint.x, firstPoint.y);
+  expect(firstCell?.zone).toBe('zone-a');
+  const rowY = firstPoint.y;
 
   // Scan the first row left to right and collect each cell path once.
   const order: string[] = [];
@@ -265,8 +271,8 @@ test('renders the provisioned 2 / 8 / 2 grid in row-major order', async ({
 
   // Eight host columns force node-a9 onto the next host row.
   let secondRow: CellPath | null = null;
-  for (let y = rowY + 5; y <= 220 && secondRow === null; y += 5) {
-    const p = await probePath(canvas, panel.locator, 25, y);
+  for (let y = rowY + 5; y <= box.height && secondRow === null; y += 5) {
+    const p = await probePath(canvas, panel.locator, firstPoint.x, y);
     if (p?.host === 'node-a9') {
       secondRow = p;
     }
@@ -281,16 +287,8 @@ test('clicking a cell opens the drilldown popover', async ({ gotoDashboardPage, 
   const canvas = panel.locator.locator('canvas');
   await expect(canvas).toBeVisible();
 
-  let cellY: number | null = null;
-  for (let y = 40; y <= 140 && cellY === null; y += 5) {
-    if (await readPath(canvas, panel.locator, 25, y)) {
-      cellY = y;
-    }
-  }
-  if (cellY === null) {
-    throw new Error('no cell found to click');
-  }
-  await canvas.click({ position: { x: 25, y: cellY } });
+  const point = await findCellPoint(canvas, panel.locator);
+  await canvas.click({ position: point });
   // The popover opens (close button). Since it's instant TestData, there's no time series and no sparkline appears.
   await expect(panel.locator.getByRole('button', { name: 'Close' })).toBeVisible();
   await expect(panel.locator.getByText('No time series').first()).toBeVisible();
