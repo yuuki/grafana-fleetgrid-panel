@@ -419,8 +419,13 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
             // Clamp a menu taller than the visible range to the visible height, and make all links reachable via internal scroll.
             const availH = Math.max(0, visibleBounds.maxY - visibleBounds.minY);
             const menuH = Math.min(contentH, availH);
+            const availableWidth = Math.max(0, visibleBounds.maxX - visibleBounds.minX);
+            const menuW = Math.min(LINK_MENU_W, availableWidth);
+            const fitsHorizontalChrome = menuW >= (LINK_MENU_PAD + LINK_MENU_BORDER) * 2;
+            const horizontalBorder = fitsHorizontalChrome ? LINK_MENU_BORDER : 0;
+            const horizontalPadding = fitsHorizontalChrome ? LINK_MENU_PAD : 0;
             // Prevent right/bottom overflow with the same flip + visible-range clamp as the popover
-            const { left, top } = placeOverlay(linkMenu.x, linkMenu.y, LINK_MENU_W, menuH, visibleBounds);
+            const { left, top } = placeOverlay(linkMenu.x, linkMenu.y, menuW, menuH, visibleBounds);
             return (
               <div
                 role="menu"
@@ -431,7 +436,7 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
                   position: 'absolute',
                   left,
                   top,
-                  width: LINK_MENU_W,
+                  width: menuW,
                   maxHeight: menuH,
                   overflowY: contentH > menuH ? 'auto' : 'hidden',
                   boxSizing: 'border-box',
@@ -440,8 +445,10 @@ export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props
                   background: theme.colors.background.elevated ?? theme.colors.background.secondary,
                   color: theme.colors.text.primary,
                   border: `${LINK_MENU_BORDER}px solid ${theme.colors.border.medium}`,
+                  borderLeftWidth: horizontalBorder,
+                  borderRightWidth: horizontalBorder,
                   borderRadius: 4,
-                  padding: LINK_MENU_PAD,
+                  padding: `${LINK_MENU_PAD}px ${horizontalPadding}px`,
                   boxShadow: theme.shadows.z3,
                 }}
               >
