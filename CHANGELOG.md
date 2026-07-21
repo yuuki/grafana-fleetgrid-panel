@@ -1,9 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-07-21
 
-- Make all layout choices, including Grid, visible in the hierarchy editor and show the column input only when Grid is selected.
-- Normalize invalid Grid column counts so malformed saved options cannot break layout calculations.
+- Keep the current top-level group label pinned while scrolling vertically.
+- Improve drilldown usability in short or narrow panels, including scrolling and resize handling.
+- Keep tooltips readable across Grafana themes and improve overlay positioning.
+- Add SSH deployment support for copying the built plugin to a Grafana host.
 
 ## 0.1.0
 
