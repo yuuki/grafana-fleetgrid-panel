@@ -21,7 +21,7 @@ export interface DrilldownPopoverProps {
   error?: boolean;
   x: number;
   y: number;
-  /** The visible range at click time (content coordinates). Used to clamp the flipped placement to both ends of the visible range */
+  /** The current visible range in content coordinates. Used to clamp the flipped placement to both ends of the visible range */
   minX: number;
   minY: number;
   maxX: number;

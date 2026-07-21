@@ -226,6 +226,25 @@ describe('ClusterviewPanel', () => {
     expect(left).toBeLessThan(60); // Flipped to the left of the click position
   });
 
+  it('repositions an open link menu within the resized visible bounds', () => {
+    const frames = clickable();
+    frames[1].fields[1].getLinks = linksOf(2);
+    const props = makeProps(frames);
+    const { rerender } = render(<ClusterviewPanel {...props} />);
+    const container = containerOf();
+    setBox(container, { cw: 400, ch: 300 });
+    fireEvent.click(container, { clientX: 60, clientY: 5 });
+    const menu = screen.getByRole('menu');
+    expect(parseFloat(menu.style.left)).toBe(68);
+
+    setBox(container, { cw: 300, ch: 180 });
+    rerender(<ClusterviewPanel {...props} width={300} height={180} />);
+
+    expect(screen.getByRole('menu')).toBe(menu);
+    expect(parseFloat(menu.style.left)).toBeLessThan(68);
+    expect(parseFloat(menu.style.left) + 240).toBeLessThanOrEqual(300);
+  });
+
   it('caps a tall link menu to the visible height and enables internal scroll', () => {
     const frames = clickable();
     frames[0].fields[1].getLinks = linksOf(12); // A tall menu
@@ -269,6 +288,27 @@ describe('ClusterviewPanel', () => {
     expect(screen.getByLabelText('Close')).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByLabelText('Close')).not.toBeInTheDocument();
+  });
+
+  it('repositions an open drilldown popover within the resized visible bounds', () => {
+    const props = makeProps(clickable());
+    const { rerender } = render(<ClusterviewPanel {...props} />);
+    const container = containerOf();
+    setBox(container, { cw: 400, ch: 300 });
+    fireEvent.click(container, { clientX: 60, clientY: 5 });
+    const close = screen.getByLabelText('Close');
+    const popover = close.parentElement!.parentElement as HTMLElement;
+    expect(parseFloat(popover.style.left)).toBe(68);
+    expect(parseFloat(popover.style.top)).toBe(13);
+
+    setBox(container, { cw: 320, ch: 80 });
+    rerender(<ClusterviewPanel {...props} width={320} height={80} />);
+
+    expect(screen.getByLabelText('Close')).toBe(close);
+    expect(parseFloat(popover.style.left)).toBeLessThan(68);
+    expect(parseFloat(popover.style.left) + 300).toBeLessThanOrEqual(320);
+    expect(parseFloat(popover.style.top)).toBeLessThan(13);
+    expect(parseFloat(popover.style.top) + 74).toBeLessThanOrEqual(80);
   });
 
   it('closes the popover on an outside pointerdown', () => {
