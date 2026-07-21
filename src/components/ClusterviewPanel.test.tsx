@@ -245,13 +245,13 @@ describe('ClusterviewPanel', () => {
     expect(right).toBeLessThanOrEqual(180);
   });
 
-  it.each([0, 1, 5])('keeps the link menu chrome within a %dpx visible width', (visibleWidth) => {
+  it.each([0, 1, 5, 9])('avoids fractional horizontal chrome below 10px at a %dpx visible width', (visibleWidth) => {
     const frames = clickable();
     frames[1].fields[1].getLinks = linksOf(2);
     render(<ClusterviewPanel {...makeProps(frames)} />);
     const container = containerOf();
-    setBox(container, { cw: visibleWidth, ch: 300 });
-    fireEvent.click(container, { clientX: 60, clientY: 5 });
+    setBox(container, { sl: 50, cw: visibleWidth, ch: 300 });
+    fireEvent.click(container, { clientX: 10, clientY: 5 });
     const menu = screen.getByRole('menu');
     const menuWidth = parseFloat(menu.style.width);
     const horizontalChrome =
@@ -261,8 +261,13 @@ describe('ClusterviewPanel', () => {
       parseFloat(menu.style.borderRightWidth);
     const minimumOuterWidth = Math.max(menuWidth, horizontalChrome);
     expect(menuWidth).toBe(visibleWidth);
+    expect(parseFloat(menu.style.paddingLeft)).toBe(0);
+    expect(parseFloat(menu.style.paddingRight)).toBe(0);
+    expect(parseFloat(menu.style.borderLeftWidth)).toBe(0);
+    expect(parseFloat(menu.style.borderRightWidth)).toBe(0);
     expect(horizontalChrome).toBeLessThanOrEqual(menuWidth);
-    expect(parseFloat(menu.style.left) + minimumOuterWidth).toBeLessThanOrEqual(visibleWidth);
+    expect(parseFloat(menu.style.left)).toBeGreaterThanOrEqual(50);
+    expect(parseFloat(menu.style.left) + minimumOuterWidth).toBeLessThanOrEqual(50 + visibleWidth);
   });
 
   it('caps a tall link menu to the visible height and enables internal scroll', () => {
