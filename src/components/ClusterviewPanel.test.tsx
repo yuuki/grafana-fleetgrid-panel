@@ -221,9 +221,24 @@ describe('ClusterviewPanel', () => {
     fireEvent.click(container, { clientX: 60, clientY: 5 }); // cx=60(zone-b)
     const menu = screen.getByRole('menu');
     const left = parseFloat(menu.style.left);
+    expect(menu.style.width).toBe('240px');
     expect(left).toBeGreaterThanOrEqual(0);
     expect(left + 240).toBeLessThanOrEqual(300); // Fits within the actual visible inner size (based on clientWidth)
     expect(left).toBeLessThan(60); // Flipped to the left of the click position
+  });
+
+  it('shrinks the link menu to fit a visible width below 240px', () => {
+    const frames = clickable();
+    frames[1].fields[1].getLinks = linksOf(2);
+    render(<ClusterviewPanel {...makeProps(frames)} />);
+    const container = containerOf();
+    setBox(container, { cw: 180, ch: 300 });
+    fireEvent.click(container, { clientX: 60, clientY: 5 });
+    const menu = screen.getByRole('menu');
+    const menuWidth = parseFloat(menu.style.width);
+    const right = parseFloat(menu.style.left) + menuWidth;
+    expect(menuWidth).toBe(180);
+    expect(right).toBeLessThanOrEqual(180);
   });
 
   it('caps a tall link menu to the visible height and enables internal scroll', () => {

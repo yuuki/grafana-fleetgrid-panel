@@ -178,7 +178,7 @@ Deliberately not implemented (YAGNI, confirmed during design): Conditions-style 
 ## 14. Known limitations / future work
 
 - Tooltip colors are fixed dark values (readable, but not theme-following); the link menu already follows the theme.
-- The link menu has a fixed 240 px width; panels narrower than that would clip it.
+- The link menu prefers a 240 px width but shrinks to the available visible width when the panel is narrower, keeping its rendered width and placement geometry aligned.
 - The drilldown popover clamps its position but has no internal scrolling if its content exceeds the panel height.
 - Verification against a live Prometheus/VictoriaMetrics (including instant→range requery behavior) is still outstanding; README states this.
 - Overlay positions are computed at click time and are not recomputed if the panel is resized while an overlay is open (scrolling closes overlays, which covers the common case).
