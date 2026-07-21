@@ -127,6 +127,9 @@ Hit testing maps content coordinates (including `scrollLeft`/`scrollTop`) to a c
 
 Without links, a click opens the **drilldown popover**: per-metric sparklines built from the time-series data already at hand, the current value, and the series count. When one cell aggregates several series and their timestamps align, the sparkline aggregates **per timestamp with the same spatial aggregation as the cell value** (missing samples excluded; all-missing timestamps become `null`), so the sparkline is the time-resolved version of the number the user clicked. If timestamps do not align, the popover falls back to the first series and says so explicitly instead of mislabeling it as an aggregate. The popover flips and clamps within the visible scroll area and closes on Esc, outside pointer-down, or scroll.
 
+**Decision: cap the drilldown popover's rendered outer height to the visible panel height and enable internal vertical scrolling only when its content is taller.**
+*Rationale:* placement must use the same capped height as the rendered border box so the bottom edge remains in bounds, while normal-height content should not gain an unnecessary scroll container. Padding and borders are included in that outer height.
+
 ### Instant queries: on-demand range requery
 
 Instant queries have no history at hand, so the panel re-issues the dashboard's targets as a range query when the popover needs series:
@@ -179,6 +182,5 @@ Deliberately not implemented (YAGNI, confirmed during design): Conditions-style 
 
 - Tooltip colors are fixed dark values (readable, but not theme-following); the link menu already follows the theme.
 - The link menu has a fixed 240 px width; panels narrower than that would clip it.
-- The drilldown popover clamps its position but has no internal scrolling if its content exceeds the panel height.
 - Verification against a live Prometheus/VictoriaMetrics (including instant→range requery behavior) is still outstanding; README states this.
 - Overlay positions are computed at click time and are not recomputed if the panel is resized while an overlay is open (scrolling closes overlays, which covers the common case).

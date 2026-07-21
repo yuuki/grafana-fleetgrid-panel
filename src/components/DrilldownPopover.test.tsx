@@ -30,6 +30,9 @@ describe('DrilldownPopover', () => {
     expect(screen.getByText('zone-a')).toBeInTheDocument();
     expect(screen.getByText('power')).toBeInTheDocument();
     expect(screen.getByTestId('sparkline')).toBeInTheDocument();
+    const popover = screen.getByText('zone-a').parentElement!.parentElement as HTMLElement;
+    expect(popover.style.maxHeight).toBe('74px');
+    expect(popover.style.overflowY).toBe('');
   });
   it('shows loading state', () => {
     const infos = buildMetricInfos([rangeFrame], theme, 'browser');
@@ -101,5 +104,59 @@ describe('DrilldownPopover', () => {
     // The bottom-right corner (left+width / top+height) also fits within the visible range
     expect(left + W).toBeLessThanOrEqual(maxX);
     expect(top + h).toBeLessThanOrEqual(maxY);
+  });
+
+  it('caps tall content to the visible height and enables internal scrolling', () => {
+    const [baseInfo] = buildMetricInfos([rangeFrame], theme, 'browser');
+    const infos = Array.from({ length: 8 }, (_, i) => ({
+      ...baseInfo,
+      refId: `metric-${i}`,
+      name: `metric-${i}`,
+    }));
+    const shortBounds = { minX: 0, minY: 20, maxX: 800, maxY: 120 };
+
+    render(
+      <DrilldownPopover
+        cell={cell}
+        metricInfos={infos}
+        seriesFor={() => ({ frame: rangeFrame, seriesCount: 1, aggregated: false })}
+        loading={false}
+        x={0}
+        y={100}
+        {...shortBounds}
+        onClose={() => {}}
+      />
+    );
+
+    const popover = screen.getByText('zone-a').parentElement!.parentElement as HTMLElement;
+    const availableH = shortBounds.maxY - shortBounds.minY;
+    expect(popover.style.maxHeight).toBe(`${availableH}px`);
+    expect(popover.style.overflowY).toBe('auto');
+    expect(popover.style.boxSizing).toBe('border-box');
+    expect(parseFloat(popover.style.top) + availableH).toBeLessThanOrEqual(shortBounds.maxY);
+  });
+
+  it('collapses safely when the visible height is zero', () => {
+    const infos = buildMetricInfos([rangeFrame], theme, 'browser');
+    render(
+      <DrilldownPopover
+        cell={cell}
+        metricInfos={infos}
+        seriesFor={() => ({ frame: rangeFrame, seriesCount: 1, aggregated: false })}
+        loading={false}
+        x={0}
+        y={100}
+        minX={0}
+        minY={100}
+        maxX={800}
+        maxY={100}
+        onClose={() => {}}
+      />
+    );
+
+    const popover = screen.getByText('zone-a').parentElement!.parentElement as HTMLElement;
+    expect(popover.style.maxHeight).toBe('0px');
+    expect(popover.style.padding).toBe('0px');
+    expect(popover.style.borderWidth).toBe('0px');
   });
 });
