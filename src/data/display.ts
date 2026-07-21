@@ -9,9 +9,40 @@ import {
   getDisplayProcessor,
 } from '@grafana/data';
 
+const expandRange = (value: number, preferredDirection: 'up' | 'down'): [number, number] => {
+  const delta = Math.max(1, Math.abs(value) * Number.EPSILON);
+  const up = value + delta;
+  const down = value - delta;
+  if (preferredDirection === 'up') {
+    if (Number.isFinite(up) && up > value) {
+      return [value, up];
+    }
+    if (Number.isFinite(down) && down < value) {
+      return [down, value];
+    }
+  } else {
+    if (Number.isFinite(down) && down < value) {
+      return [down, value];
+    }
+    if (Number.isFinite(up) && up > value) {
+      return [value, up];
+    }
+  }
+  return [0, 1];
+};
+
+const hasFinitePositiveDelta = (min: number, max: number): boolean => {
+  const delta = max - min;
+  return Number.isFinite(delta) && delta > 0;
+};
+
 export interface MetricInfo {
   refId: string;
   name: string;
+  effectiveMin: number;
+  effectiveMax: number;
+  minConfigured: boolean;
+  maxConfigured: boolean;
   processor: DisplayProcessor;
   field: Field;
   frame: DataFrame;
@@ -40,16 +71,17 @@ export function buildMetricInfos(
 
     // Per-refId min/max: prefer rangeByRef derived from cell values, and fall back to scanning frames if unavailable (explicit config always takes precedence)
     const preset = rangeByRef?.get(refId);
-    let min = preset ? preset.min : Number.POSITIVE_INFINITY;
-    let max = preset ? preset.max : Number.NEGATIVE_INFINITY;
-    if (!preset) {
+    const hasFinitePreset = preset && Number.isFinite(preset.min) && Number.isFinite(preset.max);
+    let min = hasFinitePreset ? preset.min : Number.POSITIVE_INFINITY;
+    let max = hasFinitePreset ? preset.max : Number.NEGATIVE_INFINITY;
+    if (!hasFinitePreset) {
       for (const f of group) {
         for (const field of f.fields) {
           if (field.type !== FieldType.number) {
             continue;
           }
           for (const v of field.values) {
-            if (v == null || Number.isNaN(v)) {
+            if (typeof v !== 'number' || !Number.isFinite(v)) {
               continue;
             }
             min = Math.min(min, v);
@@ -63,25 +95,56 @@ export function buildMetricInfos(
       max = 1;
     }
     if (min === max) {
-      max = min + 1;
+      [min, max] = expandRange(min, 'up');
     }
 
+    const minConfigured = Number.isFinite(firstNumeric.field.config.min);
+    const maxConfigured = Number.isFinite(firstNumeric.field.config.max);
     const config = { ...firstNumeric.field.config };
-    const effMin = config.min ?? min;
-    const effMax = config.max ?? max;
+    let effMin = minConfigured ? (config.min as number) : min;
+    let effMax = maxConfigured ? (config.max as number) : max;
+    if (minConfigured && maxConfigured) {
+      if (effMin > effMax) {
+        [effMin, effMax] = [effMax, effMin];
+      } else if (effMin === effMax) {
+        [effMin, effMax] = expandRange(effMin, 'up');
+      }
+    } else if (minConfigured && effMin >= effMax) {
+      [effMin, effMax] = expandRange(effMin, 'up');
+    } else if (maxConfigured && effMin >= effMax) {
+      [effMin, effMax] = expandRange(effMax, 'down');
+    }
+    // Extreme finite endpoints can overflow when expanded. A valid scale takes precedence over retaining an impossible endpoint.
+    if (!Number.isFinite(effMin) || !Number.isFinite(effMax) || effMin >= effMax) {
+      effMin = 0;
+      effMax = 1;
+    }
+    if (!hasFinitePositiveDelta(effMin, effMax)) {
+      effMin /= 2;
+      effMax /= 2;
+    }
+    if (!hasFinitePositiveDelta(effMin, effMax)) {
+      effMin = 0;
+      effMax = 1;
+    }
+    const delta = effMax - effMin;
     config.min = effMin;
     config.max = effMax;
     // The display processor prioritizes field.state.range over config, so keep both in sync
     const field: Field = {
       ...firstNumeric.field,
       config,
-      state: { ...firstNumeric.field.state, range: { min: effMin, max: effMax, delta: effMax - effMin } },
+      state: { ...firstNumeric.field.state, range: { min: effMin, max: effMax, delta } },
     };
     const processor = getDisplayProcessor({ field, theme, timeZone });
 
     infos.push({
       refId,
       name: group[0].name ?? refId,
+      effectiveMin: effMin,
+      effectiveMax: effMax,
+      minConfigured,
+      maxConfigured,
       processor,
       field,
       frame: firstNumeric.frame,

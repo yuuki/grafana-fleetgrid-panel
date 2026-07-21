@@ -1,8 +1,11 @@
 import React from 'react';
+import { useTheme2 } from '@grafana/ui';
 import { MetricInfo } from '../data/display';
 import { MAX_SPLIT, splitRects } from '../render/split';
+import { formatRangeEndpoint, rangeStateLabel } from './RangeLegend';
 
-export const SplitLegend: React.FC<{ metricInfos: MetricInfo[] }> = ({ metricInfos }) => {
+const SplitLegendComponent: React.FC<{ metricInfos: MetricInfo[] }> = ({ metricInfos }) => {
+  const theme = useTheme2();
   const shown = metricInfos.slice(0, MAX_SPLIT);
   const rects = splitRects(shown.length);
   const hidden = metricInfos.length - shown.length;
@@ -27,9 +30,33 @@ export const SplitLegend: React.FC<{ metricInfos: MetricInfo[] }> = ({ metricInf
             />
           </span>
           <span>{`${i + 1}: ${info.name}`}</span>
+          <span
+            data-testid={`split-range-badge-${info.refId}`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 3,
+              padding: '1px 4px',
+              border: `1px solid ${theme.colors.border.medium}`,
+              borderRadius: 3,
+              color: theme.colors.text.primary,
+              background: theme.colors.background.secondary,
+              fontSize: 11,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {(info.minConfigured || info.maxConfigured) && <span aria-hidden>🔒</span>}
+            <span style={{ color: theme.colors.text.secondary }}>{rangeStateLabel(info)}</span>
+            <span>{`${formatRangeEndpoint(info, info.effectiveMin)}–${formatRangeEndpoint(
+              info,
+              info.effectiveMax
+            )}`}</span>
+          </span>
         </span>
       ))}
       {hidden > 0 && <span style={{ opacity: 0.7 }}>{`Split view supports up to 9 queries (${hidden} hidden)`}</span>}
     </div>
   );
 };
+
+export const SplitLegend = React.memo(SplitLegendComponent);

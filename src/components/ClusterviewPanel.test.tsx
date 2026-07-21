@@ -62,6 +62,52 @@ describe('ClusterviewPanel', () => {
     expect(screen.getAllByRole('radio')).toHaveLength(2);
   });
 
+  it('always shows a range legend and reserves the measured header height for a single query', () => {
+    render(<ClusterviewPanel {...makeProps([series('A', 'power', 'zone-a')])} />);
+    expect(screen.getByLabelText(/power range, Auto/)).toBeInTheDocument();
+    expect(document.querySelector('canvas')!.parentElement).toHaveStyle({ height: '268px' });
+  });
+
+  it('clamps the scroll container height to zero when the panel is shorter than its header', () => {
+    const p = makeProps([series('A', 'power', 'zone-a')]);
+    p.height = 20;
+    render(<ClusterviewPanel {...p} />);
+    expect(document.querySelector('canvas')!.parentElement).toHaveStyle({ height: '0px' });
+  });
+
+  it('uses a measured wrapped header height when sizing the scroll container', () => {
+    const originalResizeObserver = global.ResizeObserver;
+    const observers: MockResizeObserver[] = [];
+    class MockResizeObserver {
+      observe = jest.fn();
+      unobserve = jest.fn();
+      disconnect = jest.fn();
+
+      constructor(readonly callback: ResizeObserverCallback) {
+        observers.push(this);
+      }
+    }
+    global.ResizeObserver = MockResizeObserver as unknown as typeof ResizeObserver;
+    try {
+      render(<ClusterviewPanel {...makeProps([series('A', 'power', 'zone-a')])} />);
+      const header = screen.getByTestId('range-legend').parentElement as HTMLElement;
+      Object.defineProperty(header, 'offsetHeight', { configurable: true, value: 48 });
+      const headerObserver = observers.find((observer) => observer.observe.mock.calls[0]?.[0] === header);
+      act(() => headerObserver?.callback([], headerObserver as unknown as ResizeObserver));
+      expect(document.querySelector('canvas')!.parentElement).toHaveStyle({ height: '252px' });
+    } finally {
+      global.ResizeObserver = originalResizeObserver;
+    }
+  });
+
+  it('updates the single-mode range legend when the selected metric changes', () => {
+    render(<ClusterviewPanel {...makeProps([series('A', 'power', 'zone-a'), series('B', 'temp', 'zone-a')])} />);
+    expect(screen.getByLabelText(/power range, Auto/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'temp' }));
+    expect(screen.getByLabelText(/temp range, Auto/)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/power range, Auto/)).not.toBeInTheDocument();
+  });
+
   it('shows warnings when the hierarchy label is absent', () => {
     const p = makeProps([series('A', 'power', 'zone-a')]);
     p.options.levels = [{ ...DEFAULT_LEVEL, label: 'rack' }];
@@ -111,6 +157,24 @@ describe('ClusterviewPanel', () => {
     expect(screen.getAllByRole('radio')).toHaveLength(2);
     expect(screen.getByText('power')).toBeInTheDocument(); // A is the series name
     expect(screen.getByText('B')).toBeInTheDocument(); // B has no metricInfo, so the refId is displayed
+  });
+
+  it.each([400, 500])('keeps a no-data range legend visible when a zero-series query is selected at %ipx', (width) => {
+    const p = makeProps([series('A', 'power', 'zone-a')]);
+    p.width = width;
+    p.data.request.targets = [{ refId: 'A' }, { refId: 'B' }];
+    render(<ClusterviewPanel {...p} />);
+    if (width < 480) {
+      expect(screen.getByLabelText(/power range, Auto/)).toBeInTheDocument();
+    } else {
+      expect(screen.getByText('Auto')).toBeInTheDocument();
+    }
+
+    fireEvent.click(screen.getByRole('radio', { name: 'B' }));
+
+    expect(screen.queryByText('Auto')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('B range, No data')).toHaveTextContent('B');
+    expect(screen.getByLabelText('B range, No data')).toHaveTextContent('No data');
   });
 
   it('shows a warning banner while still rendering cells when only some rows match', () => {
@@ -327,9 +391,10 @@ describe('ClusterviewPanel', () => {
 
       expect(parseFloat(menu.style.left)).toBeLessThan(68);
       expect(parseFloat(menu.style.left) + 240).toBeLessThanOrEqual(300);
-      expect(observers).toHaveLength(2);
-      expect(observers[0].disconnect).toHaveBeenCalled();
-      expect(observers[1].observe).toHaveBeenCalledWith(newContainer);
+      const oldContainerObserver = observers.find((observer) => observer.observe.mock.calls[0]?.[0] === oldContainer);
+      const newContainerObserver = observers.find((observer) => observer.observe.mock.calls[0]?.[0] === newContainer);
+      expect(oldContainerObserver?.disconnect).toHaveBeenCalled();
+      expect(newContainerObserver?.observe).toHaveBeenCalledWith(newContainer);
     } finally {
       global.ResizeObserver = originalResizeObserver;
     }

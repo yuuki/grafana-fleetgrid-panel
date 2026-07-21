@@ -87,6 +87,10 @@ Each tree leaf gets a `CellModel` whose `values` map contains **every** query re
 
 Ranges derive from displayed values rather than raw history so that a transient historical outlier or pre-aggregation sample cannot distort today's color scale.
 
+**Decision: keep the effective range visible in the panel header.** In single mode, the header is present even for one metric. At panel widths of 480 px or more it shows the metric name, range state, formatted endpoints, and a horizontal gradient sampled at 33 points through the metric's existing display processor. Below 480 px it degrades to a compact state icon and range badge whose accessible name includes the state. Endpoint labels use Grafana's Unit and Decimals formatting, and the missing color is excluded because it represents absent data rather than a point on the scale.
+
+The range state distinguishes all four field-config combinations: `Fixed` when both endpoints are explicit, `Auto` when neither is explicit, `Min fixed` when only Min is explicit, and `Max fixed` when only Max is explicit. The effective endpoint values remain visible in every state.
+
 ## 7. Layout
 
 The layout engine recursively measures the tree under a candidate cell size and picks the largest size that fits the panel:
@@ -104,10 +108,10 @@ Cell value text is drawn only when it fits: font size `clamp(cellHeight × 0.38,
 
 **Decision: default is single-metric with a panel-header selector; split-cell rendering is an explicit opt-in (`displayMode: 'split'`), capped at 9 regions.**
 *Alternatives:* (a) split cells by default (the initial recommendation), (b) single with selector, split opt-in, (c) tabs/paging.
-*Rationale:* the user raised the concern that always-split cells would degrade day-to-day dashboard reading (small regions, unfamiliar look) — the common case is monitoring one metric with occasional comparison. So (b): the default stays visually identical to a classic single-metric grid, a radio selector appears in the header when more than one query exists, and split mode is a deliberate choice. Split layouts follow fixed rules (2–3 columns, 2×2, 3×2, 3×3) shared by renderer, legend, and click resolution through a single `splitRects` function, with a legend that includes a position minimap per metric.
+*Rationale:* the user raised the concern that always-split cells would degrade day-to-day dashboard reading (small regions, unfamiliar look) — the common case is monitoring one metric with occasional comparison. So (b): the default keeps a classic single-metric grid, a radio selector appears in the header when more than one query exists, and split mode is a deliberate choice. The header remains present for a single query because it also carries the always-visible range legend. Split layouts follow fixed rules (2–3 columns, 2×2, 3×2, 3×3) shared by renderer, legend, and click resolution through a single `splitRects` function. Each split legend entry combines the position minimap with the metric name, formatted range, and range state; entries wrap as needed while the existing 9-region cap remains in force.
 
 **Decision: two distinct display sets — the selector is based on `refIds`, split mode on `metricInfos`.**
-*Rationale:* a query that returned zero series still deserves visibility in single mode: its refId is selectable and the grid renders entirely in the missing color, which reads as "this query returned nothing" instead of the query silently disappearing. Split mode, however, allocates scarce cell area; regions are allocated only to queries that actually returned data (`metricInfos`), ordered by the dashboard's target (refId) order regardless of frame arrival order. Renderer, legend, and click-region resolution all consume the same ordered set, so what you see, what the legend says, and what a click resolves to cannot diverge (unified after a review finding).
+*Rationale:* a query that returned zero series still deserves visibility in single mode: its refId is selectable, the grid renders entirely in the missing color, and the header keeps an explicit `No data` legend without fabricating endpoints. Split mode, however, allocates scarce cell area; regions are allocated only to queries that actually returned data (`metricInfos`), ordered by the dashboard's target (refId) order regardless of frame arrival order. Renderer, legend, and click-region resolution all consume the same ordered set, so what you see, what the legend says, and what a click resolves to cannot diverge (unified after a review finding).
 
 `displayMode` is normalized as `options.displayMode ?? 'single'` at runtime so dashboards saved before the option existed behave correctly.
 
