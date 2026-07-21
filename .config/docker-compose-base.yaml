@@ -1,7 +1,7 @@
 services:
   grafana:
     user: root
-    container_name: 'yuuk1-clusterview-panel'
+    container_name: 'yuuk1-fleetgrid-panel'
 
     build:
       context: .
@@ -13,13 +13,13 @@ services:
     ports:
       - 3000:3000/tcp
     volumes:
-      - ../dist:/var/lib/grafana/plugins/yuuk1-clusterview-panel
+      - ../dist:/var/lib/grafana/plugins/yuuk1-fleetgrid-panel
       - ../provisioning:/etc/grafana/provisioning
-      - ..:/root/yuuk1-clusterview-panel
+      - ..:/root/yuuk1-fleetgrid-panel
 
     environment:
       NODE_ENV: development
-      GF_LOG_FILTERS: plugin.yuuk1-clusterview-panel:debug
+      GF_LOG_FILTERS: plugin.yuuk1-fleetgrid-panel:debug
       GF_LOG_LEVEL: debug
       GF_DATAPROXY_LOGGING: 1
-      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: yuuk1-clusterview-panel
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: yuuk1-fleetgrid-panel

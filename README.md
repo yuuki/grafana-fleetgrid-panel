@@ -47,10 +47,10 @@ Open the panel editor and add hierarchy levels under **Hierarchy**. The editor l
 | Level | Label | Extract | Layout |
 | --- | --- | --- | --- |
 | 1 | `zone` | As is | Grid (columns: 2) |
-| 2 | `host` | Trailing number | Grid (columns: 8) |
+| 2 | `host` | Trailing number | Grid (columns: 10) |
 | 3 | `gpu` | As is | Grid (columns: 2) |
 
-This `2 / 8 / 2` configuration reproduces a two-column top level, eight hosts per row within each top-level group, and two GPUs per row within each host. Levels are reorderable and there is no fixed depth limit (about 8 levels is a practical maximum).
+This `2 / 10 / 2` configuration reproduces a two-column top level, ten hosts per row within each top-level group, and two GPUs per row within each host. Levels are reorderable and there is no fixed depth limit (about 8 levels is a practical maximum).
 
 ### 3. Choose a color scheme
 
@@ -110,7 +110,7 @@ Clicking a cell resolves in this order:
 
 ## Layout notes
 
-Grid layouts fill groups in row-major order within each parent: with two columns, items `0` and `1` occupy the first row, followed by `2` and `3` on the next row. Configure each hierarchy level independently; for example, the Quick start's `2 / 8 / 2` column counts produce the fixed nested layout described above.
+Grid layouts fill groups in row-major order within each parent: with two columns, items `0` and `1` occupy the first row, followed by `2` and `3` on the next row. Configure each hierarchy level independently; for example, the Quick start's `2 / 10 / 2` column counts produce the fixed nested layout described above.
 
 Cell size is auto-fitted between **6 px** and **40 px** by scanning candidate sizes from large to small and taking the largest that fits the panel. If even 6 px cells do not fit, the size is pinned to 6 px. The panel then scrolls **vertically** when the content is taller than the panel and **horizontally** when it is wider. While scrolling vertically, the current top-most level's group label stays pinned to the top — but only when that top level has its **Group label** enabled, since otherwise there is no label to pin.
 
@@ -203,10 +203,9 @@ The build uses the webpack configuration provided in `.config/`. Data transforma
 
 ## Screenshots
 
-<!-- Add screenshots under src/img/ and reference them here, and register them in
-     plugin.json (info.screenshots) before publishing to the Grafana catalog. -->
+![FleetGrid panel UI](./src/img/fleetgrid-panel.png)
 
-_Screenshots are not yet included. Add them under `src/img/` and list them in `plugin.json` before publishing._
+The example shows two zones and 200 nodes (100 per zone), with four GPU cells per node in a nested zone → host → GPU topology. Each cell is colored by the selected metric and the effective range is shown in the header.
 
 ## License
 

@@ -117,7 +117,7 @@ interface CellPath {
   text: string;
 }
 
-const PATH_RE = /(zone-[a-z0-9]+)\s*\/\s*(node-[a-z0-9]+)\s*\/\s*(gpu\d+)/i;
+const PATH_RE = /(zone-[a-z0-9]+)\s*\/\s*(\d+)\s*\/\s*(gpu\d+)/i;
 
 /**
  * Hovers over (x,y) on the canvas and returns the hierarchy path from the displayed tooltip. null if outside a cell.
@@ -226,13 +226,13 @@ test('hover tooltip lists every metric with its configured unit', async ({
   const point = await findCellPoint(canvas, panel.locator);
   const hit = await readPath(canvas, panel.locator, point.x, point.y);
   expect(hit).not.toBeNull();
-  expect(hit.text).toMatch(/zone-a\s*\/\s*node-a\d+\s*\/\s*gpu\d/);
+  expect(hit.text).toMatch(/zone-a\s*\/\s*\d+\s*\/\s*gpu\d/);
   // Query A = watt, query B = celsius (override). Both appear in the tooltip with units.
   expect(hit.text).toMatch(/\d+(\.\d+)?\s*W\b/);
   expect(hit.text).toContain('°C');
 });
 
-test('renders the provisioned 2 / 8 / 2 grid in row-major order', async ({
+test('renders the provisioned 2 / 10 / 2 grid in row-major order', async ({
   gotoDashboardPage,
   readProvisionedDashboard,
 }) => {
@@ -262,22 +262,22 @@ test('renders the provisioned 2 / 8 / 2 grid in row-major order', async ({
     }
   }
 
-  const zoneAFirstRow = Array.from({ length: 8 }, (_, host) =>
-    ['gpu0', 'gpu1'].map((gpu) => `zone-a/node-a${host + 1}/${gpu}`)
+  const zoneAFirstRow = Array.from({ length: 10 }, (_, host) =>
+    ['gpu0', 'gpu1'].map((gpu) => `zone-a/${host + 1}/${gpu}`)
   ).flat();
   expect(order.slice(0, zoneAFirstRow.length)).toEqual(zoneAFirstRow);
-  expect(order).toContain('zone-b/node-b1/gpu0');
-  expect(order).not.toContain('zone-a/node-a9/gpu0');
+  expect(order).toContain('zone-b/1/gpu0');
+  expect(order).not.toContain('zone-a/11/gpu0');
 
-  // Eight host columns force node-a9 onto the next host row.
+  // Ten host columns force node-a11 onto the next host row.
   let secondRow: CellPath | null = null;
   for (let y = rowY + 5; y <= box.height && secondRow === null; y += 5) {
     const p = await probePath(canvas, panel.locator, firstPoint.x, y);
-    if (p?.host === 'node-a9') {
+    if (p?.host === '11') {
       secondRow = p;
     }
   }
-  expect(secondRow).toMatchObject({ zone: 'zone-a', host: 'node-a9' });
+  expect(secondRow).toMatchObject({ zone: 'zone-a', host: '11' });
 });
 
 test('clicking a cell opens the drilldown popover', async ({ gotoDashboardPage, readProvisionedDashboard }) => {
