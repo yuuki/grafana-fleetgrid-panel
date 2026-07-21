@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
   "type": "panel",
   "name": "FleetGrid",
-  "id": "yuuk1-clusterview-panel",
+  "id": "yuuk1-fleetgrid-panel",
   "info": {
     "keywords": ["panel"],
     "description": "Visualize nested cluster topologies (zones, hosts, GPUs) as a hierarchical grid colored by Prometheus / VictoriaMetrics metrics, with hover tooltips, click drilldown, and multi-metric comparison.",

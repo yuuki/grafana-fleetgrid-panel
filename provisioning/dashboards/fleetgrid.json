@@ -112,7 +112,7 @@
         }
       ],
       "title": "FleetGrid",
-      "type": "yuuk1-clusterview-panel"
+      "type": "yuuk1-fleetgrid-panel"
     },
     {
       "datasource": {
@@ -223,7 +223,7 @@
         }
       ],
       "title": "Data Links",
-      "type": "yuuk1-clusterview-panel"
+      "type": "yuuk1-fleetgrid-panel"
     },
     {
       "datasource": {
@@ -311,7 +311,7 @@
         }
       ],
       "title": "Threshold Mode",
-      "type": "yuuk1-clusterview-panel"
+      "type": "yuuk1-fleetgrid-panel"
     },
     {
       "datasource": {
@@ -404,7 +404,7 @@
         }
       ],
       "title": "Split Mode",
-      "type": "yuuk1-clusterview-panel"
+      "type": "yuuk1-fleetgrid-panel"
     }
   ],
   "preload": false,

@@ -120,7 +120,7 @@ The plugin is not yet published to the Grafana catalog and its release builds ar
 
 ### 1. Get the build
 
-- **From a GitHub Release** — download the `yuuk1-clusterview-panel-<version>.zip` asset attached to the release (built by `.github/workflows/release.yml` whenever a `v*` tag is pushed).
+- **From a GitHub Release** — download the `yuuk1-fleetgrid-panel-<version>.zip` asset attached to the release (built by `.github/workflows/release.yml` whenever a `v*` tag is pushed).
 - **From source** — run `npm install && npm run build`; the output is written to `dist/`.
 
 ### 2. Install into Grafana
@@ -128,13 +128,13 @@ The plugin is not yet published to the Grafana catalog and its release builds ar
 Copy (or extract) the build into Grafana's plugin directory as a folder named after the plugin ID:
 
 ```bash
-cp -r dist "$GF_PATHS_PLUGINS/yuuk1-clusterview-panel"
+cp -r dist "$GF_PATHS_PLUGINS/yuuk1-fleetgrid-panel"
 ```
 
 Because the plugin is unsigned, Grafana refuses to load it unless it is explicitly allow-listed. Set the following on the Grafana server (or in `grafana.ini` under `[plugins]` as `allow_loading_unsigned_plugins`) before starting/restarting it:
 
 ```bash
-GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=yuuk1-clusterview-panel
+GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=yuuk1-fleetgrid-panel
 ```
 
 ### SSH deployment
@@ -149,7 +149,7 @@ RESTART_GRAFANA=1 \
 scripts/deploy-plugin-ssh.sh
 ```
 
-The script supports `DEPLOY_PORT`, `REMOTE_PLUGIN_DIR`, `PLUGIN_OWNER`, and `GRAFANA_SERVICE`. It does not configure Grafana's unsigned-plugin allow-list, so configure `GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=yuuk1-clusterview-panel` on the remote Grafana host separately.
+The script supports `DEPLOY_PORT`, `REMOTE_PLUGIN_DIR`, `PLUGIN_OWNER`, and `GRAFANA_SERVICE`. It does not configure Grafana's unsigned-plugin allow-list, so configure `GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=yuuk1-fleetgrid-panel` on the remote Grafana host separately.
 
 ### 3. Docker / docker-compose example
 
@@ -160,9 +160,9 @@ services:
     ports:
       - '3000:3000'
     environment:
-      - GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=yuuk1-clusterview-panel
+      - GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=yuuk1-fleetgrid-panel
     volumes:
-      - ./dist:/var/lib/grafana/plugins/yuuk1-clusterview-panel
+      - ./dist:/var/lib/grafana/plugins/yuuk1-fleetgrid-panel
 ```
 
 ### 4. Verify

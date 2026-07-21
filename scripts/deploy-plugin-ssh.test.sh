@@ -22,7 +22,7 @@ chmod +x "${FAKE_BIN}/npm" "${FAKE_BIN}/tar" "${FAKE_BIN}/ssh"
     DEPLOY_HOST="grafana.example.test" \
     DEPLOY_USER="deployer" \
     DEPLOY_PORT="2222" \
-    REMOTE_PLUGIN_DIR="/srv/grafana/plugins/yuuk1-clusterview-panel" \
+    REMOTE_PLUGIN_DIR="/srv/grafana/plugins/yuuk1-fleetgrid-panel" \
     PLUGIN_OWNER="grafana:grafana" \
     REMOTE_SUDO="1" \
     RESTART_GRAFANA="1" \
@@ -33,9 +33,9 @@ chmod +x "${FAKE_BIN}/npm" "${FAKE_BIN}/tar" "${FAKE_BIN}/ssh"
 grep -Fq 'npm cwd='"${ROOT_DIR}"' args=run build' "${LOG_FILE}"
 grep -Fq 'tar args=-C dist --no-mac-metadata -cf - .' "${LOG_FILE}"
 grep -Fq 'ssh args=-p 2222 deployer@grafana.example.test' "${LOG_FILE}"
-grep -Fq "sudo mkdir -p '/srv/grafana/plugins/yuuk1-clusterview-panel'" "${LOG_FILE}"
-grep -Fq "sudo chown -R 'grafana:grafana' '/srv/grafana/plugins/yuuk1-clusterview-panel'" "${LOG_FILE}"
-grep -Fq "sudo chmod -R a+rX '/srv/grafana/plugins/yuuk1-clusterview-panel'" "${LOG_FILE}"
+grep -Fq "sudo mkdir -p '/srv/grafana/plugins/yuuk1-fleetgrid-panel'" "${LOG_FILE}"
+grep -Fq "sudo chown -R 'grafana:grafana' '/srv/grafana/plugins/yuuk1-fleetgrid-panel'" "${LOG_FILE}"
+grep -Fq "sudo chmod -R a+rX '/srv/grafana/plugins/yuuk1-fleetgrid-panel'" "${LOG_FILE}"
 grep -Fq "sudo systemctl restart 'grafana-server'" "${LOG_FILE}"
 
 printf '%s\n' 'deploy-plugin-ssh.sh: pass'

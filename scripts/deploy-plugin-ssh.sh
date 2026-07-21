@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-PLUGIN_ID="yuuk1-clusterview-panel"
+PLUGIN_ID="yuuk1-fleetgrid-panel"
 DEPLOY_HOST="${DEPLOY_HOST:-}"
 DEPLOY_USER="${DEPLOY_USER:-}"
 DEPLOY_PORT="${DEPLOY_PORT:-}"
