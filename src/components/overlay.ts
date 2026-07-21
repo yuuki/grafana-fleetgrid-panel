@@ -1,7 +1,7 @@
 /** Shares the placement calculation for click-originated overlays (popover/link menu). */
 
 export interface VisibleBounds {
-  /** The top-left/bottom-right corners of the visible range (content coordinates) at click time */
+  /** The top-left/bottom-right corners of the visible range in content coordinates */
   minX: number;
   minY: number;
   maxX: number;
