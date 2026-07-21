@@ -60,7 +60,8 @@
             "label": "zone",
             "extract": "raw",
             "sort": "natural",
-            "layout": "vertical",
+            "layout": "grid",
+            "gridColumns": 2,
             "showBorder": true,
             "showLabel": true
           },
@@ -69,7 +70,7 @@
             "extract": "raw",
             "sort": "natural",
             "layout": "grid",
-            "gridColumns": 3,
+            "gridColumns": 8,
             "showBorder": true,
             "showLabel": true
           },
@@ -98,7 +99,7 @@
           },
           "refId": "A",
           "scenarioId": "csv_content",
-          "csvContent": "zone,host,gpu,power\nzone-a,node-a1,gpu0,110\nzone-a,node-a1,gpu1,130\nzone-a,node-a2,gpu0,205\nzone-a,node-a2,gpu1,175\nzone-a,node-a9,gpu0,320\nzone-a,node-a9,gpu1,260\nzone-a,node-a10,gpu0,150\nzone-a,node-a10,gpu1,290\nzone-b,node-b1,gpu0,100\nzone-b,node-b1,gpu1,140\nzone-b,node-b2,gpu0,230\nzone-b,node-b2,gpu1,185\nzone-b,node-b9,gpu0,300\nzone-b,node-b9,gpu1,270\nzone-b,node-b10,gpu0,160\nzone-b,node-b10,gpu1,210"
+          "csvContent": "zone,host,gpu,power\nzone-a,node-a1,gpu0,110\nzone-a,node-a1,gpu1,130\nzone-a,node-a2,gpu0,205\nzone-a,node-a2,gpu1,175\nzone-a,node-a3,gpu0,190\nzone-a,node-a3,gpu1,215\nzone-a,node-a4,gpu0,240\nzone-a,node-a4,gpu1,225\nzone-a,node-a5,gpu0,275\nzone-a,node-a5,gpu1,245\nzone-a,node-a6,gpu0,180\nzone-a,node-a6,gpu1,200\nzone-a,node-a7,gpu0,295\nzone-a,node-a7,gpu1,285\nzone-a,node-a8,gpu0,250\nzone-a,node-a8,gpu1,310\nzone-a,node-a9,gpu0,320\nzone-a,node-a9,gpu1,260\nzone-a,node-a10,gpu0,150\nzone-a,node-a10,gpu1,290\nzone-b,node-b1,gpu0,100\nzone-b,node-b1,gpu1,140\nzone-b,node-b2,gpu0,230\nzone-b,node-b2,gpu1,185\nzone-b,node-b3,gpu0,195\nzone-b,node-b3,gpu1,210\nzone-b,node-b4,gpu0,235\nzone-b,node-b4,gpu1,220\nzone-b,node-b5,gpu0,265\nzone-b,node-b5,gpu1,255\nzone-b,node-b6,gpu0,175\nzone-b,node-b6,gpu1,205\nzone-b,node-b7,gpu0,305\nzone-b,node-b7,gpu1,280\nzone-b,node-b8,gpu0,245\nzone-b,node-b8,gpu1,315\nzone-b,node-b9,gpu0,300\nzone-b,node-b9,gpu1,270\nzone-b,node-b10,gpu0,160\nzone-b,node-b10,gpu1,210"
         },
         {
           "datasource": {
@@ -107,7 +108,7 @@
           },
           "refId": "B",
           "scenarioId": "csv_content",
-          "csvContent": "zone,host,gpu,temp\nzone-a,node-a1,gpu0,60\nzone-a,node-a1,gpu1,64\nzone-a,node-a2,gpu0,72\nzone-a,node-a2,gpu1,68\nzone-a,node-a9,gpu0,88\nzone-a,node-a9,gpu1,82\nzone-a,node-a10,gpu0,66\nzone-a,node-a10,gpu1,85\nzone-b,node-b1,gpu0,58\nzone-b,node-b1,gpu1,63\nzone-b,node-b2,gpu0,76\nzone-b,node-b2,gpu1,70\nzone-b,node-b9,gpu0,86\nzone-b,node-b9,gpu1,80\nzone-b,node-b10,gpu0,65\nzone-b,node-b10,gpu1,74"
+          "csvContent": "zone,host,gpu,temp\nzone-a,node-a1,gpu0,60\nzone-a,node-a1,gpu1,64\nzone-a,node-a2,gpu0,72\nzone-a,node-a2,gpu1,68\nzone-a,node-a3,gpu0,70\nzone-a,node-a3,gpu1,73\nzone-a,node-a4,gpu0,75\nzone-a,node-a4,gpu1,71\nzone-a,node-a5,gpu0,79\nzone-a,node-a5,gpu1,77\nzone-a,node-a6,gpu0,67\nzone-a,node-a6,gpu1,69\nzone-a,node-a7,gpu0,84\nzone-a,node-a7,gpu1,81\nzone-a,node-a8,gpu0,78\nzone-a,node-a8,gpu1,83\nzone-a,node-a9,gpu0,88\nzone-a,node-a9,gpu1,82\nzone-a,node-a10,gpu0,66\nzone-a,node-a10,gpu1,85\nzone-b,node-b1,gpu0,58\nzone-b,node-b1,gpu1,63\nzone-b,node-b2,gpu0,76\nzone-b,node-b2,gpu1,70\nzone-b,node-b3,gpu0,69\nzone-b,node-b3,gpu1,72\nzone-b,node-b4,gpu0,74\nzone-b,node-b4,gpu1,71\nzone-b,node-b5,gpu0,80\nzone-b,node-b5,gpu1,78\nzone-b,node-b6,gpu0,66\nzone-b,node-b6,gpu1,68\nzone-b,node-b7,gpu0,83\nzone-b,node-b7,gpu1,79\nzone-b,node-b8,gpu0,77\nzone-b,node-b8,gpu1,84\nzone-b,node-b9,gpu0,86\nzone-b,node-b9,gpu1,80\nzone-b,node-b10,gpu0,65\nzone-b,node-b10,gpu1,74"
         }
       ],
       "title": "ClusterView",

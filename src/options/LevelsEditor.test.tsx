@@ -128,4 +128,29 @@ describe('LevelsEditor (component)', () => {
     render(<LevelsEditor {...editorProps([level], jest.fn(), [tableFrame])} />);
     expect(screen.getByText(/groups/)).toHaveTextContent('2 groups: 001, 002');
   });
+
+  it('shows a layout combobox and reveals Columns after choosing Grid', () => {
+    render(<StatefulLevelsEditor initial={[{ ...DEFAULT_LEVEL, label: 'host', layout: 'flow' }]} />);
+    const selects = screen.getAllByRole('combobox');
+    expect(selects).toHaveLength(2);
+
+    fireEvent.keyDown(selects[1], { key: 'ArrowDown', code: 'ArrowDown' });
+    fireEvent.keyDown(selects[1], { key: 'ArrowDown', code: 'ArrowDown' });
+    fireEvent.keyDown(selects[1], { key: 'Enter', code: 'Enter' });
+
+    expect(screen.getByRole('spinbutton')).toHaveValue(1);
+  });
+
+  it('stores grid columns as a positive integer', () => {
+    const onChange = jest.fn();
+    const level = { ...DEFAULT_LEVEL, label: 'gpu', layout: 'grid' as const, gridColumns: 2 };
+    const { rerender } = render(<LevelsEditor {...editorProps([level], onChange)} />);
+
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '2.8' } });
+    expect(onChange).toHaveBeenLastCalledWith([{ ...level, gridColumns: 2 }]);
+
+    rerender(<LevelsEditor {...editorProps([level], onChange)} />);
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '' } });
+    expect(onChange).toHaveBeenLastCalledWith([{ ...level, gridColumns: 1 }]);
+  });
 });

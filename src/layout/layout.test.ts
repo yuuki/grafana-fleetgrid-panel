@@ -5,6 +5,12 @@ const cell = (path: string[]): CellModel => ({ path, labels: {}, values: new Map
 
 const leaf = (key: string, path: string[]): HierarchyNode => ({ key, path, children: [], cell: cell(path) });
 
+const oneLevelTree = (keys: string[]): HierarchyNode => ({
+  key: '',
+  path: [],
+  children: keys.map((key) => leaf(key, [key])),
+});
+
 function tree(zones: string[][], gpuKeys: string[]): HierarchyNode {
   // zones: [['zone-a'], ...] hang gpuKeys leaves under each zone
   return {
@@ -14,6 +20,24 @@ function tree(zones: string[][], gpuKeys: string[]): HierarchyNode {
       key: z,
       path: [z],
       children: gpuKeys.map((g) => leaf(g, [z, g])),
+    })),
+  };
+}
+
+function nestedGridTree(podCount: number, hostCount: number, gpuCount: number): HierarchyNode {
+  return {
+    key: '',
+    path: [],
+    children: Array.from({ length: podCount }, (_, pod) => ({
+      key: `pod${pod + 1}`,
+      path: [`pod${pod + 1}`],
+      children: Array.from({ length: hostCount }, (_, host) => ({
+        key: String(host + 1).padStart(2, '0'),
+        path: [`pod${pod + 1}`, String(host + 1).padStart(2, '0')],
+        children: Array.from({ length: gpuCount }, (_, gpu) =>
+          leaf(String(gpu), [`pod${pod + 1}`, String(host + 1).padStart(2, '0'), String(gpu)])
+        ),
+      })),
     })),
   };
 }
@@ -122,5 +146,77 @@ describe('computeLayout', () => {
     const r = computeLayout(tree(zones, ['0']), flow, 2 * (S_MAX + 4) + 2, 800);
     const ys = new Set(r.cells.map((c) => c.y));
     expect(ys.size).toBe(2);
+  });
+
+  it('lays out three hierarchy levels in row-major 2 / 8 / 2 column grids', () => {
+    const cfg: LevelDef[] = [
+      { ...DEFAULT_LEVEL, label: 'pod', layout: 'grid', gridColumns: 2, showLabel: false },
+      { ...DEFAULT_LEVEL, label: 'host', layout: 'grid', gridColumns: 8, showLabel: false },
+      { ...DEFAULT_LEVEL, label: 'gpu', layout: 'grid', gridColumns: 2, showLabel: false },
+    ];
+    const r = computeLayout(nestedGridTree(2, 9, 4), cfg, 2000, 1000);
+    const position = (path: string[]) => {
+      const found = r.cells.find((c) => c.cell.path.join('/') === path.join('/'));
+      expect(found).toBeDefined();
+      return { x: found!.x, y: found!.y };
+    };
+
+    expect(r.cellSize).toBe(S_MAX);
+    expect(position(['pod1', '01', '0'])).toEqual({ x: 0, y: 0 });
+    expect(position(['pod1', '01', '1'])).toEqual({ x: S_MAX + CELL_GAP, y: 0 });
+    expect(position(['pod1', '01', '2'])).toEqual({ x: 0, y: S_MAX + CELL_GAP });
+    expect(position(['pod1', '02', '0'])).toEqual({ x: 2 * S_MAX + CELL_GAP + GROUP_GAP, y: 0 });
+    expect(position(['pod1', '09', '0'])).toEqual({ x: 0, y: 2 * S_MAX + CELL_GAP + GROUP_GAP });
+    expect(position(['pod2', '01', '0']).x).toBeGreaterThan(position(['pod1', '08', '1']).x);
+
+    const occupied = new Set(r.cells.map((c) => `${c.x},${c.y}`));
+    expect(occupied.size).toBe(r.cells.length);
+  });
+
+  it('keeps an incomplete grid row and ignores columns beyond the child count', () => {
+    const incomplete = [{ ...DEFAULT_LEVEL, label: 'gpu', layout: 'grid' as const, gridColumns: 2 }];
+    const wide = [{ ...DEFAULT_LEVEL, label: 'gpu', layout: 'grid' as const, gridColumns: 8 }];
+    const root = oneLevelTree(['0', '1', '2']);
+
+    const incompleteResult = computeLayout(root, incomplete, 800, 800);
+    expect(incompleteResult.cells.map(({ x, y }) => ({ x, y }))).toEqual([
+      { x: 0, y: 0 },
+      { x: S_MAX + CELL_GAP, y: 0 },
+      { x: 0, y: S_MAX + CELL_GAP },
+    ]);
+
+    const wideResult = computeLayout(root, wide, 800, 800);
+    expect(wideResult.cells.map(({ x, y }) => ({ x, y }))).toEqual([
+      { x: 0, y: 0 },
+      { x: S_MAX + CELL_GAP, y: 0 },
+      { x: 2 * (S_MAX + CELL_GAP), y: 0 },
+    ]);
+  });
+
+  it.each([undefined, 0, -2, Number.NaN, Number.POSITIVE_INFINITY])(
+    'normalizes invalid grid column count %s to one column',
+    (gridColumns) => {
+      const cfg: LevelDef[] = [{ ...DEFAULT_LEVEL, label: 'gpu', layout: 'grid', gridColumns }];
+      const root = oneLevelTree(['0', '1', '2']);
+      const r = computeLayout(root, cfg, 800, 800);
+
+      expect(r.cells.map(({ x, y }) => ({ x, y }))).toEqual([
+        { x: 0, y: 0 },
+        { x: 0, y: S_MAX + CELL_GAP },
+        { x: 0, y: 2 * (S_MAX + CELL_GAP) },
+      ]);
+    }
+  );
+
+  it('floors a fractional grid column count', () => {
+    const cfg: LevelDef[] = [{ ...DEFAULT_LEVEL, label: 'gpu', layout: 'grid', gridColumns: 2.8 }];
+    const root = oneLevelTree(['0', '1', '2']);
+    const r = computeLayout(root, cfg, 800, 800);
+
+    expect(r.cells.map(({ x, y }) => ({ x, y }))).toEqual([
+      { x: 0, y: 0 },
+      { x: S_MAX + CELL_GAP, y: 0 },
+      { x: 0, y: S_MAX + CELL_GAP },
+    ]);
   });
 });

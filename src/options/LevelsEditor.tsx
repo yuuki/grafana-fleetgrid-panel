@@ -1,9 +1,21 @@
 import React from 'react';
 import { DataFrame, FieldType, SelectableValue, StandardEditorProps } from '@grafana/data';
-import { Button, IconButton, InlineField, InlineFieldRow, Input, RadioButtonGroup, Select, Switch } from '@grafana/ui';
+import {
+  Button,
+  Combobox,
+  ComboboxOption,
+  IconButton,
+  InlineField,
+  InlineFieldRow,
+  Input,
+  RadioButtonGroup,
+  Select,
+  Switch,
+} from '@grafana/ui';
 import { DEFAULT_LEVEL, ExtractPreset, LevelDef, LevelLayout, SortOrder } from '../types';
 import { extractKey, naturalCompare } from '../data/hierarchy';
 import { isTableFrame } from '../data/normalize';
+import { normalizeGridColumns } from '../layout/layout';
 
 export function detectLabelKeys(frames: DataFrame[]): string[] {
   const keys = new Set<string>();
@@ -56,7 +68,7 @@ const SORT_OPTIONS: Array<SelectableValue<SortOrder>> = [
   { value: 'naturalDesc', label: 'Descending' },
   { value: 'none', label: 'None' },
 ];
-const LAYOUT_OPTIONS: Array<SelectableValue<LevelLayout>> = [
+const LAYOUT_OPTIONS: Array<ComboboxOption<LevelLayout>> = [
   { value: 'vertical', label: 'Vertical stack' },
   { value: 'horizontal', label: 'Horizontal' },
   { value: 'flow', label: 'Flow (wrap)' },
@@ -131,18 +143,21 @@ export const LevelsEditor: React.FC<StandardEditorProps<LevelDef[]>> = ({ value,
                 <RadioButtonGroup options={SORT_OPTIONS} value={level.sort} onChange={(v) => update(i, { sort: v })} />
               </InlineField>
               <InlineField label="Layout">
-                <RadioButtonGroup
+                <Combobox
                   options={LAYOUT_OPTIONS}
                   value={level.layout}
-                  onChange={(v) => update(i, { layout: v })}
+                  onChange={(v) => update(i, { layout: v.value })}
+                  width={20}
                 />
               </InlineField>
               {level.layout === 'grid' && (
                 <InlineField label="Columns">
                   <Input
                     type="number"
-                    value={level.gridColumns ?? 1}
-                    onChange={(e) => update(i, { gridColumns: Number(e.currentTarget.value) })}
+                    min={1}
+                    step={1}
+                    value={normalizeGridColumns(level.gridColumns)}
+                    onChange={(e) => update(i, { gridColumns: normalizeGridColumns(Number(e.currentTarget.value)) })}
                     width={8}
                   />
                 </InlineField>

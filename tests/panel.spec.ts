@@ -123,11 +123,20 @@ const PATH_RE = /(zone-[a-z0-9]+)\s*\/\s*(node-[a-z0-9]+)\s*\/\s*(gpu\d+)/i;
  * Hovers over (x,y) on the canvas and returns the hierarchy path from the displayed tooltip. null if outside a cell.
  * Polls briefly for the tooltip content to appear rather than using a fixed sleep (a safeguard against missed detection on slow environments).
  */
-async function readPath(canvas: Locator, panel: Locator, x: number, y: number): Promise<CellPath | null> {
+async function readPath(canvas: Locator, panel: Locator, x: number, y: number, timeout = 300): Promise<CellPath | null> {
   await canvas.hover({ position: { x, y } });
-  // Right after hover, the previous cell's tooltip may still linger. Wait one frame before reading the content (prevents misreading the old tooltip).
+  return readCurrentPath(canvas, panel, timeout);
+}
+
+/** Reads a path for structural layout probing using the same browser event as an end-user hover. */
+async function probePath(canvas: Locator, panel: Locator, x: number, y: number): Promise<CellPath | null> {
+  return readPath(canvas, panel, x, y, 120);
+}
+
+async function readCurrentPath(canvas: Locator, panel: Locator, timeout = 300): Promise<CellPath | null> {
+  // Right after a pointer event, the previous cell's tooltip may still linger. Wait one frame before reading the content (prevents misreading the old tooltip).
   await canvas.page().evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => r())));
-  const deadline = Date.now() + 300;
+  const deadline = Date.now() + timeout;
   do {
     const text = await panel.innerText();
     const m = text.match(PATH_RE);
@@ -141,12 +150,33 @@ async function readPath(canvas: Locator, panel: Locator, x: number, y: number): 
 
 /** Scans a given column (x) from the top and returns the y where a cell is hit */
 async function findCellY(canvas: Locator, panel: Locator, x: number): Promise<number> {
-  for (let y = 30; y <= 150; y += 5) {
-    if (await readPath(canvas, panel, x, y)) {
+  const box = await canvas.boundingBox();
+  if (!box) {
+    throw new Error('canvas has no bounding box');
+  }
+  for (let y = 0; y <= box.height; y += 5) {
+    if (await readPath(canvas, panel, x, y, 120)) {
       return y;
     }
   }
   throw new Error('no cell found while probing the column');
+}
+
+/** Finds a cell without assuming a particular panel padding or canvas offset. */
+async function findCellPoint(canvas: Locator, panel: Locator): Promise<{ x: number; y: number }> {
+  const box = await canvas.boundingBox();
+  if (!box) {
+    throw new Error('canvas has no bounding box');
+  }
+  const xCandidates = [12, 25, box.width / 4, box.width / 2, (box.width * 3) / 4].map(Math.floor);
+  for (const x of xCandidates) {
+    for (let y = 0; y <= box.height; y += 5) {
+      if (await readPath(canvas, panel, x, y, 120)) {
+        return { x, y };
+      }
+    }
+  }
+  throw new Error('no cell found while probing the canvas');
 }
 
 test('main panel renders the canvas with painted pixels', async ({ gotoDashboardPage, readProvisionedDashboard }) => {
@@ -193,20 +223,16 @@ test('hover tooltip lists every metric with its configured unit', async ({
   const canvas = panel.locator.locator('canvas');
   await expect(canvas).toBeVisible();
 
-  let hit: CellPath | null = null;
-  for (let y = 40; y <= 140 && hit === null; y += 6) {
-    hit = await readPath(canvas, panel.locator, 25, y);
-  }
-  if (hit === null) {
-    throw new Error('no cell tooltip found while probing the first row');
-  }
+  const point = await findCellPoint(canvas, panel.locator);
+  const hit = await readPath(canvas, panel.locator, point.x, point.y);
+  expect(hit).not.toBeNull();
   expect(hit.text).toMatch(/zone-a\s*\/\s*node-a\d+\s*\/\s*gpu\d/);
   // Query A = watt, query B = celsius (override). Both appear in the tooltip with units.
   expect(hit.text).toMatch(/\d+(\.\d+)?\s*W\b/);
   expect(hit.text).toContain('°C');
 });
 
-test('hosts are ordered by natural sort (a2 before a9, a10 wraps to next row)', async ({
+test('renders the provisioned 2 / 8 / 2 grid in row-major order', async ({
   gotoDashboardPage,
   readProvisionedDashboard,
 }) => {
@@ -220,42 +246,38 @@ test('hosts are ordered by natural sort (a2 before a9, a10 wraps to next row)', 
     throw new Error('canvas has no bounding box');
   }
 
-  // Identify the y of zone-a's first cell row
-  let rowY: number | null = null;
-  for (let y = 40; y <= 140 && rowY === null; y += 5) {
-    const p = await readPath(canvas, panel.locator, 25, y);
-    if (p?.zone === 'zone-a') {
-      rowY = y;
-    }
-  }
-  if (rowY === null) {
-    throw new Error('could not locate the first cell row of zone-a');
-  }
+  // Identify the y of zone-a's first cell row without assuming Grafana's panel padding.
+  const firstPoint = await findCellPoint(canvas, panel.locator);
+  const firstCell = await probePath(canvas, panel.locator, firstPoint.x, firstPoint.y);
+  expect(firstCell?.zone).toBe('zone-a');
+  const rowY = firstPoint.y;
 
-  // Scan that row left to right and collect the appearance order of hosts
+  // Scan the first row left to right and collect each cell path once.
   const order: string[] = [];
-  for (let x = 4; x <= box.width; x += 10) {
-    const p = await readPath(canvas, panel.locator, x, rowY);
-    if (p?.zone === 'zone-a' && order[order.length - 1] !== p.host) {
-      order.push(p.host);
+  for (let x = 2; x <= box.width; x += 5) {
+    const p = await probePath(canvas, panel.locator, x, rowY);
+    const key = p && `${p.zone}/${p.host}/${p.gpu}`;
+    if (key && order[order.length - 1] !== key) {
+      order.push(key);
     }
   }
-  // Row 1 of a 3-column grid = natural sort order. Lexicographic order would give [node-a1, node-a10, node-a2].
-  expect(order.slice(0, 3)).toEqual(['node-a1', 'node-a2', 'node-a9']);
-  expect(order).not.toContain('node-a10');
 
-  // node-a10 is on the next grid row (col0, directly below node-a1). Confirms it isn't missing or dropped.
-  let a10Y: number | null = null;
-  for (let y = rowY + 20; y <= rowY + 140 && a10Y === null; y += 5) {
-    const p = await readPath(canvas, panel.locator, 25, y);
-    if (p?.host === 'node-a10') {
-      a10Y = y;
+  const zoneAFirstRow = Array.from({ length: 8 }, (_, host) =>
+    ['gpu0', 'gpu1'].map((gpu) => `zone-a/node-a${host + 1}/${gpu}`)
+  ).flat();
+  expect(order.slice(0, zoneAFirstRow.length)).toEqual(zoneAFirstRow);
+  expect(order).toContain('zone-b/node-b1/gpu0');
+  expect(order).not.toContain('zone-a/node-a9/gpu0');
+
+  // Eight host columns force node-a9 onto the next host row.
+  let secondRow: CellPath | null = null;
+  for (let y = rowY + 5; y <= box.height && secondRow === null; y += 5) {
+    const p = await probePath(canvas, panel.locator, firstPoint.x, y);
+    if (p?.host === 'node-a9') {
+      secondRow = p;
     }
   }
-  if (a10Y === null) {
-    throw new Error('node-a10 was not found on the row below the first');
-  }
-  expect(a10Y).toBeGreaterThan(rowY);
+  expect(secondRow).toMatchObject({ zone: 'zone-a', host: 'node-a9' });
 });
 
 test('clicking a cell opens the drilldown popover', async ({ gotoDashboardPage, readProvisionedDashboard }) => {
@@ -265,16 +287,8 @@ test('clicking a cell opens the drilldown popover', async ({ gotoDashboardPage, 
   const canvas = panel.locator.locator('canvas');
   await expect(canvas).toBeVisible();
 
-  let cellY: number | null = null;
-  for (let y = 40; y <= 140 && cellY === null; y += 5) {
-    if (await readPath(canvas, panel.locator, 25, y)) {
-      cellY = y;
-    }
-  }
-  if (cellY === null) {
-    throw new Error('no cell found to click');
-  }
-  await canvas.click({ position: { x: 25, y: cellY } });
+  const point = await findCellPoint(canvas, panel.locator);
+  await canvas.click({ position: point });
   // The popover opens (close button). Since it's instant TestData, there's no time series and no sparkline appears.
   await expect(panel.locator.getByRole('button', { name: 'Close' })).toBeVisible();
   await expect(panel.locator.getByText('No time series').first()).toBeVisible();
@@ -307,8 +321,9 @@ test('threshold color mode renders discrete colors', async ({ gotoDashboardPage,
   const mainCanvas = main.locator.locator('canvas');
   await expect(mainCanvas).toBeVisible();
   // To avoid capturing 0 colors on a slow environment, wait for rendering to complete (continuous coloring = many colors) before taking the final value
-  await expect.poll(() => cellFillColorCount(mainCanvas, 15)).toBeGreaterThan(4);
-  const continuousColors = await cellFillColorCount(mainCanvas, 15);
+  // Continuous colors are mostly unique per cell, so count each locally uniform color once; threshold bands repeat across many cells below.
+  await expect.poll(() => cellFillColorCount(mainCanvas, 1)).toBeGreaterThan(4);
+  const continuousColors = await cellFillColorCount(mainCanvas, 1);
 
   const threshold = await dashboardPage.getPanelByTitle('Threshold Mode');
   await threshold.scrollIntoView();
