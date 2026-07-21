@@ -134,6 +134,20 @@ Because the plugin is unsigned, Grafana refuses to load it unless it is explicit
 GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=yuuk1-clusterview-panel
 ```
 
+### SSH deployment
+
+To build locally and deploy `dist/` over SSH, run `scripts/deploy-plugin-ssh.sh` from the repository. `DEPLOY_HOST` is required; the other settings are optional:
+
+```bash
+DEPLOY_HOST=grafana.example.com \
+DEPLOY_USER=deployer \
+REMOTE_SUDO=1 \
+RESTART_GRAFANA=1 \
+scripts/deploy-plugin-ssh.sh
+```
+
+The script supports `DEPLOY_PORT`, `REMOTE_PLUGIN_DIR`, `PLUGIN_OWNER`, and `GRAFANA_SERVICE`. It does not configure Grafana's unsigned-plugin allow-list, so configure `GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=yuuk1-clusterview-panel` on the remote Grafana host separately.
+
 ### 3. Docker / docker-compose example
 
 ```yaml
