@@ -1,5 +1,5 @@
 {
-  "name": "clusterview",
+  "name": "fleetgrid",
   "version": "0.2.1",
   "scripts": {
     "build": "webpack -c ./.config/webpack/webpack.config.ts --env production",

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { DataFrame, Field, LinkModel, PanelProps } from '@grafana/data';
 import { PanelDataErrorView } from '@grafana/runtime';
 import { RadioButtonGroup, useTheme2 } from '@grafana/ui';
-import { CellModel, ClusterviewOptions } from '../types';
+import { CellModel, FleetGridOptions } from '../types';
 import { buildModel } from '../data/model';
 import { computeLayout } from '../layout/layout';
 import { renderCanvas } from '../render/renderer';
@@ -35,7 +35,7 @@ const measureVisibleBounds = (el: HTMLElement): VisibleBounds => {
 const sameVisibleBounds = (a: VisibleBounds, b: VisibleBounds): boolean =>
   a.minX === b.minX && a.minY === b.minY && a.maxX === b.maxX && a.maxY === b.maxY;
 
-export const ClusterviewPanel: React.FC<PanelProps<ClusterviewOptions>> = (props) => {
+export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) => {
   const { data, width, height, options, timeZone } = props;
   const theme = useTheme2();
   const canvasRef = useRef<HTMLCanvasElement>(null);

@@ -1,10 +1,10 @@
 import { test, expect } from '@grafana/plugin-e2e';
 import type { Locator } from '@playwright/test';
 
-// The subject under test is provisioning/dashboards/clusterview.json (uid: clusterview-e2e).
+// The subject under test is provisioning/dashboards/fleetgrid.json (uid: fleetgrid-e2e).
 // Since the panel renders into a single <canvas>, items that can't be asserted via the DOM
 // are verified automatically using the canvas's getImageData and the tooltip/legend/popover (all React DOM).
-const FILE = 'clusterview.json';
+const FILE = 'fleetgrid.json';
 
 /** Whether even a single opaque pixel is drawn on the canvas (= whether something was actually rendered) */
 async function isPainted(canvas: Locator): Promise<boolean> {
@@ -182,7 +182,7 @@ async function findCellPoint(canvas: Locator, panel: Locator): Promise<{ x: numb
 test('main panel renders the canvas with painted pixels', async ({ gotoDashboardPage, readProvisionedDashboard }) => {
   const dashboard = await readProvisionedDashboard({ fileName: FILE });
   const dashboardPage = await gotoDashboardPage({ uid: dashboard.uid });
-  const panel = await dashboardPage.getPanelByTitle('ClusterView');
+  const panel = await dashboardPage.getPanelByTitle('FleetGrid');
   const canvas = panel.locator.locator('canvas');
   await expect(canvas).toBeVisible();
   await expect.poll(() => isPainted(canvas)).toBe(true);
@@ -194,7 +194,7 @@ test('metric selector exposes two options and switching re-renders', async ({
 }) => {
   const dashboard = await readProvisionedDashboard({ fileName: FILE });
   const dashboardPage = await gotoDashboardPage({ uid: dashboard.uid });
-  const panel = await dashboardPage.getPanelByTitle('ClusterView');
+  const panel = await dashboardPage.getPanelByTitle('FleetGrid');
   const canvas = panel.locator.locator('canvas');
   await expect(canvas).toBeVisible();
 
@@ -219,7 +219,7 @@ test('hover tooltip lists every metric with its configured unit', async ({
 }) => {
   const dashboard = await readProvisionedDashboard({ fileName: FILE });
   const dashboardPage = await gotoDashboardPage({ uid: dashboard.uid });
-  const panel = await dashboardPage.getPanelByTitle('ClusterView');
+  const panel = await dashboardPage.getPanelByTitle('FleetGrid');
   const canvas = panel.locator.locator('canvas');
   await expect(canvas).toBeVisible();
 
@@ -238,7 +238,7 @@ test('renders the provisioned 2 / 8 / 2 grid in row-major order', async ({
 }) => {
   const dashboard = await readProvisionedDashboard({ fileName: FILE });
   const dashboardPage = await gotoDashboardPage({ uid: dashboard.uid });
-  const panel = await dashboardPage.getPanelByTitle('ClusterView');
+  const panel = await dashboardPage.getPanelByTitle('FleetGrid');
   const canvas = panel.locator.locator('canvas');
   await expect(canvas).toBeVisible();
   const box = await canvas.boundingBox();
@@ -283,7 +283,7 @@ test('renders the provisioned 2 / 8 / 2 grid in row-major order', async ({
 test('clicking a cell opens the drilldown popover', async ({ gotoDashboardPage, readProvisionedDashboard }) => {
   const dashboard = await readProvisionedDashboard({ fileName: FILE });
   const dashboardPage = await gotoDashboardPage({ uid: dashboard.uid });
-  const panel = await dashboardPage.getPanelByTitle('ClusterView');
+  const panel = await dashboardPage.getPanelByTitle('FleetGrid');
   const canvas = panel.locator.locator('canvas');
   await expect(canvas).toBeVisible();
 
@@ -316,7 +316,7 @@ test('threshold color mode renders discrete colors', async ({ gotoDashboardPage,
   const dashboardPage = await gotoDashboardPage({ uid: dashboard.uid });
 
   // Continuous coloring (main) produces many colors per value; threshold coloring produces few colors per band
-  const main = await dashboardPage.getPanelByTitle('ClusterView');
+  const main = await dashboardPage.getPanelByTitle('FleetGrid');
   await main.scrollIntoView();
   const mainCanvas = main.locator.locator('canvas');
   await expect(mainCanvas).toBeVisible();
@@ -342,7 +342,7 @@ test('threshold color mode renders discrete colors', async ({ gotoDashboardPage,
 test('panel keeps rendering after the viewport shrinks', async ({ gotoDashboardPage, readProvisionedDashboard }) => {
   const dashboard = await readProvisionedDashboard({ fileName: FILE });
   const dashboardPage = await gotoDashboardPage({ uid: dashboard.uid });
-  const panel = await dashboardPage.getPanelByTitle('ClusterView');
+  const panel = await dashboardPage.getPanelByTitle('FleetGrid');
   const canvas = panel.locator.locator('canvas');
   await expect(canvas).toBeVisible();
 

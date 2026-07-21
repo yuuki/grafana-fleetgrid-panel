@@ -2,7 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { FieldType, LoadingState, getDefaultTimeRange, toDataFrame } from '@grafana/data';
 import { DEFAULT_LEVEL } from '../types';
-import { ClusterviewPanel } from './ClusterviewPanel';
+import { FleetGridPanel } from './FleetGridPanel';
 import { fetchDrilldownFrames } from '../drilldown/requery';
 
 jest.mock('@grafana/runtime', () => ({
@@ -55,15 +55,15 @@ const makeProps = (frames: unknown[]): any => ({
   },
 });
 
-describe('ClusterviewPanel', () => {
+describe('FleetGridPanel', () => {
   it('renders canvas and a metric selector for multiple queries', () => {
-    render(<ClusterviewPanel {...makeProps([series('A', 'power', 'zone-a'), series('B', 'temp', 'zone-a')])} />);
+    render(<FleetGridPanel {...makeProps([series('A', 'power', 'zone-a'), series('B', 'temp', 'zone-a')])} />);
     expect(document.querySelector('canvas')).toBeInTheDocument();
     expect(screen.getAllByRole('radio')).toHaveLength(2);
   });
 
   it('always shows a range legend and reserves the measured header height for a single query', () => {
-    render(<ClusterviewPanel {...makeProps([series('A', 'power', 'zone-a')])} />);
+    render(<FleetGridPanel {...makeProps([series('A', 'power', 'zone-a')])} />);
     expect(screen.getByLabelText(/power range, Auto/)).toBeInTheDocument();
     expect(document.querySelector('canvas')!.parentElement).toHaveStyle({ height: '268px' });
   });
@@ -71,7 +71,7 @@ describe('ClusterviewPanel', () => {
   it('clamps the scroll container height to zero when the panel is shorter than its header', () => {
     const p = makeProps([series('A', 'power', 'zone-a')]);
     p.height = 20;
-    render(<ClusterviewPanel {...p} />);
+    render(<FleetGridPanel {...p} />);
     expect(document.querySelector('canvas')!.parentElement).toHaveStyle({ height: '0px' });
   });
 
@@ -89,7 +89,7 @@ describe('ClusterviewPanel', () => {
     }
     global.ResizeObserver = MockResizeObserver as unknown as typeof ResizeObserver;
     try {
-      render(<ClusterviewPanel {...makeProps([series('A', 'power', 'zone-a')])} />);
+      render(<FleetGridPanel {...makeProps([series('A', 'power', 'zone-a')])} />);
       const header = screen.getByTestId('range-legend').parentElement as HTMLElement;
       Object.defineProperty(header, 'offsetHeight', { configurable: true, value: 48 });
       const headerObserver = observers.find((observer) => observer.observe.mock.calls[0]?.[0] === header);
@@ -101,7 +101,7 @@ describe('ClusterviewPanel', () => {
   });
 
   it('updates the single-mode range legend when the selected metric changes', () => {
-    render(<ClusterviewPanel {...makeProps([series('A', 'power', 'zone-a'), series('B', 'temp', 'zone-a')])} />);
+    render(<FleetGridPanel {...makeProps([series('A', 'power', 'zone-a'), series('B', 'temp', 'zone-a')])} />);
     expect(screen.getByLabelText(/power range, Auto/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('radio', { name: 'temp' }));
     expect(screen.getByLabelText(/temp range, Auto/)).toBeInTheDocument();
@@ -111,26 +111,26 @@ describe('ClusterviewPanel', () => {
   it('shows warnings when the hierarchy label is absent', () => {
     const p = makeProps([series('A', 'power', 'zone-a')]);
     p.options.levels = [{ ...DEFAULT_LEVEL, label: 'rack' }];
-    render(<ClusterviewPanel {...p} />);
+    render(<FleetGridPanel {...p} />);
     expect(screen.getByRole('alert')).toBeInTheDocument();
   });
 
   it('shows no-data view when there are no frames', () => {
-    render(<ClusterviewPanel {...makeProps([])} />);
+    render(<FleetGridPanel {...makeProps([])} />);
     expect(screen.getByText('No data')).toBeInTheDocument();
   });
 
   it('shows the metric selector when displayMode is unset (defaults to single)', () => {
     const p = makeProps([series('A', 'power', 'zone-a'), series('B', 'temp', 'zone-a')]);
     delete p.options.displayMode;
-    render(<ClusterviewPanel {...p} />);
+    render(<FleetGridPanel {...p} />);
     expect(screen.getAllByRole('radio')).toHaveLength(2);
   });
 
   it('shows the split legend and hides the single-mode selector in split mode', () => {
     const p = makeProps([series('A', 'power', 'zone-a'), series('B', 'temp', 'zone-a')]);
     p.options.displayMode = 'split';
-    render(<ClusterviewPanel {...p} />);
+    render(<FleetGridPanel {...p} />);
     expect(screen.getByText('1: power')).toBeInTheDocument(); // Legend (zone-position miniature + number:name)
     expect(screen.getByText('2: temp')).toBeInTheDocument();
     expect(screen.queryByRole('radio')).not.toBeInTheDocument(); // Don't show the selector in single mode
@@ -138,7 +138,7 @@ describe('ClusterviewPanel', () => {
 
   it('uses content coordinates (incl. scrollLeft) for hover hit testing', () => {
     // Same refId, 2 zones side by side as 2 cells (flow, s=40 → zone-a:[0,40), zone-b:[41,81)). No header since there's only one refId.
-    render(<ClusterviewPanel {...makeProps([series('A', 'power', 'zone-a'), series('A', 'power', 'zone-b')])} />);
+    render(<FleetGridPanel {...makeProps([series('A', 'power', 'zone-a'), series('A', 'power', 'zone-b')])} />);
     const container = document.querySelector('canvas')!.parentElement as HTMLElement;
     // Reproduce a horizontally scrolled state (scrollLeft=50)
     Object.defineProperty(container, 'scrollLeft', { configurable: true, value: 50 });
@@ -153,7 +153,7 @@ describe('ClusterviewPanel', () => {
     const p = makeProps([series('A', 'power', 'zone-a')]);
     // Query B is configured (targets) but has 0 series (not present in series)
     p.data.request.targets = [{ refId: 'A' }, { refId: 'B' }];
-    render(<ClusterviewPanel {...p} />);
+    render(<FleetGridPanel {...p} />);
     expect(screen.getAllByRole('radio')).toHaveLength(2);
     expect(screen.getByText('power')).toBeInTheDocument(); // A is the series name
     expect(screen.getByText('B')).toBeInTheDocument(); // B has no metricInfo, so the refId is displayed
@@ -163,7 +163,7 @@ describe('ClusterviewPanel', () => {
     const p = makeProps([series('A', 'power', 'zone-a')]);
     p.width = width;
     p.data.request.targets = [{ refId: 'A' }, { refId: 'B' }];
-    render(<ClusterviewPanel {...p} />);
+    render(<FleetGridPanel {...p} />);
     if (width < 480) {
       expect(screen.getByLabelText(/power range, Auto/)).toBeInTheDocument();
     } else {
@@ -189,7 +189,7 @@ describe('ClusterviewPanel', () => {
       });
     const p = makeProps([twoLevel('zone-a', '0'), twoLevel('zone-b')]); // The second one is missing gpu → excluded
     p.options.levels = [{ ...DEFAULT_LEVEL, label: 'zone' }, { ...DEFAULT_LEVEL, label: 'gpu' }];
-    render(<ClusterviewPanel {...p} />);
+    render(<FleetGridPanel {...p} />);
     expect(document.querySelector('canvas')).toBeInTheDocument(); // The matching row's cell is rendered
     expect(screen.getByRole('alert')).toBeInTheDocument(); // and the warning banner is also shown at the same time
     expect(screen.getByText(/1\/2/)).toBeInTheDocument();
@@ -200,7 +200,7 @@ describe('ClusterviewPanel', () => {
       refId: 'A',
       fields: [{ name: 'zone', type: FieldType.string, values: ['zone-a'] }], // No numeric field
     });
-    render(<ClusterviewPanel {...makeProps([stringOnly])} />);
+    render(<FleetGridPanel {...makeProps([stringOnly])} />);
     expect(screen.getByRole('alert')).toBeInTheDocument();
     expect(screen.getByText(/numeric cells/)).toBeInTheDocument();
     expect(document.querySelector('canvas')).not.toBeInTheDocument();
@@ -216,7 +216,7 @@ describe('ClusterviewPanel', () => {
     frames[0].fields[1].getLinks = (() => [
       { href: 'https://example.com/d/x', title: 'X', target: '_self', origin: {}, onClick: onLinkClick },
     ]) as any;
-    render(<ClusterviewPanel {...makeProps(frames)} />);
+    render(<FleetGridPanel {...makeProps(frames)} />);
     fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
     expect(onLinkClick).toHaveBeenCalled(); // Data Links take priority and execute immediately
     expect(screen.queryByLabelText('Close')).not.toBeInTheDocument(); // The popover is suppressed
@@ -228,7 +228,7 @@ describe('ClusterviewPanel', () => {
       { href: 'https://example.com/a', title: 'Link A', target: '_blank', origin: {} },
       { href: 'https://example.com/b', title: 'Link B', target: '_blank', origin: {} },
     ]) as any;
-    render(<ClusterviewPanel {...makeProps(frames)} />);
+    render(<FleetGridPanel {...makeProps(frames)} />);
     fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
     expect(screen.getByText('Link A')).toBeInTheDocument();
     expect(screen.getByText('Link B')).toBeInTheDocument();
@@ -241,7 +241,7 @@ describe('ClusterviewPanel', () => {
       { href: 'https://example.com/a', title: 'Link A', target: '_blank', origin: {} },
       { href: 'https://example.com/b', title: 'Link B', target: '_blank', origin: {} },
     ]) as any;
-    render(<ClusterviewPanel {...makeProps(frames)} />);
+    render(<FleetGridPanel {...makeProps(frames)} />);
     fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
     const menu = screen.getByRole('menu');
     // Use theme-derived colors instead of the old implementation's fixed dark color (readable in light theme too)
@@ -265,7 +265,7 @@ describe('ClusterviewPanel', () => {
   it('places the link menu in content coordinates using the scroll offset', () => {
     const frames = clickable();
     frames[1].fields[1].getLinks = linksOf(2); // 2 links on the zone-b cell
-    render(<ClusterviewPanel {...makeProps(frames)} />);
+    render(<FleetGridPanel {...makeProps(frames)} />);
     const container = containerOf();
     setBox(container, { sl: 50, cw: 400, ch: 300 });
     // clientX=10 + scrollLeft=50 → cx=60 (hits zone-b including horizontal scroll)
@@ -278,7 +278,7 @@ describe('ClusterviewPanel', () => {
   it('flips and clamps the link menu within the real inner width (excludes scrollbar area)', () => {
     const frames = clickable();
     frames[1].fields[1].getLinks = linksOf(2);
-    render(<ClusterviewPanel {...makeProps(frames)} />);
+    render(<FleetGridPanel {...makeProps(frames)} />);
     const container = containerOf();
     // Make the actual visible inner size 300, narrower than props.width(400). Using width would overflow the right edge.
     setBox(container, { cw: 300, ch: 300 });
@@ -298,7 +298,7 @@ describe('ClusterviewPanel', () => {
   it('shrinks the link menu to fit a visible width below 240px', () => {
     const frames = clickable();
     frames[1].fields[1].getLinks = linksOf(2);
-    render(<ClusterviewPanel {...makeProps(frames)} />);
+    render(<FleetGridPanel {...makeProps(frames)} />);
     const container = containerOf();
     setBox(container, { cw: 180, ch: 300 });
     fireEvent.click(container, { clientX: 60, clientY: 5 });
@@ -312,7 +312,7 @@ describe('ClusterviewPanel', () => {
   it.each([0, 1, 5, 9])('avoids fractional horizontal chrome below 10px at a %dpx visible width', (visibleWidth) => {
     const frames = clickable();
     frames[1].fields[1].getLinks = linksOf(2);
-    render(<ClusterviewPanel {...makeProps(frames)} />);
+    render(<FleetGridPanel {...makeProps(frames)} />);
     const container = containerOf();
     setBox(container, { sl: 50, cw: visibleWidth, ch: 300 });
     fireEvent.click(container, { clientX: 10, clientY: 5 });
@@ -338,7 +338,7 @@ describe('ClusterviewPanel', () => {
     const frames = clickable();
     frames[1].fields[1].getLinks = linksOf(2);
     const props = makeProps(frames);
-    const { rerender } = render(<ClusterviewPanel {...props} />);
+    const { rerender } = render(<FleetGridPanel {...props} />);
     const container = containerOf();
     setBox(container, { cw: 400, ch: 300 });
     fireEvent.click(container, { clientX: 60, clientY: 5 });
@@ -346,7 +346,7 @@ describe('ClusterviewPanel', () => {
     expect(parseFloat(menu.style.left)).toBe(68);
 
     setBox(container, { cw: 300, ch: 180 });
-    rerender(<ClusterviewPanel {...props} width={300} height={180} />);
+    rerender(<FleetGridPanel {...props} width={300} height={180} />);
 
     expect(screen.getByRole('menu')).toBe(menu);
     expect(parseFloat(menu.style.left)).toBeLessThan(68);
@@ -371,12 +371,12 @@ describe('ClusterviewPanel', () => {
       const frames = clickable();
       frames[1].fields[1].getLinks = linksOf(2);
       const props = makeProps(frames);
-      const { rerender } = render(<ClusterviewPanel {...props} />);
+      const { rerender } = render(<FleetGridPanel {...props} />);
       const oldContainer = containerOf();
       setBox(oldContainer, { cw: 400, ch: 300 });
 
-      rerender(<ClusterviewPanel {...makeProps([])} />);
-      rerender(<ClusterviewPanel {...props} />);
+      rerender(<FleetGridPanel {...makeProps([])} />);
+      rerender(<FleetGridPanel {...props} />);
       const newContainer = containerOf();
       expect(newContainer).not.toBe(oldContainer);
       setBox(newContainer, { cw: 400, ch: 300 });
@@ -403,7 +403,7 @@ describe('ClusterviewPanel', () => {
   it('caps a tall link menu to the visible height and enables internal scroll', () => {
     const frames = clickable();
     frames[0].fields[1].getLinks = linksOf(12); // A tall menu
-    render(<ClusterviewPanel {...makeProps(frames)} />);
+    render(<FleetGridPanel {...makeProps(frames)} />);
     const container = containerOf();
     setBox(container, { cw: 400, ch: 100 }); // Taller than the visible height of 100px
     fireEvent.click(container, { clientX: 10, clientY: 5 }); // cx=10(zone-a)
@@ -430,7 +430,7 @@ describe('ClusterviewPanel', () => {
     };
     const p = makeProps([mk('node-a017', 'https://a'), mk('node-b017', 'https://b')]);
     p.options.levels = [{ ...DEFAULT_LEVEL, label: 'host', extract: 'trailingNumber' }];
-    render(<ClusterviewPanel {...p} />);
+    render(<FleetGridPanel {...p} />);
     fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
     expect(screen.getByRole('menu')).toBeInTheDocument();
     expect(screen.getByText('https://a')).toBeInTheDocument();
@@ -438,7 +438,7 @@ describe('ClusterviewPanel', () => {
   });
 
   it('opens the drilldown popover when there are no data links, then closes it on Escape', () => {
-    render(<ClusterviewPanel {...makeProps(clickable())} />);
+    render(<FleetGridPanel {...makeProps(clickable())} />);
     fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
     expect(screen.getByLabelText('Close')).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
@@ -447,7 +447,7 @@ describe('ClusterviewPanel', () => {
 
   it('repositions an open drilldown popover within the resized visible bounds', () => {
     const props = makeProps(clickable());
-    const { rerender } = render(<ClusterviewPanel {...props} />);
+    const { rerender } = render(<FleetGridPanel {...props} />);
     const container = containerOf();
     setBox(container, { cw: 400, ch: 300 });
     fireEvent.click(container, { clientX: 60, clientY: 5 });
@@ -457,7 +457,7 @@ describe('ClusterviewPanel', () => {
     expect(parseFloat(popover.style.top)).toBe(13);
 
     setBox(container, { cw: 320, ch: 80 });
-    rerender(<ClusterviewPanel {...props} width={320} height={80} />);
+    rerender(<FleetGridPanel {...props} width={320} height={80} />);
 
     expect(screen.getByLabelText('Close')).toBe(close);
     expect(parseFloat(popover.style.left)).toBeLessThan(68);
@@ -467,7 +467,7 @@ describe('ClusterviewPanel', () => {
   });
 
   it('closes the popover on an outside pointerdown', () => {
-    render(<ClusterviewPanel {...makeProps(clickable())} />);
+    render(<FleetGridPanel {...makeProps(clickable())} />);
     fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
     expect(screen.getByLabelText('Close')).toBeInTheDocument();
     fireEvent.pointerDown(document.body);
@@ -475,7 +475,7 @@ describe('ClusterviewPanel', () => {
   });
 
   it('closes the popover on scroll', () => {
-    render(<ClusterviewPanel {...makeProps(clickable())} />);
+    render(<FleetGridPanel {...makeProps(clickable())} />);
     const container = containerOf();
     fireEvent.click(container, { clientX: 10, clientY: 5 });
     expect(screen.getByLabelText('Close')).toBeInTheDocument();
@@ -497,7 +497,7 @@ describe('ClusterviewPanel', () => {
 
     it('does not requery when the panel data has no instant targets (range-only)', () => {
       // makeProps's targets have no instant flag (range-only), so no requery runs
-      render(<ClusterviewPanel {...makeProps(clickable())} />);
+      render(<FleetGridPanel {...makeProps(clickable())} />);
       fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
       expect(screen.getByLabelText('Close')).toBeInTheDocument(); // The popover opens
       expect(mockFetch).not.toHaveBeenCalled(); // range-only → no requery
@@ -513,7 +513,7 @@ describe('ClusterviewPanel', () => {
       const instantTargets = [{ refId: 'A', instant: true }];
       const p1 = makeProps(clickable());
       p1.data.request.targets = instantTargets;
-      const { rerender } = render(<ClusterviewPanel {...p1} />);
+      const { rerender } = render(<FleetGridPanel {...p1} />);
       fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
       // With instant and no time series on hand → requery starts, showing loading state
       expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -524,7 +524,7 @@ describe('ClusterviewPanel', () => {
       p2.data.request.requestId = 'Q2';
       p2.data.request.targets = instantTargets;
       await act(async () => {
-        rerender(<ClusterviewPanel {...p2} />);
+        rerender(<FleetGridPanel {...p2} />);
       });
       expect(mockFetch).toHaveBeenCalledTimes(2); // A requery runs with the new requestId
 
@@ -555,7 +555,7 @@ describe('ClusterviewPanel', () => {
       const instantTargets = [{ refId: 'A', instant: true }];
       const p1 = makeProps(clickable());
       p1.data.request.targets = instantTargets;
-      const { rerender } = render(<ClusterviewPanel {...p1} />);
+      const { rerender } = render(<FleetGridPanel {...p1} />);
       fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
       expect(mockFetch).toHaveBeenCalledTimes(1);
       expect(screen.getByText('Loading…')).toBeInTheDocument();
@@ -565,7 +565,7 @@ describe('ClusterviewPanel', () => {
       p2.data.request.requestId = 'Q2';
       p2.data.request.targets = instantTargets;
       await act(async () => {
-        rerender(<ClusterviewPanel {...p2} />);
+        rerender(<FleetGridPanel {...p2} />);
       });
       expect(mockFetch).toHaveBeenCalledTimes(2);
 
@@ -590,7 +590,7 @@ describe('ClusterviewPanel', () => {
       mockFetch.mockReturnValueOnce(new Promise((_, r) => (reject1 = r)));
       const p = makeProps(clickable());
       p.data.request.targets = [{ refId: 'A', instant: true }];
-      render(<ClusterviewPanel {...p} />);
+      render(<FleetGridPanel {...p} />);
       fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
       expect(mockFetch).toHaveBeenCalledTimes(1);
       await act(async () => {
