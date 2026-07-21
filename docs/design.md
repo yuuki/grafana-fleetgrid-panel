@@ -117,6 +117,9 @@ Cell value text is drawn only when it fits: font size `clamp(cellHeight × 0.38,
 
 Hit testing maps content coordinates (including `scrollLeft`/`scrollTop`) to a cell by linear scan over the laid-out rectangles; the tooltip shows the hierarchy path and every metric's formatted value (`formattedValueToString`), listing zero-series refIds with a missing indication.
 
+**Decision: use Grafana theme tokens for the tooltip surface, text, border, and shadow.**
+*Rationale:* the tooltip is a panel overlay, so fixed dark colors would become unreadable or visually inconsistent in light themes. Standard theme tokens keep it aligned with the rest of the panel without changing its content or interaction behavior.
+
 **Decision: linear-scan hit test, no spatial index.**
 *Rationale:* at thousands of cells a linear scan costs microseconds per mouse event; an R-tree or grid index would be premature complexity. This was proposed in external review and consciously declined.
 
@@ -177,7 +180,6 @@ Deliberately not implemented (YAGNI, confirmed during design): Conditions-style 
 
 ## 14. Known limitations / future work
 
-- Tooltip colors are fixed dark values (readable, but not theme-following); the link menu already follows the theme.
 - The link menu has a fixed 240 px width; panels narrower than that would clip it.
 - The drilldown popover clamps its position but has no internal scrolling if its content exceeds the panel height.
 - Verification against a live Prometheus/VictoriaMetrics (including instant→range requery behavior) is still outstanding; README states this.
