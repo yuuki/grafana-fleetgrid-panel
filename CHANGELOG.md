@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Add ordered label-based color-scale ranges with exact/regex matching, partial Min/Max fallback, and an editor populated from query labels.
+- Show the actual applied range in tooltips, identify multi-range metrics in legends, and warn and fall back safely when aggregated source labels select conflicting rules.
+- Cover table and time-series range selection in unit, component, and two-zone end-to-end fixtures, and document GPU power and bandwidth configurations.
+
 ## 0.2.1 - 2026-07-22
 
 - Add fixed-column hierarchy grids and expose the layout choice clearly in the editor.

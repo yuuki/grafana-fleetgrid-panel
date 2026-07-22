@@ -2,6 +2,7 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { createTheme, FieldType, toDataFrame } from '@grafana/data';
 import { buildMetricInfos, MetricInfo } from '../data/display';
+import { CellRangeInfo } from '../types';
 import { RangeLegend, rangeStateLabel } from './RangeLegend';
 
 let mockTheme = createTheme();
@@ -28,6 +29,43 @@ const metricInfo = (minConfigured: boolean, maxConfigured: boolean): MetricInfo 
 });
 
 describe('RangeLegend', () => {
+  const range = (max: number, color: string): CellRangeInfo => ({
+    effectiveMin: 0,
+    effectiveMax: max,
+    minConfigured: true,
+    maxConfigured: true,
+    processor: ((value: number) => ({
+      text: String(value),
+      suffix: ' W',
+      numeric: value,
+      color,
+    })) as CellRangeInfo['processor'],
+    source: 'override',
+  });
+
+  it('shows label-based ranges without a gradient or fixed endpoints when multiple signatures are used', () => {
+    render(
+      <RangeLegend
+        metricInfo={metricInfo(false, false)}
+        width={480}
+        rangeInfos={[range(500, '#500'), range(700, '#700')]}
+      />
+    );
+
+    expect(screen.getByText('Label-based ranges')).toBeInTheDocument();
+    expect(screen.getByText('2 ranges')).toBeInTheDocument();
+    expect(screen.queryByTestId('range-gradient')).not.toBeInTheDocument();
+    expect(screen.queryByText('0.0%')).not.toBeInTheDocument();
+  });
+
+  it('renders a single actually-used cell range with its processor', () => {
+    render(<RangeLegend metricInfo={metricInfo(false, false)} width={480} rangeInfos={[range(700, '#700')]} />);
+
+    expect(screen.getByText('Fixed')).toBeInTheDocument();
+    expect(screen.getByText('0 W')).toBeInTheDocument();
+    expect(screen.getByText('700 W')).toBeInTheDocument();
+  });
+
   it.each([
     [true, true, 'Fixed'],
     [false, false, 'Auto'],
@@ -81,8 +119,7 @@ describe('RangeLegend', () => {
       background: mockTheme.colors.background.secondary,
       border: `1px solid ${mockTheme.colors.border.medium}`,
     });
-    const secondary =
-      width < 480 ? legend.querySelector('[aria-hidden]') : screen.getByText('Fixed');
+    const secondary = width < 480 ? legend.querySelector('[aria-hidden]') : screen.getByText('Fixed');
     expect(secondary).toHaveStyle({ color: mockTheme.colors.text.secondary });
   });
 

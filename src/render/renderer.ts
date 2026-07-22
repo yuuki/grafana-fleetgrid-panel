@@ -2,6 +2,7 @@ import { GrafanaTheme2 } from '@grafana/data';
 import { MetricInfo, chooseCellText } from '../data/display';
 import { LayoutResult } from '../layout/layout';
 import { DisplayMode } from '../types';
+import { cellRangeFor } from '../data/cellRange';
 import { splitRects } from './split';
 
 export interface RenderContext {
@@ -51,7 +52,8 @@ export function renderCanvas(canvas: HTMLCanvasElement, rc: RenderContext): void
     if (split && rects) {
       rc.metricInfos.slice(0, rects.length).forEach((info, i) => {
         const v = c.cell.values.get(info.refId) ?? null;
-        ctx.fillStyle = v === null ? rc.missingColor : (info.processor(v).color ?? rc.missingColor);
+        const processor = cellRangeFor(c.cell, info).processor;
+        ctx.fillStyle = v === null ? rc.missingColor : (processor(v).color ?? rc.missingColor);
         const r = rects[i];
         ctx.fillRect(c.x + r.x * c.w, c.y + r.y * c.h, r.w * c.w - 0.5, r.h * c.h - 0.5);
       });
@@ -69,7 +71,7 @@ export function renderCanvas(canvas: HTMLCanvasElement, rc: RenderContext): void
       ctx.fillRect(c.x, c.y, c.w, c.h);
       continue;
     }
-    const disp = selected.processor(v);
+    const disp = cellRangeFor(c.cell, selected).processor(v);
     ctx.fillStyle = disp.color ?? rc.missingColor;
     ctx.fillRect(c.x, c.y, c.w, c.h);
 

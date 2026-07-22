@@ -50,8 +50,8 @@ async function cellFillColorCount(canvas: Locator, minCount: number): Promise<nu
       return `${img[p] >> 3},${img[p + 1] >> 3},${img[p + 2] >> 3}`;
     };
     const counts: Record<string, number> = {};
-    const step = 6;
-    const r = 3; // neighborhood radius (px); cells are far larger than 2r, borders/glyphs are not
+    const step = 4;
+    const r = 2; // Small E2E cells still contain a 2r-wide flat fill; borders/glyphs do not.
     for (let y = r; y < h - r; y += step) {
       for (let x = r; x < w - r; x += step) {
         const center = quant(x, y);
@@ -117,13 +117,19 @@ interface CellPath {
   text: string;
 }
 
-const PATH_RE = /(zone-[a-z0-9]+)\s*\/\s*(\d+)\s*\/\s*(gpu\d+)/i;
+const PATH_RE = /(zone-[a-z0-9]+)\s*\/\s*([^/\s]+)\s*\/\s*(gpu\d+)/i;
 
 /**
  * Hovers over (x,y) on the canvas and returns the hierarchy path from the displayed tooltip. null if outside a cell.
  * Polls briefly for the tooltip content to appear rather than using a fixed sleep (a safeguard against missed detection on slow environments).
  */
-async function readPath(canvas: Locator, panel: Locator, x: number, y: number, timeout = 300): Promise<CellPath | null> {
+async function readPath(
+  canvas: Locator,
+  panel: Locator,
+  x: number,
+  y: number,
+  timeout = 300
+): Promise<CellPath | null> {
   await canvas.hover({ position: { x, y } });
   return readCurrentPath(canvas, panel, timeout);
 }
@@ -177,6 +183,88 @@ async function findCellPoint(canvas: Locator, panel: Locator): Promise<{ x: numb
     }
   }
   throw new Error('no cell found while probing the canvas');
+}
+
+/** Finds the vertical center of each requested zone without assuming panel padding or cell height. */
+async function findZoneCellPoints(
+  canvas: Locator,
+  panel: Locator,
+  zones: string[]
+): Promise<Record<string, { x: number; y: number }>> {
+  const box = await canvas.boundingBox();
+  if (!box) {
+    throw new Error('canvas has no bounding box');
+  }
+  const x = Math.floor(box.width / 2);
+  const hits = new Map<string, number[]>();
+  for (let y = 0; y <= box.height; y += 5) {
+    const path = await probePath(canvas, panel, x, y);
+    if (path && zones.includes(path.zone)) {
+      const ys = hits.get(path.zone) ?? [];
+      ys.push(y);
+      hits.set(path.zone, ys);
+    }
+  }
+  return Object.fromEntries(
+    zones.map((zone) => {
+      const ys = hits.get(zone);
+      if (!ys?.length) {
+        throw new Error(`no cell found for ${zone}`);
+      }
+      return [zone, { x, y: Math.round((ys[0] + ys[ys.length - 1]) / 2) }];
+    })
+  );
+}
+
+/**
+ * Reads the dominant locally-uniform fill near a CSS-coordinate point. The conversion through
+ * getBoundingClientRect handles devicePixelRatio and any browser scaling of the backing canvas.
+ */
+async function cellFillColorAt(canvas: Locator, point: { x: number; y: number }): Promise<string> {
+  return canvas.evaluate((el, cssPoint) => {
+    const c = el as HTMLCanvasElement;
+    const ctx = c.getContext('2d');
+    const rect = c.getBoundingClientRect();
+    if (!ctx || rect.width === 0 || rect.height === 0) {
+      throw new Error('canvas is not measurable');
+    }
+    const image = ctx.getImageData(0, 0, c.width, c.height).data;
+    const scaleX = c.width / rect.width;
+    const scaleY = c.height / rect.height;
+    const centerX = Math.round(cssPoint.x * scaleX);
+    const centerY = Math.round(cssPoint.y * scaleY);
+    const radiusX = Math.max(4, Math.round(20 * scaleX));
+    const radiusY = Math.max(4, Math.round(20 * scaleY));
+    const neighborX = Math.max(1, Math.round(2 * scaleX));
+    const neighborY = Math.max(1, Math.round(2 * scaleY));
+    const colorAt = (x: number, y: number): string | null => {
+      if (x < 0 || y < 0 || x >= c.width || y >= c.height) {
+        return null;
+      }
+      const offset = (y * c.width + x) * 4;
+      return image[offset + 3] >= 240 ? `${image[offset]},${image[offset + 1]},${image[offset + 2]}` : null;
+    };
+    const counts = new Map<string, number>();
+    for (let y = centerY - radiusY; y <= centerY + radiusY; y += Math.max(1, neighborY)) {
+      for (let x = centerX - radiusX; x <= centerX + radiusX; x += Math.max(1, neighborX)) {
+        const color = colorAt(x, y);
+        if (
+          color &&
+          colorAt(x - neighborX, y) === color &&
+          colorAt(x + neighborX, y) === color &&
+          colorAt(x, y - neighborY) === color &&
+          colorAt(x, y + neighborY) === color
+        ) {
+          counts.set(color, (counts.get(color) ?? 0) + 1);
+        }
+      }
+    }
+    const dominant = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    if (!dominant) {
+      throw new Error('no locally-uniform cell fill found');
+    }
+    return dominant;
+  }, point);
 }
 
 test('main panel renders the canvas with painted pixels', async ({ gotoDashboardPage, readProvisionedDashboard }) => {
@@ -337,6 +425,43 @@ test('threshold color mode renders discrete colors', async ({ gotoDashboardPage,
   // Discrete coloring is always fewer than continuous coloring, converging to around the band count (3).
   expect(thresholdColors).toBeLessThanOrEqual(4);
   expect(thresholdColors).toBeLessThan(continuousColors);
+});
+
+test('label-based ranges color equal values differently and expose each applied range', async ({
+  gotoDashboardPage,
+  readProvisionedDashboard,
+}) => {
+  const dashboard = await readProvisionedDashboard({ fileName: FILE });
+  const dashboardPage = await gotoDashboardPage({ uid: dashboard.uid });
+  const panel = await dashboardPage.getPanelByTitle('Label-based ranges');
+  // Open the dedicated panel directly because Grafana does not mount dashboard rows below the viewport.
+  const page = panel.locator.page();
+  const panelUrl = new URL(page.url());
+  panelUrl.searchParams.set('viewPanel', '5');
+  await page.goto(panelUrl.toString());
+  await expect(panel.locator).toBeVisible();
+  const canvas = panel.locator.locator('canvas');
+  await expect(canvas).toBeVisible();
+  await expect.poll(() => isPainted(canvas)).toBe(true);
+
+  await expect(panel.locator.getByTestId('range-legend')).toContainText('Label-based ranges');
+  const points = await findZoneCellPoints(canvas, panel.locator, ['zone-a', 'zone-b']);
+
+  await canvas.hover({ position: points['zone-a'] });
+  const zoneATooltip = panel.locator.getByRole('tooltip');
+  await expect(zoneATooltip).toContainText('Fixed');
+  await expect(zoneATooltip).toContainText(/0\s*W.*200\s*W/);
+  await expect(zoneATooltip).toContainText('zone = zone-a');
+
+  await canvas.hover({ position: points['zone-b'] });
+  const zoneBTooltip = panel.locator.getByRole('tooltip');
+  await expect(zoneBTooltip).toContainText('Fixed');
+  await expect(zoneBTooltip).toContainText(/0\s*W.*400\s*W/);
+  await expect(zoneBTooltip).toContainText('zone = zone-b');
+
+  const zoneAColor = await cellFillColorAt(canvas, points['zone-a']);
+  const zoneBColor = await cellFillColorAt(canvas, points['zone-b']);
+  expect(zoneAColor).not.toBe(zoneBColor);
 });
 
 test('panel keeps rendering after the viewport shrinks', async ({ gotoDashboardPage, readProvisionedDashboard }) => {

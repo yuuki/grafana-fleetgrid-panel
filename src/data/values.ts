@@ -29,13 +29,16 @@ export function attachCells(
   rows: NormalizedRow[],
   levels: LevelDef[],
   agg: SpatialAggregation,
-  refIds: string[] = collectRefIds(rows)
+  refIds: string[] = collectRefIds(rows),
+  captureSourceLabels = false
 ): void {
   // pathKey → { all original label sets, refId → raw value list }
   interface Bucket {
     labelSets: Array<Record<string, string>>;
     seenLabelSets: Set<string>;
     byRef: Map<string, number[]>;
+    sourceLabelSetsByRef?: Map<string, Array<Record<string, string>>>;
+    seenSourceLabelSetsByRef?: Map<string, Set<string>>;
   }
   const buckets = new Map<string, Bucket>();
   for (const row of rows) {
@@ -56,7 +59,13 @@ export function attachCells(
     const pk = pathKey(path);
     let bucket = buckets.get(pk);
     if (!bucket) {
-      bucket = { labelSets: [], seenLabelSets: new Set(), byRef: new Map() };
+      bucket = {
+        labelSets: [],
+        seenLabelSets: new Set(),
+        byRef: new Map(),
+        sourceLabelSetsByRef: captureSourceLabels ? new Map() : undefined,
+        seenSourceLabelSetsByRef: captureSourceLabels ? new Map() : undefined,
+      };
       buckets.set(pk, bucket);
     }
     // Record all distinct original label sets whose extraction keys collide (duplicates are collapsed).
@@ -73,6 +82,21 @@ export function attachCells(
     if (row.value === null) {
       continue;
     }
+    if (captureSourceLabels) {
+      const sourceKey = JSON.stringify(
+        Object.entries(row.labels)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, value]) => [key, value])
+      );
+      const seenSourceLabels = bucket.seenSourceLabelSetsByRef?.get(row.refId) ?? new Set<string>();
+      if (!seenSourceLabels.has(sourceKey)) {
+        seenSourceLabels.add(sourceKey);
+        bucket.seenSourceLabelSetsByRef?.set(row.refId, seenSourceLabels);
+        const sourceLabels = bucket.sourceLabelSetsByRef?.get(row.refId) ?? [];
+        sourceLabels.push({ ...row.labels });
+        bucket.sourceLabelSetsByRef?.set(row.refId, sourceLabels);
+      }
+    }
     const list = bucket.byRef.get(row.refId) ?? [];
     list.push(row.value);
     bucket.byRef.set(row.refId, list);
@@ -88,7 +112,13 @@ export function attachCells(
       }
       const labelSets = bucket?.labelSets ?? [];
       // labels is the representative original value for backward compatibility (the first set)
-      node.cell = { path: node.path, labels: labelSets[0] ?? {}, labelSets, values };
+      node.cell = {
+        path: node.path,
+        labels: labelSets[0] ?? {},
+        labelSets,
+        ...(captureSourceLabels ? { sourceLabelSetsByRef: bucket?.sourceLabelSetsByRef ?? new Map() } : {}),
+        values,
+      };
       return;
     }
     node.children.forEach(visit);

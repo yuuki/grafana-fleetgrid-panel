@@ -3,57 +3,81 @@ import { useTheme2 } from '@grafana/ui';
 import { MetricInfo } from '../data/display';
 import { MAX_SPLIT, splitRects } from '../render/split';
 import { formatRangeEndpoint, rangeStateLabel } from './RangeLegend';
+import { DisplayRangeInfo } from '../data/cellRange';
 
-const SplitLegendComponent: React.FC<{ metricInfos: MetricInfo[] }> = ({ metricInfos }) => {
+const SplitLegendComponent: React.FC<{
+  metricInfos: MetricInfo[];
+  rangeInfosByRef?: Map<string, DisplayRangeInfo[]>;
+}> = ({ metricInfos, rangeInfosByRef }) => {
   const theme = useTheme2();
   const shown = metricInfos.slice(0, MAX_SPLIT);
   const rects = splitRects(shown.length);
   const hidden = metricInfos.length - shown.length;
   return (
     <div style={{ display: 'flex', gap: 12, alignItems: 'center', fontSize: 12, flexWrap: 'wrap' }}>
-      {shown.map((info, i) => (
-        <span key={info.refId} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-          {/* Zone-position miniature: which zone within the cell this metric is drawn in (the spec's position-mapping diagram) */}
-          <span
-            aria-hidden
-            style={{ position: 'relative', width: 14, height: 14, border: '1px solid currentColor', display: 'inline-block' }}
-          >
+      {shown.map((info, i) => {
+        const rangeInfos = rangeInfosByRef?.get(info.refId);
+        const multipleRanges = (rangeInfos?.length ?? 0) > 1;
+        const displayedRange = rangeInfos?.length === 1 ? rangeInfos[0] : info;
+        return (
+          <span key={info.refId} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            {/* Zone-position miniature: which zone within the cell this metric is drawn in (the spec's position-mapping diagram) */}
             <span
+              aria-hidden
               style={{
-                position: 'absolute',
-                left: `${rects[i].x * 100}%`,
-                top: `${rects[i].y * 100}%`,
-                width: `${rects[i].w * 100}%`,
-                height: `${rects[i].h * 100}%`,
-                background: 'currentColor',
+                position: 'relative',
+                width: 14,
+                height: 14,
+                border: '1px solid currentColor',
+                display: 'inline-block',
               }}
-            />
+            >
+              <span
+                style={{
+                  position: 'absolute',
+                  left: `${rects[i].x * 100}%`,
+                  top: `${rects[i].y * 100}%`,
+                  width: `${rects[i].w * 100}%`,
+                  height: `${rects[i].h * 100}%`,
+                  background: 'currentColor',
+                }}
+              />
+            </span>
+            <span>{`${i + 1}: ${info.name}`}</span>
+            <span
+              data-testid={`split-range-badge-${info.refId}`}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 3,
+                padding: '1px 4px',
+                border: `1px solid ${theme.colors.border.medium}`,
+                borderRadius: 3,
+                color: theme.colors.text.primary,
+                background: theme.colors.background.secondary,
+                fontSize: 11,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {multipleRanges ? (
+                <>
+                  <span>Label-based ranges</span>
+                  <span style={{ color: theme.colors.text.secondary }}>{`${rangeInfos!.length} ranges`}</span>
+                </>
+              ) : (
+                <>
+                  {(displayedRange.minConfigured || displayedRange.maxConfigured) && <span aria-hidden>🔒</span>}
+                  <span style={{ color: theme.colors.text.secondary }}>{rangeStateLabel(displayedRange)}</span>
+                  <span>{`${formatRangeEndpoint(displayedRange, displayedRange.effectiveMin)}–${formatRangeEndpoint(
+                    displayedRange,
+                    displayedRange.effectiveMax
+                  )}`}</span>
+                </>
+              )}
+            </span>
           </span>
-          <span>{`${i + 1}: ${info.name}`}</span>
-          <span
-            data-testid={`split-range-badge-${info.refId}`}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 3,
-              padding: '1px 4px',
-              border: `1px solid ${theme.colors.border.medium}`,
-              borderRadius: 3,
-              color: theme.colors.text.primary,
-              background: theme.colors.background.secondary,
-              fontSize: 11,
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {(info.minConfigured || info.maxConfigured) && <span aria-hidden>🔒</span>}
-            <span style={{ color: theme.colors.text.secondary }}>{rangeStateLabel(info)}</span>
-            <span>{`${formatRangeEndpoint(info, info.effectiveMin)}–${formatRangeEndpoint(
-              info,
-              info.effectiveMax
-            )}`}</span>
-          </span>
-        </span>
-      ))}
+        );
+      })}
       {hidden > 0 && <span style={{ opacity: 0.7 }}>{`Split view supports up to 9 queries (${hidden} hidden)`}</span>}
     </div>
   );

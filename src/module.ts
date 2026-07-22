@@ -3,6 +3,7 @@ import { FleetGridOptions } from './types';
 import { FleetGridPanel } from './components/FleetGridPanel';
 import { LevelsEditor } from './options/LevelsEditor';
 import { ReduceCalcEditor } from './options/ReduceCalcEditor';
+import { RangeOverridesEditor } from './options/RangeOverridesEditor';
 
 // useFieldConfig() enables the standard Field settings (Color scheme / Thresholds / Unit / Min-Max / Data Links / Overrides).
 // Without this, this plugin's entire color/unit design would not function.
@@ -59,5 +60,13 @@ export const plugin = new PanelPlugin<FleetGridOptions>(FleetGridPanel).useField
       category: ['Data'],
       editor: ReduceCalcEditor,
       defaultValue: 'lastNotNull',
+    })
+    .addCustomEditor({
+      id: 'rangeOverrides',
+      path: 'rangeOverrides',
+      name: 'Color scale overrides',
+      category: ['Color scale overrides'],
+      editor: RangeOverridesEditor,
+      defaultValue: [],
     })
 );

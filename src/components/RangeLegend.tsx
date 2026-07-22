@@ -2,11 +2,12 @@ import React, { useMemo } from 'react';
 import { formattedValueToString } from '@grafana/data';
 import { useTheme2 } from '@grafana/ui';
 import { MetricInfo } from '../data/display';
+import { DisplayRangeInfo } from '../data/cellRange';
 
 const COMPACT_WIDTH = 480;
 const GRADIENT_SAMPLES = 33;
 
-export const rangeStateLabel = (metricInfo: MetricInfo): 'Fixed' | 'Auto' | 'Min fixed' | 'Max fixed' => {
+export const rangeStateLabel = (metricInfo: DisplayRangeInfo): 'Fixed' | 'Auto' | 'Min fixed' | 'Max fixed' => {
   if (metricInfo.minConfigured && metricInfo.maxConfigured) {
     return 'Fixed';
   }
@@ -19,10 +20,10 @@ export const rangeStateLabel = (metricInfo: MetricInfo): 'Fixed' | 'Auto' | 'Min
   return 'Auto';
 };
 
-export const formatRangeEndpoint = (metricInfo: MetricInfo, value: number): string =>
+export const formatRangeEndpoint = (metricInfo: DisplayRangeInfo, value: number): string =>
   formattedValueToString(metricInfo.processor(value));
 
-const buildGradient = (metricInfo: MetricInfo): string => {
+const buildGradient = (metricInfo: DisplayRangeInfo): string => {
   const colors = Array.from({ length: GRADIENT_SAMPLES }, (_, index) => {
     const ratio = index / (GRADIENT_SAMPLES - 1);
     const value = metricInfo.effectiveMin + (metricInfo.effectiveMax - metricInfo.effectiveMin) * ratio;
@@ -32,25 +33,28 @@ const buildGradient = (metricInfo: MetricInfo): string => {
   return `linear-gradient(to right, ${colors.join(', ')})`;
 };
 
-export const RangeLegend: React.FC<{ metricInfo?: MetricInfo; metricName?: string; width: number }> = ({
-  metricInfo,
-  metricName,
-  width,
-}) => {
+export const RangeLegend: React.FC<{
+  metricInfo?: MetricInfo;
+  metricName?: string;
+  width: number;
+  rangeInfos?: DisplayRangeInfo[];
+}> = ({ metricInfo, metricName, width, rangeInfos }) => {
   const theme = useTheme2();
   const isCompact = width < COMPACT_WIDTH;
+  const multipleRanges = (rangeInfos?.length ?? 0) > 1;
+  const displayedRange = rangeInfos?.length === 1 ? rangeInfos[0] : metricInfo;
   const range = useMemo(() => {
-    if (!metricInfo) {
+    if (!displayedRange) {
       return null;
     }
     return {
-      state: rangeStateLabel(metricInfo),
-      min: formatRangeEndpoint(metricInfo, metricInfo.effectiveMin),
-      max: formatRangeEndpoint(metricInfo, metricInfo.effectiveMax),
-      gradient: isCompact ? undefined : buildGradient(metricInfo),
-      isConfigured: metricInfo.minConfigured || metricInfo.maxConfigured,
+      state: rangeStateLabel(displayedRange),
+      min: formatRangeEndpoint(displayedRange, displayedRange.effectiveMin),
+      max: formatRangeEndpoint(displayedRange, displayedRange.effectiveMax),
+      gradient: isCompact ? undefined : buildGradient(displayedRange),
+      isConfigured: displayedRange.minConfigured || displayedRange.maxConfigured,
     };
-  }, [metricInfo, isCompact]);
+  }, [displayedRange, isCompact]);
   if (!metricInfo) {
     const name = metricName ?? 'Metric';
     return (
@@ -73,6 +77,32 @@ export const RangeLegend: React.FC<{ metricInfo?: MetricInfo; metricName?: strin
       >
         <span>{name}</span>
         <span style={{ color: theme.colors.text.secondary }}>No data</span>
+      </div>
+    );
+  }
+
+  if (multipleRanges) {
+    return (
+      <div
+        data-testid="range-legend"
+        aria-label={`${metricInfo.name} range, Label-based ranges, ${rangeInfos!.length} ranges`}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          minWidth: 0,
+          padding: isCompact ? '2px 6px' : '3px 6px',
+          border: `1px solid ${theme.colors.border.medium}`,
+          borderRadius: 3,
+          color: theme.colors.text.primary,
+          background: theme.colors.background.secondary,
+          fontSize: 11,
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {!isCompact && <span>{metricInfo.name}</span>}
+        <span>Label-based ranges</span>
+        <span style={{ color: theme.colors.text.secondary }}>{`${rangeInfos!.length} ranges`}</span>
       </div>
     );
   }

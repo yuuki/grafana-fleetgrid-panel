@@ -69,6 +69,21 @@ describe('attachCells', () => {
     expect(cell.labelSets).toEqual([{ host: 'node-a017' }, { host: 'node-b017' }]);
   });
 
+  it('keeps complete non-null source labels separately for each refId', () => {
+    const oneLevel: LevelDef[] = [{ ...DEFAULT_LEVEL, label: 'zone' }];
+    const rows: NormalizedRow[] = [
+      { labels: { zone: 'zone-a', bw_type: 'NVLink RX', pod: 'p1' }, value: 10, refId: 'A' },
+      { labels: { zone: 'zone-a', bw_type: 'PCIe RX', pod: 'p2' }, value: null, refId: 'A' },
+      { labels: { zone: 'zone-a', sensor: 'temperature' }, value: 60, refId: 'B' },
+    ];
+    const { root } = buildHierarchy(rows, oneLevel);
+    attachCells(root, rows, oneLevel, 'max', collectRefIds(rows), true);
+    const cell = root.children[0].cell!;
+    expect(cell.sourceLabelSetsByRef?.get('A')).toEqual([{ zone: 'zone-a', bw_type: 'NVLink RX', pod: 'p1' }]);
+    expect(cell.sourceLabelSetsByRef?.get('B')).toEqual([{ zone: 'zone-a', sensor: 'temperature' }]);
+    expect(cell.labelSets).toEqual([{ zone: 'zone-a' }]);
+  });
+
   it('collects refIds in appearance order', () => {
     const rows: NormalizedRow[] = [
       { labels: {}, value: 1, refId: 'B' },

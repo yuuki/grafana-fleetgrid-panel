@@ -24,8 +24,9 @@ The panel is a pipeline of pure functions feeding a single-canvas renderer, with
 DataFrame[]                         (Grafana query result)
   → normalize   src/data/normalize.ts   frames → NormalizedRow[] {labels, value, refId}
   → hierarchy   src/data/hierarchy.ts   rows + LevelDef[] → tree (natural sort, warnings)
-  → cells       src/data/values.ts      leaves ← CellModel {values by refId, labelSets}
-  → display     src/data/display.ts     per-refId Grafana display processors (color/unit)
+  → cells       src/data/values.ts      leaves ← CellModel {values + source labels by refId}
+  → display     src/data/display.ts     standard per-refId Grafana display processors
+  → ranges      src/data/model.ts       cell/refId range resolution + processor cache
   → layout      src/layout/layout.ts    tree + panel size → cell rectangles
   → render      src/render/renderer.ts  single <canvas>, dpr-aware, sticky labels
 ```
@@ -74,22 +75,29 @@ Each tree leaf gets a `CellModel` whose `values` map contains **every** query re
 **Decision: cells retain all raw label sets (`labelSets`), not just the first matching row's labels.**
 *Rationale:* when extraction collapses different raw values into one key (e.g. `node-a017` and `node-b017` both → `017`), the cell value aggregates both series. Drilldown and data-link resolution must therefore search **all** contributing label sets, or the sparkline/link would silently describe a subset of what the number shows. This replaced the original "first row's labels" design after the final review demonstrated the mismatch.
 
+When at least one valid range rule compiles, cells additionally retain complete, non-null contributing labels per refId (`sourceLabelSetsByRef`). Table frames take these from all string columns in the row; time-series frames take them from the numeric field's labels. Keeping provenance per refId prevents one metric's labels from selecting another metric's range; an absent, empty, or entirely invalid rule list stays on the legacy path without this extra provenance.
+
+**Decision: an aggregated cell receives an override only when every contributing label set selects the same rule identity.**
+*Rationale:* two ordered rules can produce the same numeric endpoints today but diverge after a dashboard edit. Treating rule identity — including matched versus unmatched — as the contract makes conflict detection stable and independent of query row order. A conflict falls back to the standard range and produces one warning per refId with a count and up to three example paths, rather than an unbounded warning per cell.
+
 ## 6. Color, units, and scales — delegation to Grafana
 
-**Decision: delegate color, unit, decimals, thresholds, min/max, and data links entirely to Grafana's standard field configuration; implement no custom color DSL.**
-*Alternatives:* (a) reimplement a Conditions-style expression system (HPE), (b) a custom gradient editor, (c) standard field config.
-*Rationale:* option (c) directly solves problems 1 and 4 with zero new UI: the standard Field tab provides continuous gradient schemes, threshold steps, unit formatting, and per-query overrides, all familiar to Grafana users and maintained upstream. This requires `useFieldConfig()` in `module.ts` — without it the Field tab does not exist and the whole approach collapses (caught in plan review).
+**Decision: keep unit, decimals, value mappings, color scheme, thresholds, and data links in Grafana's standard field configuration; add only label-based Min/Max selection to FleetGrid.**
+*Alternatives:* (a) reimplement a Conditions-style expression system, (b) add a threshold/color DSL, (c) layer ordered range matchers over standard field config.
+*Rationale:* Grafana field overrides have no matcher for a table row's labels, so per-refId Min/Max cannot express zone/pod limits inside one query. Option (c) fills only that gap while preserving Grafana's familiar formatting, mappings, color processors, thresholds, and Data Links. `useFieldConfig()` remains required; range overrides alter the field clone passed to `getDisplayProcessor`, not the rest of the display contract.
 
 **Per-query scales.** Queries measure different quantities (watts vs. degrees), so a shared min/max would flatten one metric's gradient. For each refId, effective min/max default to the min/max of the **displayed** cell values (after time reduction and spatial aggregation), unless the user set explicit min/max in field config (each endpoint independently respected).
 
-**Decision: write the effective range to both `field.config.min/max` and `field.state.range`.**
-*Rationale:* `getDisplayProcessor` prefers `state.range` when present, and Grafana's `applyFieldOverrides` can inject a *panel-global* range into `state.range` — which would silently override per-refId scales. Setting both, with `state.range` recomputed from the effective values, makes the per-query scale win deterministically (plan-review finding).
+**Label-based scales.** `rangeOverrides` is an ordered list. A rule's refId is optional (blank means all metrics), its one-or-more exact/JavaScript-regex label matchers are ANDed, and the first matching rule wins. At least one endpoint is required. A missing endpoint falls back to the finite field-config endpoint and then to the refId's existing displayed-cell automatic endpoint. The editor reports invalid rules inline, and runtime compilation skips them defensively. An absent or empty list takes the old per-refId path, preserving previous behavior.
+
+**Decision: write every effective range to both `field.config.min/max` and `field.state.range`, and cache its display processor by `refId + min + max`.**
+*Rationale:* `getDisplayProcessor` prefers `state.range` when present, and Grafana's `applyFieldOverrides` can inject a panel-global range into `state.range`. Keeping both synchronized makes the selected range deterministic. The cache ensures the render loop does not construct a processor per cell: cells sharing the same refId and numeric range share one processor, while unit, decimals, mappings, color scheme, thresholds, and links continue to come from the original field config.
 
 Ranges derive from displayed values rather than raw history so that a transient historical outlier or pre-aggregation sample cannot distort today's color scale.
 
-**Decision: keep the effective range visible in the panel header.** In single mode, the header is present even for one metric. At panel widths of 480 px or more it shows the metric name, range state, formatted endpoints, and a horizontal gradient sampled at 33 points through the metric's existing display processor. Below 480 px it degrades to a compact state icon and range badge whose accessible name includes the state. Endpoint labels use Grafana's Unit and Decimals formatting, and the missing color is excluded because it represents absent data rather than a point on the scale.
+**Decision: keep an unambiguous range summary visible in the panel header.** If a displayed metric actually uses one range, the existing formatted endpoints and gradient remain, including for an override-derived range. If it uses two or more range signatures, single and split legends show `Label-based ranges` and the count instead of presenting one gradient as universal. A signature includes numeric endpoints and their fixed/automatic state. Endpoint labels use Grafana's Unit and Decimals formatting, and the missing color is excluded because it represents absent data rather than a point on the scale.
 
-The range state distinguishes all four field-config combinations: `Fixed` when both endpoints are explicit, `Auto` when neither is explicit, `Min fixed` when only Min is explicit, and `Max fixed` when only Max is explicit. The effective endpoint values remain visible in every state.
+The range state distinguishes all four combinations of endpoints fixed by standard field config or the matched override: `Fixed` when both are explicit, `Auto` when neither is explicit, `Min fixed` when only Min is explicit, and `Max fixed` when only Max is explicit. The effective endpoint values remain visible in every state.
 
 ## 7. Layout
 
@@ -119,7 +127,7 @@ Cell value text is drawn only when it fits: font size `clamp(cellHeight × 0.38,
 
 ### Hover tooltip
 
-Hit testing maps content coordinates (including `scrollLeft`/`scrollTop`) to a cell by linear scan over the laid-out rectangles; the tooltip shows the hierarchy path and every metric's formatted value (`formattedValueToString`), listing zero-series refIds with a missing indication.
+Hit testing maps content coordinates (including `scrollLeft`/`scrollTop`) to a cell by linear scan over the laid-out rectangles; the tooltip shows the hierarchy path and every metric's formatted value (`formattedValueToString`), listing zero-series refIds with a missing indication. For each value it also shows the cell's actual formatted Min/Max, `Fixed` / `Auto` / `Min fixed` / `Max fixed` state, and either the matched conditions, standard-range fallback, or conflict fallback. The drilldown popover and Data Links consume the same cell-specific processor while preserving their hierarchy path, sparkline, and link behavior.
 
 **Decision: use Grafana theme tokens for the tooltip surface, text, border, and shadow.**
 *Rationale:* the tooltip is a panel overlay, so fixed dark colors would become unreadable or visually inconsistent in light themes. Standard theme tokens keep it aligned with the rest of the panel without changing its content or interaction behavior.
@@ -156,7 +164,7 @@ Instant queries have no history at hand, so the panel re-issues the dashboard's 
 
 ## 10. Options surface
 
-Custom options are intentionally few; everything color/unit/link-related lives in standard field config:
+Custom options are intentionally few; display formatting/color/link behavior lives in standard field config, with one targeted range-matching option:
 
 | Option | Values (default) |
 |---|---|
@@ -166,6 +174,9 @@ Custom options are intentionally few; everything color/unit/link-related lives i
 | `missingColor` | color (theme fallback) |
 | `spatialAggregation` | `max` (default) / `mean` / `min` / `sum` |
 | `reduceCalc` | numeric reducers only: `lastNotNull` (default), `last`, `mean`, `min`, `max`, `sum`, `count` |
+| `rangeOverrides` | ordered `RangeOverride[]` (`[]`) — optional refId, one-or-more exact/regex label matchers, optional Min/Max |
+
+The **Color scale overrides** editor supports add/remove/reorder and multiple matchers per rule. It derives refId, label-name, and sample-value suggestions from both table and time-series query results while allowing custom values. Inline validation covers missing matchers or labels, invalid regex, non-finite endpoints, neither endpoint set, and `min >= max`; min-only and max-only rules are valid.
 
 **Decision: restrict `reduceCalc` to an allowlist of numeric reducers rather than the full standard Calculation picker.**
 *Rationale:* non-numeric reducers (`allValues`, `uniqueValues`, …) produce values the color pipeline cannot render; offering them would be an invitation to a broken panel. A guarded Select with a numeric allowlist keeps the standard vocabulary while making invalid states unrepresentable.
@@ -179,14 +190,14 @@ Custom options are intentionally few; everything color/unit/link-related lives i
 
 ## 12. Testing strategy
 
-- **Unit (Jest + jest-canvas-mock):** every pipeline stage TDD-tested as a pure function; renderer tested through the canvas mock (split regions, missing-color path, contrast text).
-- **Component (React Testing Library):** option editors (add/remove/reorder levels, preset switching, live preview, reducer allowlist), panel wiring (selector, tooltip coordinates incl. scroll, data-link priority, link menu, popover close paths, requery race with deferred promises).
-- **E2E (`@grafana/plugin-e2e` + Playwright):** a provisioned TestData dashboard (`uid: fleetgrid-e2e`, generic zone/host/gpu data with unpadded host numbers so natural order differs from lexicographic order) exercised against the default Grafana image **and** `GRAFANA_VERSION=11.6.0`. Canvas assertions use polling plus color quantization/dominant-color counts rather than screenshot equality, to tolerate cross-version anti-aliasing differences.
+- **Unit (Jest + jest-canvas-mock):** every pipeline stage TDD-tested as a pure function; range resolution covers refId, exact/regex, AND, order, partial endpoints, table/time-series provenance, conflict fallback, and processor reuse; renderer covers cell-specific colors as well as split regions, missing color, and contrast text.
+- **Component (React Testing Library):** option editors (including range-rule add/remove/reorder, suggestions, and validation), panel wiring (multi-range legends, actual-range tooltip, selector, scroll coordinates, data-link priority, link menu, popover close paths, requery race with deferred promises).
+- **E2E (`@grafana/plugin-e2e` + Playwright):** a provisioned TestData dashboard (`uid: fleetgrid-e2e`, generic zone/host/gpu data with unpadded host numbers so natural order differs from lexicographic order) exercised against the default Grafana image **and** `GRAFANA_VERSION=11.6.0`. A dedicated two-zone table panel gives equal values different maxima and verifies the legend, each tooltip range, and different canvas fills. Canvas assertions map CSS coordinates to backing-store coordinates and use locally uniform colors rather than screenshot equality, tolerating DPR and cross-version anti-aliasing differences.
 - Checks that genuinely require human eyes or a live Prometheus (visual sparkline quality, in-cell unit suffix at various widths, instant requery against a real datasource, split-region visuals, minimum-cell-size boundary) are explicitly listed as manual follow-ups rather than silently claimed.
 
 ## 13. Out of scope
 
-Deliberately not implemented (YAGNI, confirmed during design): Conditions-style expression DSL, modifier-click actions, pinned/frozen cells, zoom/pan of the grid, custom URL template mechanisms outside standard Data Links, and datasource-specific code paths (the pipeline is frame-shape-based and datasource-agnostic; Prometheus/VictoriaMetrics are the design targets, not a hard dependency).
+Deliberately not implemented (YAGNI, confirmed during design): Conditions-style expression or threshold DSL (range matchers select only Min/Max), modifier-click actions, pinned/frozen cells, zoom/pan of the grid, custom URL template mechanisms outside standard Data Links, and datasource-specific code paths (the pipeline is frame-shape-based and datasource-agnostic; Prometheus/VictoriaMetrics are the design targets, not a hard dependency).
 
 ## 14. Known limitations / future work
 

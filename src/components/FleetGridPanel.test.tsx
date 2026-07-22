@@ -149,6 +149,37 @@ describe('FleetGridPanel', () => {
     expect(title.parentElement).toHaveStyle({ left: '72px' }); // tooltip x = cx(60) + 12 = content coordinates
   });
 
+  it('shows the standard range for an unmatched cell while overrides are active', () => {
+    const p = makeProps([series('A', 'power', 'zone-a'), series('A', 'power', 'zone-b')]);
+    p.options.rangeOverrides = [
+      { matchers: [{ label: 'zone', operator: 'exact', value: 'zone-a' }], min: 0, max: 100 },
+    ];
+    render(<FleetGridPanel {...p} />);
+    fireEvent.mouseMove(containerOf(), { clientX: 60, clientY: 5 });
+    expect(screen.getByText('zone-b')).toBeInTheDocument();
+    expect(screen.getByText('Standard range')).toBeInTheDocument();
+    expect(screen.getByText('Auto')).toBeInTheDocument();
+  });
+
+  it('keeps tooltip interaction from triggering cell links or drilldown overlays', () => {
+    const frames = clickable();
+    const getLinks = jest.fn(() => [
+      { href: 'https://example.com', title: 'X', target: '_self', origin: {}, onClick: jest.fn() },
+    ]);
+    frames[0].fields[1].getLinks = getLinks as any;
+    render(<FleetGridPanel {...makeProps(frames)} />);
+    fireEvent.mouseMove(containerOf(), { clientX: 10, clientY: 5 });
+    const tooltip = screen.getByRole('tooltip', { name: 'zone-a details' });
+
+    fireEvent.pointerDown(tooltip);
+    fireEvent.click(tooltip);
+
+    expect(getLinks).not.toHaveBeenCalled();
+    expect(screen.getByRole('tooltip', { name: 'zone-a details' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Close')).not.toBeInTheDocument();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
   it('lists refIds for configured queries that returned no series', () => {
     const p = makeProps([series('A', 'power', 'zone-a')]);
     // Query B is configured (targets) but has 0 series (not present in series)
@@ -188,7 +219,10 @@ describe('FleetGridPanel', () => {
         ],
       });
     const p = makeProps([twoLevel('zone-a', '0'), twoLevel('zone-b')]); // The second one is missing gpu → excluded
-    p.options.levels = [{ ...DEFAULT_LEVEL, label: 'zone' }, { ...DEFAULT_LEVEL, label: 'gpu' }];
+    p.options.levels = [
+      { ...DEFAULT_LEVEL, label: 'zone' },
+      { ...DEFAULT_LEVEL, label: 'gpu' },
+    ];
     render(<FleetGridPanel {...p} />);
     expect(document.querySelector('canvas')).toBeInTheDocument(); // The matching row's cell is rendered
     expect(screen.getByRole('alert')).toBeInTheDocument(); // and the warning banner is also shown at the same time
@@ -220,6 +254,30 @@ describe('FleetGridPanel', () => {
     fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
     expect(onLinkClick).toHaveBeenCalled(); // Data Links take priority and execute immediately
     expect(screen.queryByLabelText('Close')).not.toBeInTheDocument(); // The popover is suppressed
+  });
+
+  it('passes the cell-specific display value to Data Links', () => {
+    const captured: unknown[] = [];
+    const frames = clickable();
+    for (const frame of frames) {
+      frame.fields[1].config.color = { mode: 'continuous-GrYlRd' };
+      frame.fields[1].getLinks = ((opts: { calculatedValue: unknown }) => {
+        captured.push(opts.calculatedValue);
+        return [{ href: 'https://example.com', title: 'X', target: '_self', origin: {}, onClick: jest.fn() }];
+      }) as any;
+    }
+    const p = makeProps(frames);
+    p.options.rangeOverrides = [
+      { matchers: [{ label: 'zone', operator: 'exact', value: 'zone-a' }], min: 0, max: 2 },
+      { matchers: [{ label: 'zone', operator: 'exact', value: 'zone-b' }], min: 0, max: 100 },
+    ];
+    render(<FleetGridPanel {...p} />);
+
+    fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
+    fireEvent.click(containerOf(), { clientX: 60, clientY: 5 });
+
+    expect(captured).toHaveLength(2);
+    expect((captured[0] as { color?: string }).color).not.toBe((captured[1] as { color?: string }).color);
   });
 
   it('shows a selection menu for multiple data links (not the popover)', () => {
@@ -260,7 +318,13 @@ describe('FleetGridPanel', () => {
     Object.defineProperty(el, 'clientHeight', { configurable: true, value: box.ch });
   };
   const linksOf = (n: number) =>
-    (() => Array.from({ length: n }, (_, i) => ({ href: `https://l/${i}`, title: `L${i}`, target: '_blank', origin: {} }))) as any;
+    (() =>
+      Array.from({ length: n }, (_, i) => ({
+        href: `https://l/${i}`,
+        title: `L${i}`,
+        target: '_blank',
+        origin: {},
+      }))) as any;
 
   it('places the link menu in content coordinates using the scroll offset', () => {
     const frames = clickable();

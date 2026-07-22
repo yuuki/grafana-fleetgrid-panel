@@ -36,9 +36,59 @@ const hasFinitePositiveDelta = (min: number, max: number): boolean => {
   return Number.isFinite(delta) && delta > 0;
 };
 
+export interface EffectiveRange {
+  min: number;
+  max: number;
+}
+
+export function normalizeEffectiveRange(
+  min: number,
+  max: number,
+  minConfigured: boolean,
+  maxConfigured: boolean,
+  preferredEndpoint?: 'min' | 'max'
+): EffectiveRange {
+  let effectiveMin = min;
+  let effectiveMax = max;
+  if (preferredEndpoint === 'min' && effectiveMin >= effectiveMax) {
+    [effectiveMin, effectiveMax] = expandRange(effectiveMin, 'up');
+  } else if (preferredEndpoint === 'max' && effectiveMin >= effectiveMax) {
+    [effectiveMin, effectiveMax] = expandRange(effectiveMax, 'down');
+  } else if (minConfigured && maxConfigured) {
+    if (effectiveMin > effectiveMax) {
+      [effectiveMin, effectiveMax] = [effectiveMax, effectiveMin];
+    } else if (effectiveMin === effectiveMax) {
+      [effectiveMin, effectiveMax] = expandRange(effectiveMin, 'up');
+    }
+  } else if (minConfigured && effectiveMin >= effectiveMax) {
+    [effectiveMin, effectiveMax] = expandRange(effectiveMin, 'up');
+  } else if (maxConfigured && effectiveMin >= effectiveMax) {
+    [effectiveMin, effectiveMax] = expandRange(effectiveMax, 'down');
+  }
+  if (!Number.isFinite(effectiveMin) || !Number.isFinite(effectiveMax) || effectiveMin >= effectiveMax) {
+    effectiveMin = 0;
+    effectiveMax = 1;
+  }
+  if (!hasFinitePositiveDelta(effectiveMin, effectiveMax)) {
+    effectiveMin /= 2;
+    effectiveMax /= 2;
+  }
+  if (!hasFinitePositiveDelta(effectiveMin, effectiveMax)) {
+    effectiveMin = 0;
+    effectiveMax = 1;
+  }
+  return { min: effectiveMin, max: effectiveMax };
+}
+
 export interface MetricInfo {
   refId: string;
   name: string;
+  /** Cell-derived automatic endpoints before field-config normalization. */
+  autoMin?: number;
+  autoMax?: number;
+  /** Original finite field-config endpoints, before they are normalized for display. */
+  configuredMin?: number;
+  configuredMax?: number;
   effectiveMin: number;
   effectiveMax: number;
   minConfigured: boolean;
@@ -101,32 +151,14 @@ export function buildMetricInfos(
     const minConfigured = Number.isFinite(firstNumeric.field.config.min);
     const maxConfigured = Number.isFinite(firstNumeric.field.config.max);
     const config = { ...firstNumeric.field.config };
-    let effMin = minConfigured ? (config.min as number) : min;
-    let effMax = maxConfigured ? (config.max as number) : max;
-    if (minConfigured && maxConfigured) {
-      if (effMin > effMax) {
-        [effMin, effMax] = [effMax, effMin];
-      } else if (effMin === effMax) {
-        [effMin, effMax] = expandRange(effMin, 'up');
-      }
-    } else if (minConfigured && effMin >= effMax) {
-      [effMin, effMax] = expandRange(effMin, 'up');
-    } else if (maxConfigured && effMin >= effMax) {
-      [effMin, effMax] = expandRange(effMax, 'down');
-    }
-    // Extreme finite endpoints can overflow when expanded. A valid scale takes precedence over retaining an impossible endpoint.
-    if (!Number.isFinite(effMin) || !Number.isFinite(effMax) || effMin >= effMax) {
-      effMin = 0;
-      effMax = 1;
-    }
-    if (!hasFinitePositiveDelta(effMin, effMax)) {
-      effMin /= 2;
-      effMax /= 2;
-    }
-    if (!hasFinitePositiveDelta(effMin, effMax)) {
-      effMin = 0;
-      effMax = 1;
-    }
+    const normalized = normalizeEffectiveRange(
+      minConfigured ? (config.min as number) : min,
+      maxConfigured ? (config.max as number) : max,
+      minConfigured,
+      maxConfigured
+    );
+    const effMin = normalized.min;
+    const effMax = normalized.max;
     const delta = effMax - effMin;
     config.min = effMin;
     config.max = effMax;
@@ -141,6 +173,10 @@ export function buildMetricInfos(
     infos.push({
       refId,
       name: group[0].name ?? refId,
+      autoMin: min,
+      autoMax: max,
+      configuredMin: minConfigured ? (firstNumeric.field.config.min as number) : undefined,
+      configuredMax: maxConfigured ? (firstNumeric.field.config.max as number) : undefined,
       effectiveMin: effMin,
       effectiveMax: effMax,
       minConfigured,

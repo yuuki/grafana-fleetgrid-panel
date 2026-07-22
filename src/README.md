@@ -7,7 +7,7 @@ All cells are drawn on a single `<canvas>`, with the tooltip, drilldown popover,
 ## Features
 
 - **Hierarchical grid** — Define an arbitrary number of nesting levels from your query labels (for example `zone` → `host` → `gpu`). Each level chooses its own layout (stack, row, flow-wrap, or grid) and sort order, with an editor that lists the detected label keys and previews the group count.
-- **Standard Grafana coloring** — Color scheme (continuous gradient), Thresholds, Unit, Decimals, Min/Max, and Data Links are all configured through Grafana's native Field and Overrides tabs. There is no custom color DSL; only numeric values are colored, and each query keeps its own color scale.
+- **Grafana-native display with label-based ranges** — Unit, Decimals, value mappings, color scheme, Thresholds, and Data Links use Grafana's Field and Overrides tabs. Ordered exact/regex rules can apply different Min/Max by refId, zone, pod, or other labels without introducing a threshold DSL; a multi-range legend avoids implying one fixed scale, and hover shows the range actually used.
 - **Auto-fitted cells** — Cell size is computed from the panel dimensions. Numbers are drawn only when the formatted text fits; the exact value is always available on hover.
 - **Natural sort** — Numeric segments inside labels are compared as numbers (`node-a2` before `node-a10`), ascending by default (descending and data-order are also selectable).
 - **Multiple metrics** — Show one metric at a time with an in-panel selector (default), or opt in to split each cell into sub-regions to compare its metrics side by side. The tooltip and popover list every metric that returned data.
@@ -26,6 +26,8 @@ The automated end-to-end tests run against Grafana's built-in TestData data sour
 1. Add one or more numeric queries whose series carry the labels you want to nest (for example `zone`, `host`, `gpu`).
 2. In the panel editor, under **Hierarchy**, add a level per label. For each level pick how to extract the key (as-is, trailing number, or a custom regex), the sort order, and the layout.
 3. On the **Field** tab, choose a **Color scheme** such as `Green-Yellow-Red (by value)` for a continuous gradient, or configure **Thresholds** for discrete colors. Set **Unit**, **Decimals**, and **Min/Max** as needed; use **Overrides** (by refId) for per-query settings.
+
+When a query needs zone- or pod-specific limits, add ordered rules under **Color scale overrides**. The first rule whose optional refId and all exact/regex label conditions match wins; min-only and max-only rules fall back to standard field config and then automatic scaling for the other endpoint. Table and time-series query results are supported. Conflicting source labels aggregated into one cell produce a warning and use the standard range instead of choosing by data order. See the repository README for GPU power and bandwidth JSON examples.
 
 Cells are built from the union of all queries, so a node present in only one query still appears; cells with no sample for the displayed query use the missing color. To compare several metrics side by side, enable split mode under **Display**; it shows the queries that returned data, capped at the first nine.
 
