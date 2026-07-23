@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.3 - 2026-07-23
+
+- Show the actual hierarchy label values in cell tooltips instead of normalized display labels.
+- Update end-to-end tooltip assertions to cover raw hierarchy label values.
+
 ## 0.2.2 - 2026-07-23
 
 - Add ordered label-based color-scale ranges with exact/regex matching, partial Min/Max fallback, and an editor populated from query labels.

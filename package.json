@@ -1,6 +1,6 @@
 {
   "name": "fleetgrid",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "scripts": {
     "build": "webpack -c ./.config/webpack/webpack.config.ts --env production",
     "deploy:grafana:ssh": "bash scripts/deploy-plugin-ssh.sh",
