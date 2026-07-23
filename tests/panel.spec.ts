@@ -120,6 +120,26 @@ interface CellPath {
 const PATH_RE = /(zone-[a-z0-9]+)\s*\/\s*([^/\s]+)\s*\/\s*(gpu\d+)/i;
 
 /**
+ * Dispatches a canvas-local mousemove without relying on DOM hit-testing.
+ *
+ * The tooltip is rendered above the canvas in newer Grafana versions. A real
+ * Playwright hover can therefore be intercepted by the tooltip's pointer
+ * events, while the panel still receives the same bubbling mouse event.
+ */
+async function hoverCanvas(canvas: Locator, position: { x: number; y: number }): Promise<void> {
+  await canvas.evaluate((el, point) => {
+    const rect = el.getBoundingClientRect();
+    el.dispatchEvent(
+      new MouseEvent('mousemove', {
+        bubbles: true,
+        clientX: rect.left + point.x,
+        clientY: rect.top + point.y,
+      })
+    );
+  }, position);
+}
+
+/**
  * Hovers over (x,y) on the canvas and returns the hierarchy path from the displayed tooltip. null if outside a cell.
  * Polls briefly for the tooltip content to appear rather than using a fixed sleep (a safeguard against missed detection on slow environments).
  */
@@ -130,7 +150,7 @@ async function readPath(
   y: number,
   timeout = 300
 ): Promise<CellPath | null> {
-  await canvas.hover({ position: { x, y } });
+  await hoverCanvas(canvas, { x, y });
   return readCurrentPath(canvas, panel, timeout);
 }
 
@@ -447,13 +467,13 @@ test('label-based ranges color equal values differently and expose each applied 
   await expect(panel.locator.getByTestId('range-legend')).toContainText('Label-based ranges');
   const points = await findZoneCellPoints(canvas, panel.locator, ['zone-a', 'zone-b']);
 
-  await canvas.hover({ position: points['zone-a'] });
+  await hoverCanvas(canvas, points['zone-a']);
   const zoneATooltip = panel.locator.getByRole('tooltip');
   await expect(zoneATooltip).toContainText('Fixed');
   await expect(zoneATooltip).toContainText(/0\s*W.*200\s*W/);
   await expect(zoneATooltip).toContainText('zone = zone-a');
 
-  await canvas.hover({ position: points['zone-b'] });
+  await hoverCanvas(canvas, points['zone-b']);
   const zoneBTooltip = panel.locator.getByRole('tooltip');
   await expect(zoneBTooltip).toContainText('Fixed');
   await expect(zoneBTooltip).toContainText(/0\s*W.*400\s*W/);
