@@ -117,7 +117,7 @@ interface CellPath {
   text: string;
 }
 
-const PATH_RE = /(zone-[a-z0-9]+)\s*\/\s*([^/\s]+)\s*\/\s*(gpu\d+)/i;
+const PATH_RE = /zone:\s*(zone-[a-z0-9]+)\s+host:\s*([^\s]+)\s+gpu:\s*(gpu\d+)/i;
 
 /**
  * Dispatches a canvas-local mousemove without relying on DOM hit-testing.
@@ -140,7 +140,7 @@ async function hoverCanvas(canvas: Locator, position: { x: number; y: number }):
 }
 
 /**
- * Hovers over (x,y) on the canvas and returns the hierarchy path from the displayed tooltip. null if outside a cell.
+ * Hovers over (x,y) on the canvas and returns the raw hierarchy labels from the displayed tooltip. null if outside a cell.
  * Polls briefly for the tooltip content to appear rather than using a fixed sleep (a safeguard against missed detection on slow environments).
  */
 async function readPath(
@@ -334,7 +334,8 @@ test('hover tooltip lists every metric with its configured unit', async ({
   const point = await findCellPoint(canvas, panel.locator);
   const hit = await readPath(canvas, panel.locator, point.x, point.y);
   expect(hit).not.toBeNull();
-  expect(hit.text).toMatch(/zone-a\s*\/\s*\d+\s*\/\s*gpu\d/);
+  expect(hit.text).toMatch(/zone:\s*zone-a\s+host:\s*node-a\d+\s+gpu:\s*gpu\d/i);
+  expect(hit.text).not.toMatch(/zone-a\s*\/\s*\d+\s*\/\s*gpu\d/i);
   // Query A = watt, query B = celsius (override). Both appear in the tooltip with units.
   expect(hit.text).toMatch(/\d+(\.\d+)?\s*W\b/);
   expect(hit.text).toContain('°C');
@@ -371,21 +372,21 @@ test('renders the provisioned 2 / 10 / 2 grid in row-major order', async ({
   }
 
   const zoneAFirstRow = Array.from({ length: 10 }, (_, host) =>
-    ['gpu0', 'gpu1'].map((gpu) => `zone-a/${host + 1}/${gpu}`)
+    ['gpu0', 'gpu1'].map((gpu) => `zone-a/node-a${host + 1}/${gpu}`)
   ).flat();
   expect(order.slice(0, zoneAFirstRow.length)).toEqual(zoneAFirstRow);
-  expect(order).toContain('zone-b/1/gpu0');
-  expect(order).not.toContain('zone-a/11/gpu0');
+  expect(order).toContain('zone-b/node-b1/gpu0');
+  expect(order).not.toContain('zone-a/node-a11/gpu0');
 
   // Ten host columns force node-a11 onto the next host row.
   let secondRow: CellPath | null = null;
   for (let y = rowY + 5; y <= box.height && secondRow === null; y += 5) {
     const p = await probePath(canvas, panel.locator, firstPoint.x, y);
-    if (p?.host === '11') {
+    if (p?.host === 'node-a11') {
       secondRow = p;
     }
   }
-  expect(secondRow).toMatchObject({ zone: 'zone-a', host: '11' });
+  expect(secondRow).toMatchObject({ zone: 'zone-a', host: 'node-a11' });
 });
 
 test('clicking a cell opens the drilldown popover', async ({ gotoDashboardPage, readProvisionedDashboard }) => {
@@ -471,13 +472,13 @@ test('label-based ranges color equal values differently and expose each applied 
   const zoneATooltip = panel.locator.getByRole('tooltip');
   await expect(zoneATooltip).toContainText('Fixed');
   await expect(zoneATooltip).toContainText(/0\s*W.*200\s*W/);
-  await expect(zoneATooltip).toContainText('zone = zone-a');
+  await expect(zoneATooltip).toContainText('zone: zone-a');
 
   await hoverCanvas(canvas, points['zone-b']);
   const zoneBTooltip = panel.locator.getByRole('tooltip');
   await expect(zoneBTooltip).toContainText('Fixed');
   await expect(zoneBTooltip).toContainText(/0\s*W.*400\s*W/);
-  await expect(zoneBTooltip).toContainText('zone = zone-b');
+  await expect(zoneBTooltip).toContainText('zone: zone-b');
 
   const zoneAColor = await cellFillColorAt(canvas, points['zone-a']);
   const zoneBColor = await cellFillColorAt(canvas, points['zone-b']);
