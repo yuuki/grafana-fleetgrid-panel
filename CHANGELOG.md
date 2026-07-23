@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.2 - 2026-07-23
 
 - Add ordered label-based color-scale ranges with exact/regex matching, partial Min/Max fallback, and an editor populated from query labels.
 - Show the actual applied range in tooltips, identify multi-range metrics in legends, and warn and fall back safely when aggregated source labels select conflicting rules.
