@@ -144,9 +144,8 @@ describe('FleetGridPanel', () => {
     Object.defineProperty(container, 'scrollLeft', { configurable: true, value: 50 });
     // clientX=10 would naively be zone-a([0,40)), but with +scrollLeft=50, cx=60 → zone-b([41,81)) is the correct hit
     fireEvent.mouseMove(container, { clientX: 10, clientY: 5 });
-    const title = screen.getByText('zone-b'); // The correct cell accounting for scrollLeft is hit
-    expect(title).toBeInTheDocument();
-    expect(title.parentElement).toHaveStyle({ left: '72px' }); // tooltip x = cx(60) + 12 = content coordinates
+    const tooltip = screen.getByRole('tooltip', { name: 'zone: zone-b' });
+    expect(tooltip).toHaveStyle({ left: '72px' }); // tooltip x = cx(60) + 12 = content coordinates
   });
 
   it('shows the standard range for an unmatched cell while overrides are active', () => {
@@ -156,7 +155,7 @@ describe('FleetGridPanel', () => {
     ];
     render(<FleetGridPanel {...p} />);
     fireEvent.mouseMove(containerOf(), { clientX: 60, clientY: 5 });
-    expect(screen.getByText('zone-b')).toBeInTheDocument();
+    expect(screen.getByText('zone: zone-b')).toBeInTheDocument();
     expect(screen.getByText('Standard range')).toBeInTheDocument();
     expect(screen.getByText('Auto')).toBeInTheDocument();
   });
@@ -169,13 +168,13 @@ describe('FleetGridPanel', () => {
     frames[0].fields[1].getLinks = getLinks as any;
     render(<FleetGridPanel {...makeProps(frames)} />);
     fireEvent.mouseMove(containerOf(), { clientX: 10, clientY: 5 });
-    const tooltip = screen.getByRole('tooltip', { name: 'zone-a details' });
+    const tooltip = screen.getByRole('tooltip', { name: 'zone: zone-a' });
 
     fireEvent.pointerDown(tooltip);
     fireEvent.click(tooltip);
 
     expect(getLinks).not.toHaveBeenCalled();
-    expect(screen.getByRole('tooltip', { name: 'zone-a details' })).toBeInTheDocument();
+    expect(screen.getByRole('tooltip', { name: 'zone: zone-a' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Close')).not.toBeInTheDocument();
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   });

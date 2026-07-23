@@ -46,7 +46,7 @@ describe('CellTooltip', () => {
     };
     render(<CellTooltip cell={cell} metricInfos={infos} missingColor="#444" x={0} y={0} />);
 
-    expect(screen.getByText('zone-a / 0').parentElement).toHaveStyle({
+    expect(screen.getByRole('tooltip', { name: 'zone: zone-a' })).toHaveStyle({
       background: theme.colors.background.elevated ?? theme.colors.background.secondary,
       color: theme.colors.text.primary,
       border: `1px solid ${theme.colors.border.medium}`,
@@ -54,7 +54,7 @@ describe('CellTooltip', () => {
     });
   });
 
-  it('shows path and all metric values including missing', () => {
+  it('shows all metric values including missing', () => {
     const infos = buildMetricInfos(frames, theme, 'browser');
     const cell = {
       path: ['zone-a', '0'],
@@ -65,13 +65,95 @@ describe('CellTooltip', () => {
       ]),
     };
     render(<CellTooltip cell={cell} metricInfos={infos} missingColor="#444" x={0} y={0} />);
-    expect(screen.getByText('zone-a / 0')).toBeInTheDocument();
     expect(screen.getByText(/^503\s*W$/)).toBeInTheDocument(); // Formatted result with unit (not the raw value)
     expect(screen.getByText('power')).toBeInTheDocument();
     expect(screen.getByText('temp')).toBeInTheDocument(); // Name of the second metric
     expect(screen.getByText('No data')).toBeInTheDocument();
     expect(screen.getByText('Standard range')).toBeInTheDocument();
     expect(screen.getByText('Auto')).toBeInTheDocument();
+  });
+
+  it('shows each hierarchy label with its value before extraction', () => {
+    const infos = buildMetricInfos([frames[0]], theme, 'browser');
+    const cell = {
+      path: ['017'],
+      labels: { host: 'node-a017' },
+      values: new Map<string, number | null>([['A', 503]]),
+    };
+
+    render(
+      <CellTooltip
+        cell={cell}
+        metricInfos={infos}
+        missingColor="#444"
+        x={10}
+        y={10}
+        minX={0}
+        minY={0}
+        maxX={180}
+        maxY={200}
+      />
+    );
+
+    expect(screen.getByText('host: node-a017')).toHaveStyle({ overflowWrap: 'anywhere' });
+    expect(screen.queryByText('017')).not.toBeInTheDocument();
+    expect(screen.getByRole('tooltip', { name: 'host: node-a017' })).toBeInTheDocument();
+  });
+
+  it('uses all hierarchy label rows when placing the tooltip', () => {
+    const infos = buildMetricInfos([frames[0]], theme, 'browser');
+    const cell = {
+      path: ['017'],
+      labels: { zone: 'zone-a', host: 'node-a017' },
+      values: new Map<string, number | null>([['A', 503]]),
+    };
+
+    render(
+      <CellTooltip
+        cell={cell}
+        metricInfos={infos}
+        missingColor="#444"
+        x={10}
+        y={120}
+        minX={0}
+        minY={0}
+        maxX={180}
+        maxY={200}
+      />
+    );
+
+    expect(screen.getByText('zone: zone-a')).toBeInTheDocument();
+    expect(screen.getByText('host: node-a017')).toBeInTheDocument();
+    const tooltip = screen.getByRole('tooltip', {
+      name: 'zone: zone-a, host: node-a017',
+    }) as HTMLElement;
+    expect(tooltip.style.top).toBe('34px');
+    expect(tooltip.style.maxHeight).toBe('166px');
+  });
+
+  it('uses the space below its placement for a long hierarchy label', () => {
+    const infos = buildMetricInfos([frames[0]], theme, 'browser');
+    const cell = {
+      path: ['017'],
+      labels: { host: `node-a017-${'long-'.repeat(20)}value` },
+      values: new Map<string, number | null>([['A', 503]]),
+    };
+
+    render(
+      <CellTooltip
+        cell={cell}
+        metricInfos={infos}
+        missingColor="#444"
+        x={10}
+        y={10}
+        minX={0}
+        minY={0}
+        maxX={180}
+        maxY={200}
+      />
+    );
+
+    expect(parseFloat((screen.getByRole('tooltip') as HTMLElement).style.maxHeight)).toBe(182);
   });
 
   it('is focusable and keeps pointer movement from escaping to the panel', () => {
@@ -84,7 +166,7 @@ describe('CellTooltip', () => {
         <CellTooltip cell={cell} metricInfos={infos} missingColor="#444" x={0} y={0} />
       </div>
     );
-    const tooltip = screen.getByRole('tooltip', { name: 'zone-a details' });
+    const tooltip = screen.getByRole('tooltip', { name: 'Cell details' });
     expect(tooltip).toHaveStyle({ pointerEvents: 'auto' });
     expect(tooltip).toHaveAttribute('tabindex', '0');
     tooltip.focus();
@@ -159,7 +241,7 @@ describe('CellTooltip', () => {
     const cell = { path: ['zone-a'], labels: {}, values: new Map<string, number | null>([['A', 503]]) };
     const bounds = { minX: 200, minY: 150, maxX: 500, maxY: 330 };
     render(<CellTooltip cell={cell} metricInfos={infos} missingColor="#444" x={490} y={320} {...bounds} />);
-    const tooltip = screen.getByText('zone-a').parentElement as HTMLElement;
+    const tooltip = screen.getByRole('tooltip', { name: 'Cell details' });
     expect(parseFloat(tooltip.style.left)).toBeGreaterThanOrEqual(bounds.minX);
     expect(parseFloat(tooltip.style.top)).toBeGreaterThanOrEqual(bounds.minY);
     expect(parseFloat(tooltip.style.left) + parseFloat(tooltip.style.width)).toBeLessThanOrEqual(bounds.maxX);
@@ -198,7 +280,7 @@ describe('CellTooltip', () => {
       />
     );
     const matcher = screen.getByText(/^bw_type =~/);
-    const tooltip = screen.getByText('zone-a').parentElement as HTMLElement;
+    const tooltip = screen.getByRole('tooltip', { name: 'Cell details' });
     expect(matcher).toHaveStyle({ overflowWrap: 'anywhere' });
     expect(tooltip.style.overflowY).toBe('auto');
     expect(parseFloat(tooltip.style.maxWidth)).toBeLessThanOrEqual(180);

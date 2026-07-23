@@ -23,6 +23,7 @@ const MAX_W = 320;
 
 export const CellTooltip: React.FC<CellTooltipProps> = ({ cell, metricInfos, missingColor, x, y, ...bounds }) => {
   const theme = useTheme2();
+  const labels = Object.entries(cell.labels);
   const infoByRef = new Map(metricInfos.map((info) => [info.refId, info]));
   // Adaptation: since choices are based on model.refIds, a refId with 0 series has no MetricInfo.
   // Prioritize metricInfos order, while also listing refIds that exist only in cell.values (0 series) at the end and showing them as missing.
@@ -41,20 +42,23 @@ export const CellTooltip: React.FC<CellTooltipProps> = ({ cell, metricInfos, mis
   const availableH = hasBounds ? bounds.maxY! - bounds.minY! : 0;
   const outerW = hasBounds ? Math.min(MAX_W, availableW) : undefined;
   const estimatedH =
-    32 +
+    labels.length * 18 +
     refIds.reduce((height, refId) => {
       const range = cell.ranges?.get(refId);
       const hasValue = cell.values.get(refId) != null && infoByRef.has(refId);
       return height + 22 + (hasValue ? 20 + (range?.matchers?.length ?? 0) * 18 : 0);
     }, 0);
-  const outerH = hasBounds ? Math.min(estimatedH, availableH) : undefined;
+  const placementH = hasBounds ? Math.min(estimatedH, availableH) : undefined;
   const placement = hasBounds
-    ? placeOverlay(x, y, outerW!, outerH!, bounds as Required<typeof bounds>)
+    ? placeOverlay(x, y, outerW!, placementH!, bounds as Required<typeof bounds>)
     : { left: x + 12, top: y + 12 };
+  const outerH = hasBounds ? Math.max(0, bounds.maxY! - placement.top) : undefined;
+  const accessibleName =
+    labels.length > 0 ? labels.map(([name, value]) => `${name}: ${value}`).join(', ') : 'Cell details';
   return (
     <div
       role="tooltip"
-      aria-label={`${cell.path.join(' / ')} details`}
+      aria-label={accessibleName}
       tabIndex={0}
       onMouseMove={(event) => event.stopPropagation()}
       onPointerMove={(event) => event.stopPropagation()}
@@ -83,7 +87,9 @@ export const CellTooltip: React.FC<CellTooltipProps> = ({ cell, metricInfos, mis
         whiteSpace: 'normal',
       }}
     >
-      <div style={{ fontWeight: 600, marginBottom: 4 }}>{cell.path.join(' / ')}</div>
+      {labels.map(([name, value]) => (
+        <div key={name} style={{ overflowWrap: 'anywhere' }}>{`${name}: ${value}`}</div>
+      ))}
       {refIds.map((refId) => {
         const info = infoByRef.get(refId);
         const v = cell.values.get(refId) ?? null;
