@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.4 - 2026-07-23
+
+- Update the transitive `fast-uri` dependency to 3.1.4 to resolve CVE-2026-16221 and restore release validation.
+
 ## 0.2.3 - 2026-07-23
 
 - Show the actual hierarchy label values in cell tooltips instead of normalized display labels.
