@@ -1,8 +1,24 @@
+import type { DisplayProcessor } from '@grafana/data';
+
 export type ExtractPreset = 'raw' | 'trailingNumber' | 'regex';
 export type SortOrder = 'natural' | 'naturalDesc' | 'none';
 export type LevelLayout = 'vertical' | 'horizontal' | 'flow' | 'grid';
 export type SpatialAggregation = 'max' | 'mean' | 'min' | 'sum';
 export type DisplayMode = 'single' | 'split';
+export type RangeMatcherOperator = 'exact' | 'regex';
+
+export interface RangeMatcher {
+  label: string;
+  operator: RangeMatcherOperator;
+  value: string;
+}
+
+export interface RangeOverride {
+  refId?: string;
+  matchers: RangeMatcher[];
+  min?: number;
+  max?: number;
+}
 
 export interface LevelDef {
   label: string;
@@ -24,6 +40,8 @@ export interface FleetGridOptions {
   spatialAggregation: SpatialAggregation;
   /** ReducerID (e.g. 'lastNotNull') — reduce along the time axis */
   reduceCalc: string;
+  /** Ordered color scale overrides. The first rule matching a source label set wins. */
+  rangeOverrides?: RangeOverride[];
 }
 
 export const DEFAULT_LEVEL: LevelDef = {
@@ -52,7 +70,22 @@ export interface CellModel {
    * Always set on the production path (attachCells). May be omitted for display-only/lightweight fixtures.
    */
   labelSets?: Array<Record<string, string>>;
+  /** Complete source labels that contributed a non-null value, kept separate per query. */
+  sourceLabelSetsByRef?: Map<string, Array<Record<string, string>>>;
   values: Map<string, number | null>;
+  /** Effective color range and processor for each metric in this cell. */
+  ranges?: Map<string, CellRangeInfo>;
+}
+
+export interface CellRangeInfo {
+  effectiveMin: number;
+  effectiveMax: number;
+  minConfigured: boolean;
+  maxConfigured: boolean;
+  processor: DisplayProcessor;
+  source: 'standard' | 'override' | 'conflict';
+  matchedRuleIndex?: number;
+  matchers?: RangeMatcher[];
 }
 
 export interface HierarchyNode {

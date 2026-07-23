@@ -1,7 +1,7 @@
 import { createTheme, DisplayValue } from '@grafana/data';
 import { MetricInfo } from '../data/display';
 import { LayoutResult } from '../layout/layout';
-import { CellModel } from '../types';
+import { CellModel, CellRangeInfo } from '../types';
 import { renderCanvas, RenderContext } from './renderer';
 
 const theme = createTheme();
@@ -64,6 +64,43 @@ const fillRects = (canvas: HTMLCanvasElement): Array<{ x: number; y: number; wid
     .map((e) => e.props);
 
 describe('renderCanvas', () => {
+  const cellRange = (processor: jest.Mock): CellRangeInfo => ({
+    effectiveMin: 0,
+    effectiveMax: 100,
+    minConfigured: true,
+    maxConfigured: true,
+    processor: processor as unknown as CellRangeInfo['processor'],
+    source: 'override',
+  });
+
+  it.each(['single', 'split'] as const)('uses the cell range processor in %s mode', (displayMode) => {
+    const standard = jest.fn((v: number): DisplayValue => ({ numeric: v, text: `standard ${v}`, color: '#111111' }));
+    const zoneA = jest.fn((v: number): DisplayValue => ({ numeric: v, text: `zone-a ${v}`, color: '#abcdef' }));
+    const zoneB = jest.fn((v: number): DisplayValue => ({ numeric: v, text: `zone-b ${v}`, color: '#fedcba' }));
+    const layout = makeLayout([['A', 1]]);
+    layout.cells[0].cell.ranges = new Map([['A', cellRange(zoneA)]]);
+    layout.cells.push({
+      ...layout.cells[0],
+      x: 41,
+      cell: {
+        ...layout.cells[0].cell,
+        path: ['b'],
+        values: new Map([['A', 1]]),
+        ranges: new Map([['A', cellRange(zoneB)]]),
+      },
+    });
+    layout.contentWidth = 81;
+    const canvas = document.createElement('canvas');
+
+    renderCanvas(canvas, baseCtx({ metricInfos: [makeInfo('A', standard)], layout, displayMode, showValues: true }));
+
+    expect(zoneA).toHaveBeenCalledWith(1);
+    expect(zoneB).toHaveBeenCalledWith(1);
+    expect(standard).not.toHaveBeenCalled();
+    expect(fillStyles(canvas)).toContain('#abcdef');
+    expect(fillStyles(canvas)).toContain('#fedcba');
+  });
+
   it('renders a selected zero-series refId as missing without falling back to another metric', () => {
     const spy = jest.fn((v: number): DisplayValue => ({ numeric: v, text: String(v), color: '#abcdef' }));
     const canvas = document.createElement('canvas');

@@ -15,6 +15,7 @@ import { DrilldownPopover } from './DrilldownPopover';
 import { RangeLegend } from './RangeLegend';
 import { SplitLegend } from './SplitLegend';
 import { placeOverlay, VisibleBounds } from './overlay';
+import { cellRangeFor } from '../data/cellRange';
 
 // Header height fallback for when showHeader is on (the actual height is measured after layout and overwrites this)
 const HEADER_H = 32;
@@ -126,8 +127,7 @@ export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) =>
     () => computeLayout(model.root, options.levels, width, bodyH),
     [model.root, options.levels, width, bodyH]
   );
-
-  const selectedRefId = selected && model.refIds.includes(selected) ? selected : model.refIds[0] ?? 'A';
+  const selectedRefId = selected && model.refIds.includes(selected) ? selected : (model.refIds[0] ?? 'A');
   const selectedMetricInfo = model.metricInfos.find((info) => info.refId === selectedRefId);
 
   useEffect(() => {
@@ -251,8 +251,8 @@ export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) =>
           ))
         ) : (
           <p>
-            Could not build numeric cells from the query results. Check that your queries return numeric values and
-            that the hierarchy levels match your labels.
+            Could not build numeric cells from the query results. Check that your queries return numeric values and that
+            the hierarchy levels match your labels.
           </p>
         )}
       </div>
@@ -268,7 +268,7 @@ export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) =>
         >
           {isSplit ? (
             // In split mode, each position entry carries its own metric range.
-            <SplitLegend metricInfos={model.metricInfos} />
+            <SplitLegend metricInfos={model.metricInfos} rangeInfosByRef={model.rangeInfosByRef} />
           ) : (
             <>
               {model.refIds.length > 1 && (
@@ -283,7 +283,12 @@ export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) =>
                   onChange={setSelected}
                 />
               )}
-              <RangeLegend metricInfo={selectedMetricInfo} metricName={selectedRefId} width={width} />
+              <RangeLegend
+                metricInfo={selectedMetricInfo}
+                metricName={selectedRefId}
+                width={width}
+                rangeInfos={selectedMetricInfo ? model.rangeInfosByRef.get(selectedMetricInfo.refId) : undefined}
+              />
             </>
           )}
         </div>
@@ -367,7 +372,7 @@ export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) =>
             data.series,
             clickRefId,
             hit.cell.labelSets ?? hit.cell.labels,
-            v != null ? info?.processor(v) : undefined
+            v != null && info ? cellRangeFor(hit.cell, info).processor(v) : undefined
           );
           if (links.length === 1) {
             followLink(links[0], e);
@@ -394,6 +399,10 @@ export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) =>
             missingColor={options.missingColor}
             x={hover.x}
             y={hover.y}
+            minX={visibleBounds.minX}
+            minY={visibleBounds.minY}
+            maxX={visibleBounds.maxX}
+            maxY={visibleBounds.maxY}
           />
         )}
         {popover && (

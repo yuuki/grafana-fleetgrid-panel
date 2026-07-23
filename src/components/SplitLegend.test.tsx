@@ -4,6 +4,7 @@ import { createTheme, toDataFrame, FieldType } from '@grafana/data';
 import { buildMetricInfos, MetricInfo } from '../data/display';
 import { splitRects } from '../render/split';
 import { SplitLegend } from './SplitLegend';
+import { CellRangeInfo } from '../types';
 
 const theme = createTheme();
 let mockTheme = theme;
@@ -22,6 +23,24 @@ const frame = (refId: string, name: string, config = {}) =>
   });
 
 describe('SplitLegend', () => {
+  it('shows a label-based range count for a metric with multiple actually-used signatures', () => {
+    const infos = buildMetricInfos([frame('A', 'power')], theme, 'browser');
+    const cellRange = (max: number): CellRangeInfo => ({
+      effectiveMin: 0,
+      effectiveMax: max,
+      minConfigured: true,
+      maxConfigured: true,
+      processor: infos[0].processor,
+      source: 'override',
+    });
+
+    render(<SplitLegend metricInfos={infos} rangeInfosByRef={new Map([['A', [cellRange(500), cellRange(700)]]])} />);
+
+    expect(screen.getByText('Label-based ranges')).toBeInTheDocument();
+    expect(screen.getByText('2 ranges')).toBeInTheDocument();
+    expect(screen.queryByText(/–/)).not.toBeInTheDocument();
+  });
+
   it('lists region number and query name in order', () => {
     const infos = buildMetricInfos([frame('A', 'power'), frame('B', 'temp')], theme, 'browser');
     render(<SplitLegend metricInfos={infos} />);

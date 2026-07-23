@@ -405,6 +405,103 @@
       ],
       "title": "Split Mode",
       "type": "yuuk1-fleetgrid-panel"
+    },
+    {
+      "datasource": {
+        "type": "grafana-testdata-datasource",
+        "uid": "trlxrdZVk"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 23
+      },
+      "id": 5,
+      "options": {
+        "levels": [
+          {
+            "label": "zone",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "vertical",
+            "showBorder": true,
+            "showLabel": true
+          },
+          {
+            "label": "host",
+            "extract": "trailingNumber",
+            "sort": "natural",
+            "layout": "grid",
+            "gridColumns": 1,
+            "showBorder": true,
+            "showLabel": true
+          },
+          {
+            "label": "gpu",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "grid",
+            "gridColumns": 1,
+            "showBorder": false,
+            "showLabel": true
+          }
+        ],
+        "displayMode": "single",
+        "defaultMetric": "A",
+        "showValues": false,
+        "missingColor": "rgb(70,70,70)",
+        "spatialAggregation": "max",
+        "reduceCalc": "lastNotNull",
+        "rangeOverrides": [
+          {
+            "refId": "A",
+            "matchers": [
+              {
+                "label": "zone",
+                "operator": "exact",
+                "value": "zone-a"
+              }
+            ],
+            "min": 0,
+            "max": 200
+          },
+          {
+            "refId": "A",
+            "matchers": [
+              {
+                "label": "zone",
+                "operator": "exact",
+                "value": "zone-b"
+              }
+            ],
+            "min": 0,
+            "max": 400
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "trlxrdZVk"
+          },
+          "refId": "A",
+          "scenarioId": "csv_content",
+          "csvContent": "zone,host,gpu,power\nzone-a,node-a1,gpu0,100\nzone-b,node-b1,gpu0,100"
+        }
+      ],
+      "title": "Label-based ranges",
+      "type": "yuuk1-fleetgrid-panel"
     }
   ],
   "preload": false,

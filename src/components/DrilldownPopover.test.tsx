@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { createTheme, toDataFrame, FieldType } from '@grafana/data';
 import { buildMetricInfos } from '../data/display';
 import { DrilldownPopover } from './DrilldownPopover';
+import { CellRangeInfo } from '../types';
 
 jest.mock('@grafana/ui', () => ({
   ...jest.requireActual('@grafana/ui'),
@@ -22,10 +23,53 @@ const rangeFrame = toDataFrame({
 describe('DrilldownPopover', () => {
   const cell = { path: ['zone-a'], labels: { zone: 'zone-a' }, values: new Map<string, number | null>([['A', 503]]) };
   const bounds = { minX: 0, minY: 0, maxX: 800, maxY: 600 };
+  it('formats the current value with the cell range processor', () => {
+    const infos = buildMetricInfos([rangeFrame], theme, 'browser');
+    const processor = jest.fn((value: number) => ({
+      text: `cell ${value}`,
+      suffix: ' W',
+      numeric: value,
+      color: '#abc',
+    }));
+    const range: CellRangeInfo = {
+      effectiveMin: 0,
+      effectiveMax: 700,
+      minConfigured: true,
+      maxConfigured: true,
+      processor: processor as CellRangeInfo['processor'],
+      source: 'override',
+    };
+    const rangeCell = { ...cell, ranges: new Map([['A', range]]) };
+
+    render(
+      <DrilldownPopover
+        cell={rangeCell}
+        metricInfos={infos}
+        seriesFor={() => ({ frame: rangeFrame, seriesCount: 1, aggregated: false })}
+        loading={false}
+        x={0}
+        y={0}
+        {...bounds}
+        onClose={() => {}}
+      />
+    );
+
+    expect(processor).toHaveBeenCalledWith(503);
+    expect(screen.getByText('cell 503 W')).toBeInTheDocument();
+  });
   it('renders a sparkline row per metric', () => {
     const infos = buildMetricInfos([rangeFrame], theme, 'browser');
     render(
-      <DrilldownPopover cell={cell} metricInfos={infos} seriesFor={() => ({ frame: rangeFrame, seriesCount: 1, aggregated: false })} loading={false} x={0} y={0} {...bounds} onClose={() => {}} />
+      <DrilldownPopover
+        cell={cell}
+        metricInfos={infos}
+        seriesFor={() => ({ frame: rangeFrame, seriesCount: 1, aggregated: false })}
+        loading={false}
+        x={0}
+        y={0}
+        {...bounds}
+        onClose={() => {}}
+      />
     );
     expect(screen.getByText('zone-a')).toBeInTheDocument();
     expect(screen.getByText('power')).toBeInTheDocument();
@@ -37,14 +81,33 @@ describe('DrilldownPopover', () => {
   it('shows loading state', () => {
     const infos = buildMetricInfos([rangeFrame], theme, 'browser');
     render(
-      <DrilldownPopover cell={cell} metricInfos={infos} seriesFor={() => ({ frame: null, seriesCount: 0, aggregated: false })} loading={true} x={0} y={0} {...bounds} onClose={() => {}} />
+      <DrilldownPopover
+        cell={cell}
+        metricInfos={infos}
+        seriesFor={() => ({ frame: null, seriesCount: 0, aggregated: false })}
+        loading={true}
+        x={0}
+        y={0}
+        {...bounds}
+        onClose={() => {}}
+      />
     );
     expect(screen.getByText('Loading…')).toBeInTheDocument();
   });
   it('shows a re-query failure message when error is set and no series is available', () => {
     const infos = buildMetricInfos([rangeFrame], theme, 'browser');
     render(
-      <DrilldownPopover cell={cell} metricInfos={infos} seriesFor={() => ({ frame: null, seriesCount: 0, aggregated: false })} loading={false} error={true} x={0} y={0} {...bounds} onClose={() => {}} />
+      <DrilldownPopover
+        cell={cell}
+        metricInfos={infos}
+        seriesFor={() => ({ frame: null, seriesCount: 0, aggregated: false })}
+        loading={false}
+        error={true}
+        x={0}
+        y={0}
+        {...bounds}
+        onClose={() => {}}
+      />
     );
     expect(screen.getByText('Failed to load time series')).toBeInTheDocument();
     expect(screen.queryByText('No time series')).not.toBeInTheDocument();
@@ -52,7 +115,17 @@ describe('DrilldownPopover', () => {
   it('prefers loading over error while a fetch is in flight', () => {
     const infos = buildMetricInfos([rangeFrame], theme, 'browser');
     render(
-      <DrilldownPopover cell={cell} metricInfos={infos} seriesFor={() => ({ frame: null, seriesCount: 0, aggregated: false })} loading={true} error={true} x={0} y={0} {...bounds} onClose={() => {}} />
+      <DrilldownPopover
+        cell={cell}
+        metricInfos={infos}
+        seriesFor={() => ({ frame: null, seriesCount: 0, aggregated: false })}
+        loading={true}
+        error={true}
+        x={0}
+        y={0}
+        {...bounds}
+        onClose={() => {}}
+      />
     );
     expect(screen.getByText('Loading…')).toBeInTheDocument();
     expect(screen.queryByText('Failed to load time series')).not.toBeInTheDocument();
@@ -60,14 +133,32 @@ describe('DrilldownPopover', () => {
   it('labels aggregated multi-series rows', () => {
     const infos = buildMetricInfos([rangeFrame], theme, 'browser');
     render(
-      <DrilldownPopover cell={cell} metricInfos={infos} seriesFor={() => ({ frame: rangeFrame, seriesCount: 3, aggregated: true })} loading={false} x={0} y={0} {...bounds} onClose={() => {}} />
+      <DrilldownPopover
+        cell={cell}
+        metricInfos={infos}
+        seriesFor={() => ({ frame: rangeFrame, seriesCount: 3, aggregated: true })}
+        loading={false}
+        x={0}
+        y={0}
+        {...bounds}
+        onClose={() => {}}
+      />
     );
     expect(screen.getByText('power (aggregating 3 series)')).toBeInTheDocument();
   });
   it('labels non-aggregated fallback multi-series rows precisely', () => {
     const infos = buildMetricInfos([rangeFrame], theme, 'browser');
     render(
-      <DrilldownPopover cell={cell} metricInfos={infos} seriesFor={() => ({ frame: rangeFrame, seriesCount: 3, aggregated: false })} loading={false} x={0} y={0} {...bounds} onClose={() => {}} />
+      <DrilldownPopover
+        cell={cell}
+        metricInfos={infos}
+        seriesFor={() => ({ frame: rangeFrame, seriesCount: 3, aggregated: false })}
+        loading={false}
+        x={0}
+        y={0}
+        {...bounds}
+        onClose={() => {}}
+      />
     );
     expect(screen.getByText('power (showing first of 3 series)')).toBeInTheDocument();
   });

@@ -4,6 +4,7 @@ import { Sparkline, useTheme2 } from '@grafana/ui';
 import { CellModel } from '../types';
 import { MetricInfo } from '../data/display';
 import { placeOverlay } from './overlay';
+import { cellRangeFor } from '../data/cellRange';
 
 const W = 300;
 const ROW_H = 34;
@@ -63,13 +64,17 @@ export const DrilldownPopover: React.FC<DrilldownPopoverProps> = (props) => {
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
         <strong>{props.cell.path.join(' / ')}</strong>
-        <button onClick={props.onClose} aria-label="Close" style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }}>
+        <button
+          onClick={props.onClose}
+          aria-label="Close"
+          style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }}
+        >
           ×
         </button>
       </div>
       {props.metricInfos.map((info) => {
         const v = props.cell.values.get(info.refId) ?? null;
-        const disp = v === null ? null : info.processor(v);
+        const disp = v === null ? null : cellRangeFor(props.cell, info).processor(v);
         const { frame, seriesCount, aggregated } = props.seriesFor(info.refId);
         const yField = frame?.fields.find((f) => f.type === FieldType.number);
         const xField = frame?.fields.find((f) => f.type === FieldType.time);
@@ -82,7 +87,9 @@ export const DrilldownPopover: React.FC<DrilldownPopoverProps> = (props) => {
             : info.name;
         return (
           <div key={info.refId} style={{ display: 'flex', alignItems: 'center', gap: 8, height: ROW_H }}>
-            <span style={{ width: 70, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+            <span style={{ width: 70, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {name}
+            </span>
             <span style={{ width: 60, textAlign: 'right' }}>{disp ? formattedValueToString(disp) : 'No data'}</span>
             <span style={{ flex: 1 }}>
               {yField && xField ? (
