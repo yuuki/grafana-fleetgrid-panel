@@ -456,6 +456,14 @@ test('shows categorical legend and paints distinct category top bars', async ({
   expect(await canvasPixelAt(canvas, { x: zoneA.x, y: zoneA.y })).not.toBe(
     await canvasPixelAt(canvas, { x: zoneB.x, y: zoneB.y })
   );
+
+  const before = await stableHash(canvas);
+  const partitionB = panel.locator.getByTestId('category-legend-b');
+  await partitionB.click();
+  await expect(partitionB).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => frameHash(canvas)).not.toBe(before);
+  await panel.locator.getByTestId('category-legend-clear').click();
+  await expect.poll(() => frameHash(canvas)).toBe(before);
 });
 
 test('renders the provisioned 2 / 10 / 2 grid in row-major order', async ({

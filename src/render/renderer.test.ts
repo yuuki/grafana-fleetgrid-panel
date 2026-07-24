@@ -259,4 +259,59 @@ describe('renderCanvas', () => {
         .map((event) => event.props.value)
     ).toContain(2);
   });
+
+  it('dims non-matching cells, keeps matching multi-value cells bright, and leaves empty selections unchanged', () => {
+    const category: CategoryModel = {
+      label: 'partition',
+      values: ['a', 'b'],
+      colorByValue: new Map([
+        ['a', '#f00'],
+        ['b', '#00f'],
+      ]),
+    };
+    const layout = makeLayout([['A', 1]]);
+    layout.cells[0].cell.labelValues = new Map([['partition', ['a', 'b']]]);
+    layout.cells.push({
+      x: 41,
+      y: 0,
+      w: 40,
+      h: 40,
+      cell: { ...layout.cells[0].cell, labelValues: new Map([['partition', ['c']]]) },
+    });
+    const processor = jest.fn((value: number): DisplayValue => ({ numeric: value, text: String(value), color: '#000000' }));
+    const canvas = document.createElement('canvas');
+
+    renderCanvas(
+      canvas,
+      baseCtx({ metricInfos: [makeInfo('A', processor)], layout, category, selectedCategoryValues: ['b'] })
+    );
+
+    const alphaValues = canvasEvents(canvas)
+      .filter((event) => event.type === 'globalAlpha')
+      .map((event) => event.props.value);
+    expect(alphaValues).toContain(0.22);
+    expect(alphaValues).toContain(1);
+
+    const emptySelectionCanvas = document.createElement('canvas');
+    renderCanvas(
+      emptySelectionCanvas,
+      baseCtx({ metricInfos: [makeInfo('A', processor)], layout, category, selectedCategoryValues: [] })
+    );
+    expect(
+      canvasEvents(emptySelectionCanvas)
+        .filter((event) => event.type === 'globalAlpha')
+        .map((event) => event.props.value)
+    ).not.toContain(0.22);
+
+    const noCategoryCanvas = document.createElement('canvas');
+    renderCanvas(
+      noCategoryCanvas,
+      baseCtx({ metricInfos: [makeInfo('A', processor)], layout, selectedCategoryValues: ['b'] })
+    );
+    expect(
+      canvasEvents(noCategoryCanvas)
+        .filter((event) => event.type === 'globalAlpha')
+        .map((event) => event.props.value)
+    ).not.toContain(0.22);
+  });
 });
