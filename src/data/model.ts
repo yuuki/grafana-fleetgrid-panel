@@ -24,10 +24,19 @@ export function buildModel(
 ): PanelModel {
   const compiledOverrides = compileRangeOverrides(options.rangeOverrides);
   const rows = normalizeFrames(frames, options.reduceCalc || 'lastNotNull');
+  const extraLabelKeys = [...new Set((options.tooltipLabels ?? []).filter((key) => key !== ''))];
   const { root, warnings } = buildHierarchy(rows, options.levels);
   // Keep the refIds of configured queries (leave a slot marked as missing even when the result has 0 series)
   const refIds = [...new Set([...targetRefIds, ...collectRefIds(rows)])];
-  attachCells(root, rows, options.levels, options.spatialAggregation, refIds, compiledOverrides.length > 0);
+  attachCells(
+    root,
+    rows,
+    options.levels,
+    options.spatialAggregation,
+    refIds,
+    compiledOverrides.length > 0,
+    extraLabelKeys
+  );
 
   // The color scale is computed from the display value (the cell value after reduce and spatial aggregation)
   const ranges = new Map<string, { min: number; max: number }>();

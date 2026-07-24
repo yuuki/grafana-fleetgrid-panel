@@ -87,6 +87,7 @@ Configured through the **Hierarchy levels** editor. Each level has:
 | Display mode | `Single` | `Single` shows one metric with a selector; `Split` divides each cell into per-query sub-regions |
 | Default metric (refId) | first query | Which query the selector starts on in single mode |
 | Show values | on | Draw numbers when they fit; hover still shows the value when off or when text does not fit |
+| Extra tooltip labels | empty | Label names whose distinct values are listed in the cell tooltip, for example `partition` |
 | Missing color | `rgb(70,70,70)` | Fill for cells with no sample for the displayed query |
 
 ### Data
@@ -153,6 +154,8 @@ The cell model holds each query's value for a cell (marked missing where a query
 - **Split mode (opt-in)** — Each cell is auto-divided by the number of metrics that returned data: 2 = left/right, 3 = three columns, 4 = 2×2, 5–6 = 3×2, 7–9 = 3×3. Regions are capped at 9; with 10+ metrics only the first 9 are drawn and the legend notes the remainder. The header legend combines each region's position minimap with its metric name and either its single formatted range or `Label-based ranges`; entries wrap when space is limited. A query that returned no series gets no region. Values are not drawn inside split regions because they are inherently too small to read.
 
 The tooltip (on hover) and the drilldown popover list every metric that returned data, regardless of mode. The tooltip also shows the hovered cell's actual formatted Min/Max, its `Fixed` / `Auto` / `Min fixed` / `Max fixed` state, and the matched label conditions or standard-range fallback.
+
+For Slurm dashboards, `slurm_node_status` from [SckyzO/slurm_exporter](https://github.com/SckyzO/slurm_exporter) exposes a `partition` label per node; add `partition` to `tooltipLabels` to show it in the cell tooltip.
 
 ## Drilldown
 

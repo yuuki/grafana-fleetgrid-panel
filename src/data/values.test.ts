@@ -84,6 +84,36 @@ describe('attachCells', () => {
     expect(cell.labelSets).toEqual([{ zone: 'zone-a' }]);
   });
 
+  it('captures distinct extra label values before reducing, including null rows', () => {
+    const oneLevel: LevelDef[] = [{ ...DEFAULT_LEVEL, label: 'zone' }];
+    const rows: NormalizedRow[] = [
+      { labels: { zone: 'zone-a', partition: 'gpu' }, value: 10, refId: 'A' },
+      { labels: { zone: 'zone-a', partition: 'batch' }, value: 10, refId: 'A' },
+      { labels: { zone: 'zone-a', partition: 'gpu' }, value: null, refId: 'A' },
+      { labels: { zone: 'zone-a' }, value: 10, refId: 'A' },
+    ];
+    const { root } = buildHierarchy(rows, oneLevel);
+
+    attachCells(root, rows, oneLevel, 'max', collectRefIds(rows), false, ['partition', 'queue']);
+
+    expect(root.children[0].cell!.labelValues).toEqual(
+      new Map([
+        ['partition', ['batch', 'gpu']],
+        ['queue', []],
+      ])
+    );
+  });
+
+  it('does not add labelValues when no extra labels are configured', () => {
+    const oneLevel: LevelDef[] = [{ ...DEFAULT_LEVEL, label: 'zone' }];
+    const rows: NormalizedRow[] = [{ labels: { zone: 'zone-a', partition: 'batch' }, value: 10, refId: 'A' }];
+    const { root } = buildHierarchy(rows, oneLevel);
+
+    attachCells(root, rows, oneLevel, 'max');
+
+    expect(root.children[0].cell!.labelValues).toBeUndefined();
+  });
+
   it('collects refIds in appearance order', () => {
     const rows: NormalizedRow[] = [
       { labels: {}, value: 1, refId: 'B' },

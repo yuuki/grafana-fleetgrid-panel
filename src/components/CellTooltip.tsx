@@ -11,6 +11,7 @@ export interface CellTooltipProps {
   cell: CellModel;
   metricInfos: MetricInfo[];
   missingColor: string;
+  tooltipLabels?: string[];
   x: number;
   y: number;
   minX?: number;
@@ -21,9 +22,20 @@ export interface CellTooltipProps {
 
 const MAX_W = 320;
 
-export const CellTooltip: React.FC<CellTooltipProps> = ({ cell, metricInfos, missingColor, x, y, ...bounds }) => {
+export const CellTooltip: React.FC<CellTooltipProps> = ({
+  cell,
+  metricInfos,
+  missingColor,
+  tooltipLabels = [],
+  x,
+  y,
+  ...bounds
+}) => {
   const theme = useTheme2();
   const labels = Object.entries(cell.labels);
+  const extraLabels = tooltipLabels
+    .map((key) => [key, cell.labelValues?.get(key) ?? []] as const)
+    .filter(([, values]) => values.length > 0);
   const infoByRef = new Map(metricInfos.map((info) => [info.refId, info]));
   // Adaptation: since choices are based on model.refIds, a refId with 0 series has no MetricInfo.
   // Prioritize metricInfos order, while also listing refIds that exist only in cell.values (0 series) at the end and showing them as missing.
@@ -42,7 +54,7 @@ export const CellTooltip: React.FC<CellTooltipProps> = ({ cell, metricInfos, mis
   const availableH = hasBounds ? bounds.maxY! - bounds.minY! : 0;
   const outerW = hasBounds ? Math.min(MAX_W, availableW) : undefined;
   const estimatedH =
-    labels.length * 18 +
+    (labels.length + extraLabels.length) * 18 +
     refIds.reduce((height, refId) => {
       const range = cell.ranges?.get(refId);
       const hasValue = cell.values.get(refId) != null && infoByRef.has(refId);
@@ -54,7 +66,11 @@ export const CellTooltip: React.FC<CellTooltipProps> = ({ cell, metricInfos, mis
     : { left: x + 12, top: y + 12 };
   const outerH = hasBounds ? Math.max(0, bounds.maxY! - placement.top) : undefined;
   const accessibleName =
-    labels.length > 0 ? labels.map(([name, value]) => `${name}: ${value}`).join(', ') : 'Cell details';
+    [...labels, ...extraLabels].length > 0
+      ? [...labels, ...extraLabels]
+          .map(([name, value]) => `${name}: ${Array.isArray(value) ? value.join(', ') : value}`)
+          .join(', ')
+      : 'Cell details';
   return (
     <div
       role="tooltip"
@@ -89,6 +105,9 @@ export const CellTooltip: React.FC<CellTooltipProps> = ({ cell, metricInfos, mis
     >
       {labels.map(([name, value]) => (
         <div key={name} style={{ overflowWrap: 'anywhere' }}>{`${name}: ${value}`}</div>
+      ))}
+      {extraLabels.map(([name, values]) => (
+        <div key={name} style={{ overflowWrap: 'anywhere' }}>{`${name}: ${values.join(', ')}`}</div>
       ))}
       {refIds.map((refId) => {
         const info = infoByRef.get(refId);
