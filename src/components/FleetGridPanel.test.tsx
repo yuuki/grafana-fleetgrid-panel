@@ -136,6 +136,20 @@ describe('FleetGridPanel', () => {
     expect(screen.queryByRole('radio')).not.toBeInTheDocument(); // Don't show the selector in single mode
   });
 
+  it('shows and hides the category legend according to the option', () => {
+    const p = makeProps([series('A', 'power', 'zone-a')]);
+    p.options.categoryLabel = 'zone';
+    const first = render(<FleetGridPanel {...p} />);
+    expect(screen.getByTestId('category-legend-zone-a')).toBeInTheDocument();
+    first.unmount();
+
+    const hidden = makeProps([series('A', 'power', 'zone-a')]);
+    hidden.options.categoryLabel = 'zone';
+    hidden.options.showCategoryLegend = false;
+    render(<FleetGridPanel {...hidden} />);
+    expect(screen.queryByTestId('category-legend-zone-a')).not.toBeInTheDocument();
+  });
+
   it('uses content coordinates (incl. scrollLeft) for hover hit testing', () => {
     // Same refId, 2 zones side by side as 2 cells (flow, s=40 → zone-a:[0,40), zone-b:[41,81)). No header since there's only one refId.
     render(<FleetGridPanel {...makeProps([series('A', 'power', 'zone-a'), series('A', 'power', 'zone-b')])} />);

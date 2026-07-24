@@ -1,7 +1,8 @@
-import { GrafanaTheme2 } from '@grafana/data';
+import { DisplayValue, GrafanaTheme2 } from '@grafana/data';
+import { CategoryModel, primaryCategoryValue } from '../data/categories';
 import { MetricInfo, chooseCellText } from '../data/display';
 import { LayoutResult } from '../layout/layout';
-import { DisplayMode } from '../types';
+import { CategoryDecorationStyle, DisplayMode } from '../types';
 import { cellRangeFor } from '../data/cellRange';
 import { splitRects } from './split';
 
@@ -15,6 +16,26 @@ export interface RenderContext {
   theme: GrafanaTheme2;
   scrollTop: number;
   viewportH: number;
+  category?: CategoryModel;
+  categoryStyle: CategoryDecorationStyle;
+}
+
+function drawCategoryDecoration(
+  ctx: CanvasRenderingContext2D,
+  c: LayoutResult['cells'][number],
+  color: string,
+  style: CategoryDecorationStyle
+): void {
+  if (style === 'topBar') {
+    ctx.fillStyle = color;
+    ctx.fillRect(c.x, c.y, c.w, Math.max(1, Math.round(c.h * 0.2)));
+  } else {
+    const lw = c.w >= 14 ? 2 : 1;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lw;
+    ctx.strokeRect(c.x + lw / 2, c.y + lw / 2, c.w - lw, c.h - lw);
+  }
+  ctx.lineWidth = 1;
 }
 
 export function renderCanvas(canvas: HTMLCanvasElement, rc: RenderContext): void {
@@ -49,6 +70,7 @@ export function renderCanvas(canvas: HTMLCanvasElement, rc: RenderContext): void
   const rects = split ? splitRects(rc.metricInfos.length) : null;
 
   for (const c of layout.cells) {
+    let display: DisplayValue | undefined;
     if (split && rects) {
       rc.metricInfos.slice(0, rects.length).forEach((info, i) => {
         const v = c.cell.values.get(info.refId) ?? null;
@@ -57,32 +79,39 @@ export function renderCanvas(canvas: HTMLCanvasElement, rc: RenderContext): void
         const r = rects[i];
         ctx.fillRect(c.x + r.x * c.w, c.y + r.y * c.h, r.w * c.w - 0.5, r.h * c.h - 0.5);
       });
-      continue;
+    } else {
+      if (!selected) {
+        // No selected metric (e.g. a 0-series refId is selected) → render the whole cell with the missing color
+        ctx.fillStyle = rc.missingColor;
+        ctx.fillRect(c.x, c.y, c.w, c.h);
+      } else {
+        const v = c.cell.values.get(selected.refId) ?? null;
+        if (v === null) {
+          ctx.fillStyle = rc.missingColor;
+          ctx.fillRect(c.x, c.y, c.w, c.h);
+        } else {
+          display = cellRangeFor(c.cell, selected).processor(v);
+          ctx.fillStyle = display.color ?? rc.missingColor;
+          ctx.fillRect(c.x, c.y, c.w, c.h);
+        }
+      }
     }
-    if (!selected) {
-      // No selected metric (e.g. a 0-series refId is selected) → render the whole cell with the missing color
-      ctx.fillStyle = rc.missingColor;
-      ctx.fillRect(c.x, c.y, c.w, c.h);
-      continue;
-    }
-    const v = c.cell.values.get(selected.refId) ?? null;
-    if (v === null) {
-      ctx.fillStyle = rc.missingColor;
-      ctx.fillRect(c.x, c.y, c.w, c.h);
-      continue;
-    }
-    const disp = cellRangeFor(c.cell, selected).processor(v);
-    ctx.fillStyle = disp.color ?? rc.missingColor;
-    ctx.fillRect(c.x, c.y, c.w, c.h);
 
-    if (rc.showValues) {
-      const fit = chooseCellText(disp, c.w, c.h, (text, fontPx) => {
+    const categoryValue = rc.category ? primaryCategoryValue(c.cell, rc.category.label) : undefined;
+    const categoryColor = categoryValue ? rc.category?.colorByValue.get(categoryValue) : undefined;
+    if (categoryColor) {
+      drawCategoryDecoration(ctx, c, categoryColor, rc.categoryStyle);
+      ctx.strokeStyle = theme.colors.border.medium;
+    }
+
+    if (!split && rc.showValues && display) {
+      const fit = chooseCellText(display, c.w, c.h, (text, fontPx) => {
         ctx.font = `${fontPx}px ${theme.typography.fontFamily}`;
         return ctx.measureText(text).width;
       });
       if (fit) {
         ctx.font = `${fit.fontPx}px ${theme.typography.fontFamily}`;
-        ctx.fillStyle = theme.colors.getContrastText(disp.color ?? rc.missingColor);
+        ctx.fillStyle = theme.colors.getContrastText(display.color ?? rc.missingColor);
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(fit.text, c.x + c.w / 2, c.y + c.h / 2);

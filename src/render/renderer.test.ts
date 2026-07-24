@@ -2,6 +2,7 @@ import { createTheme, DisplayValue } from '@grafana/data';
 import { MetricInfo } from '../data/display';
 import { LayoutResult } from '../layout/layout';
 import { CellModel, CellRangeInfo } from '../types';
+import { CategoryModel } from '../data/categories';
 import { renderCanvas, RenderContext } from './renderer';
 
 const theme = createTheme();
@@ -44,6 +45,7 @@ const baseCtx = (over: Partial<RenderContext>): RenderContext => ({
   theme,
   scrollTop: 0,
   viewportH: 40,
+  categoryStyle: 'border',
   ...over,
 });
 
@@ -62,6 +64,11 @@ const fillRects = (canvas: HTMLCanvasElement): Array<{ x: number; y: number; wid
     .__getEvents()
     .filter((e) => e.type === 'fillRect')
     .map((e) => e.props);
+
+const canvasEvents = (canvas: HTMLCanvasElement): Array<{ type: string; props: Record<string, unknown> }> =>
+  (
+    canvas.getContext('2d') as unknown as { __getEvents(): Array<{ type: string; props: Record<string, unknown> }> }
+  ).__getEvents();
 
 describe('renderCanvas', () => {
   const cellRange = (processor: jest.Mock): CellRangeInfo => ({
@@ -156,5 +163,100 @@ describe('renderCanvas', () => {
     const styles = fillStyles(canvas);
     expect(styles).toContain('#aaaaaa'); // Zone 1: A
     expect(styles).toContain('#bbbbbb'); // Zone 2: B
+  });
+
+  it.each(['single', 'split'] as const)('draws a category border after metric fills in %s mode', (displayMode) => {
+    const canvas = document.createElement('canvas');
+    const category: CategoryModel = { label: 'partition', values: ['a'], colorByValue: new Map([['a', '#ff0000']]) };
+    const layout = makeLayout([
+      ['A', 1],
+      ['B', 2],
+    ]);
+    layout.cells[0].cell.labelValues = new Map([['partition', ['a']]]);
+
+    const processor = jest.fn((value: number): DisplayValue => ({
+      numeric: value,
+      text: String(value),
+      color: '#000000',
+    }));
+    renderCanvas(
+      canvas,
+      baseCtx({
+        metricInfos: [makeInfo('A', processor), makeInfo('B', processor)],
+        layout,
+        displayMode,
+        category,
+        categoryStyle: 'border',
+      })
+    );
+
+    const events = canvasEvents(canvas);
+    expect(events.filter((event) => event.type === 'strokeRect')).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'strokeRect')[0].props).toMatchObject({
+      x: 1,
+      y: 1,
+      width: 38,
+      height: 38,
+    });
+  });
+
+  it('draws a top bar with the expected height and skips uncategorized cells', () => {
+    const canvas = document.createElement('canvas');
+    const category: CategoryModel = { label: 'partition', values: ['a'], colorByValue: new Map([['a', '#ff0000']]) };
+    const layout = makeLayout([
+      ['A', 1],
+      ['B', null],
+    ]);
+    layout.cells[0].cell.labelValues = new Map([['partition', ['a']]]);
+    layout.cells.push({ x: 41, y: 0, w: 40, h: 40, cell: { ...layout.cells[0].cell, labelValues: undefined } });
+
+    const processor = jest.fn((value: number): DisplayValue => ({
+      numeric: value,
+      text: String(value),
+      color: '#000000',
+    }));
+    renderCanvas(
+      canvas,
+      baseCtx({ metricInfos: [makeInfo('A', processor)], layout, category, categoryStyle: 'topBar' })
+    );
+
+    expect(fillRects(canvas)).toContainEqual({ x: 0, y: 0, width: 40, height: 8 });
+    expect(fillRects(canvas)).not.toContainEqual({ x: 41, y: 0, width: 40, height: 8 });
+  });
+
+  it('uses a one-pixel border for small cells and two pixels for larger cells', () => {
+    const category: CategoryModel = { label: 'partition', values: ['a'], colorByValue: new Map([['a', '#ff0000']]) };
+    const canvas = document.createElement('canvas');
+    const layout = makeLayout([['A', 1]]);
+    layout.cells[0].w = 10;
+    layout.cells[0].h = 10;
+    layout.cells[0].cell.labelValues = new Map([['partition', ['a']]]);
+    const processor = jest.fn((value: number): DisplayValue => ({
+      numeric: value,
+      text: String(value),
+      color: '#000000',
+    }));
+    renderCanvas(
+      canvas,
+      baseCtx({ metricInfos: [makeInfo('A', processor)], layout, category, categoryStyle: 'border' })
+    );
+    expect(
+      canvasEvents(canvas)
+        .filter((event) => event.type === 'lineWidth')
+        .map((event) => event.props.value)
+    ).toContain(1);
+
+    const largeCanvas = document.createElement('canvas');
+    const largeLayout = makeLayout([['A', 1]]);
+    largeLayout.cells[0].cell.labelValues = new Map([['partition', ['a']]]);
+    renderCanvas(
+      largeCanvas,
+      baseCtx({ metricInfos: [makeInfo('A', processor)], layout: largeLayout, category, categoryStyle: 'border' })
+    );
+    expect(
+      canvasEvents(largeCanvas)
+        .filter((event) => event.type === 'lineWidth')
+        .map((event) => event.props.value)
+    ).toContain(2);
   });
 });

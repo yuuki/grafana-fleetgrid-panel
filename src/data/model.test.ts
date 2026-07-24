@@ -86,6 +86,88 @@ describe('buildModel', () => {
     expect(unconfigured.root.children[0].children[0].cell!.labelValues).toBeUndefined();
   });
 
+  it('builds category data from categoryLabel and captures its values with tooltip labels', () => {
+    const m = buildModel(
+      [
+        toDataFrame({
+          refId: 'A',
+          fields: [
+            { name: 'Time', type: FieldType.time, values: [1000] },
+            {
+              name: 'Value',
+              type: FieldType.number,
+              values: [10],
+              labels: { zone: 'zone-a', gpu: '0', partition: 'gpu' },
+            },
+          ],
+        }),
+        toDataFrame({
+          refId: 'A',
+          fields: [
+            { name: 'Time', type: FieldType.time, values: [1000] },
+            {
+              name: 'Value',
+              type: FieldType.number,
+              values: [20],
+              labels: { zone: 'zone-a', gpu: '1', partition: 'batch' },
+            },
+          ],
+        }),
+      ],
+      { ...options, levels: [{ ...DEFAULT_LEVEL, label: 'zone' }], tooltipLabels: ['gpu'], categoryLabel: 'partition' },
+      theme,
+      'browser'
+    );
+
+    expect(m.category?.values).toEqual(['batch', 'gpu']);
+    expect(m.root.children[0].cell?.labelValues).toEqual(
+      new Map([
+        ['gpu', ['0', '1']],
+        ['partition', ['batch', 'gpu']],
+      ])
+    );
+  });
+
+  it('warns when category values exceed the visualization palette', () => {
+    const smallPaletteTheme = {
+      ...theme,
+      visualization: { ...theme.visualization, palette: ['red'] },
+    } as typeof theme;
+    const m = buildModel(
+      [
+        toDataFrame({
+          refId: 'A',
+          fields: [
+            { name: 'Time', type: FieldType.time, values: [1000] },
+            {
+              name: 'Value',
+              type: FieldType.number,
+              values: [1],
+              labels: { zone: 'zone-a', gpu: '0', partition: 'one' },
+            },
+          ],
+        }),
+        toDataFrame({
+          refId: 'A',
+          fields: [
+            { name: 'Time', type: FieldType.time, values: [1000] },
+            {
+              name: 'Value',
+              type: FieldType.number,
+              values: [2],
+              labels: { zone: 'zone-b', gpu: '0', partition: 'other' },
+            },
+          ],
+        }),
+      ],
+      { ...options, levels: [{ ...DEFAULT_LEVEL, label: 'zone' }], categoryLabel: 'partition' },
+      smallPaletteTheme,
+      'browser'
+    );
+
+    expect(m.warnings).toContain('Category colors repeat: 2 values exceed the 1-color palette');
+  });
+
   it('orders metric infos by configured refId order, not by series appearance order', () => {
     // Even if data.series is in reverse order from targets (B first), the legend/split zones align in refId order (A,B)
     const m = buildModel([frame('B', 'zone-a', '0', 61), frame('A', 'zone-a', '0', 503)], options, theme, 'browser', [
