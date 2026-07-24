@@ -18,6 +18,7 @@ export interface RenderContext {
   viewportH: number;
   category?: CategoryModel;
   categoryStyle: CategoryDecorationStyle;
+  selectedCategoryValues?: string[];
 }
 
 function drawCategoryDecoration(
@@ -70,6 +71,13 @@ export function renderCanvas(canvas: HTMLCanvasElement, rc: RenderContext): void
   const rects = split ? splitRects(rc.metricInfos.length) : null;
 
   for (const c of layout.cells) {
+    const dimmed =
+      !!rc.category &&
+      (rc.selectedCategoryValues ?? []).length > 0 &&
+      !(c.cell.labelValues?.get(rc.category.label) ?? []).some((value) =>
+        (rc.selectedCategoryValues ?? []).includes(value)
+      );
+    ctx.globalAlpha = dimmed ? 0.22 : 1;
     let display: DisplayValue | undefined;
     if (split && rects) {
       rc.metricInfos.slice(0, rects.length).forEach((info, i) => {
@@ -117,6 +125,7 @@ export function renderCanvas(canvas: HTMLCanvasElement, rc: RenderContext): void
         ctx.fillText(fit.text, c.x + c.w / 2, c.y + c.h / 2);
       }
     }
+    ctx.globalAlpha = 1;
   }
 
   // Group label

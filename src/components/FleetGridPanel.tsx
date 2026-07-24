@@ -48,6 +48,7 @@ export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) =>
   }, []);
   const [scrollTop, setScrollTop] = useState(0);
   const [selected, setSelected] = useState<string | undefined>(options.defaultMetric || undefined);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [hover, setHover] = useState<{ cell: CellModel; x: number; y: number } | null>(null);
   // Popover/link menu origins are kept in content coordinates. Visible bounds are measured separately so an open overlay follows panel resizes.
   const [popover, setPopover] = useState<{
@@ -82,6 +83,15 @@ export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) =>
     () => buildModel(data.series, options, theme, timeZone, targetRefIds),
     [data.series, options, theme, timeZone, targetRefIds]
   );
+  const effectiveSelection = useMemo(
+    () => selectedCategories.filter((value) => model.category?.colorByValue.has(value) ?? false),
+    [selectedCategories, model.category]
+  );
+  useEffect(() => {
+    // The selection is view-only state and must be cleared when its category meaning changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedCategories([]);
+  }, [options.categoryLabel]);
 
   // displayMode was already registered in Task 14, but dashboards saved before that registration lack the key. Normalize it to single by default
   const displayMode = options.displayMode ?? 'single';
@@ -142,12 +152,13 @@ export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) =>
         missingColor: options.missingColor,
         category: model.category,
         categoryStyle: options.categoryStyle ?? 'border',
+        selectedCategoryValues: effectiveSelection,
         theme,
         scrollTop,
         viewportH: bodyH,
       });
     }
-  }, [layout, model, selectedRefId, displayMode, options, theme, scrollTop, bodyH]);
+  }, [layout, model, selectedRefId, displayMode, options, theme, scrollTop, bodyH, effectiveSelection]);
 
   // When panel data updates, discard the cache/error/loading state and advance the generation (cache is invalidated per panel via requestId).
   // Advancing the generation ensures that responses from stale in-flight requests (success/failure/finally) are reliably discarded by the guard downstream.
@@ -294,7 +305,18 @@ export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) =>
               />
             </>
           )}
-          {model.category && options.showCategoryLegend !== false && <CategoryLegend category={model.category} />}
+          {model.category && options.showCategoryLegend !== false && (
+            <CategoryLegend
+              category={model.category}
+              selectedValues={effectiveSelection}
+              onToggle={(value) =>
+                setSelectedCategories((current) =>
+                  current.includes(value) ? current.filter((selectedValue) => selectedValue !== value) : [...current, value]
+                )
+              }
+              onClear={() => setSelectedCategories([])}
+            />
+          )}
         </div>
       )}
       {model.warnings.length > 0 && (
