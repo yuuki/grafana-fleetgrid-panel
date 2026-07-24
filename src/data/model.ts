@@ -6,6 +6,7 @@ import { attachCells, collectRefIds } from './values';
 import { MetricInfo, buildMetricInfos, normalizeEffectiveRange } from './display';
 import { compileRangeOverrides, resolveCellRangeOverride } from './rangeOverrides';
 import { DisplayRangeInfo, rangeSignature } from './cellRange';
+import { buildCategoryModel, CategoryModel } from './categories';
 
 export interface PanelModel {
   root: HierarchyNode;
@@ -13,6 +14,7 @@ export interface PanelModel {
   metricInfos: MetricInfo[];
   refIds: string[];
   rangeInfosByRef: Map<string, DisplayRangeInfo[]>;
+  category?: CategoryModel;
 }
 
 export function buildModel(
@@ -24,7 +26,13 @@ export function buildModel(
 ): PanelModel {
   const compiledOverrides = compileRangeOverrides(options.rangeOverrides);
   const rows = normalizeFrames(frames, options.reduceCalc || 'lastNotNull');
-  const extraLabelKeys = [...new Set((options.tooltipLabels ?? []).filter((key) => key !== ''))];
+  const extraLabelKeys = [
+    ...new Set(
+      [...(options.tooltipLabels ?? []), ...(options.categoryLabel ? [options.categoryLabel] : [])].filter(
+        (key) => key !== ''
+      )
+    ),
+  ];
   const { root, warnings } = buildHierarchy(rows, options.levels);
   // Keep the refIds of configured queries (leave a slot marked as missing even when the result has 0 series)
   const refIds = [...new Set([...targetRefIds, ...collectRefIds(rows)])];
@@ -58,6 +66,12 @@ export function buildModel(
   visit(root);
 
   const metricInfos = buildMetricInfos(frames, theme, timeZone, ranges);
+  const category = options.categoryLabel ? buildCategoryModel(root, options.categoryLabel, theme) : undefined;
+  if (category && category.values.length > theme.visualization.palette.length) {
+    warnings.push(
+      `Category colors repeat: ${category.values.length} values exceed the ${theme.visualization.palette.length}-color palette`
+    );
+  }
   // Fix the legend/split-zone order to the refId order per spec. buildMetricInfos builds MetricInfo
   // in frame-scan order, so the order breaks if data.series differs from the targets order. Sort by refIds order
   // (a refId not in refIds is pushed to the end, relying on Array.sort's stability to preserve relative order).
@@ -96,7 +110,7 @@ export function buildModel(
         addRangeInfo(refId, standard);
       }
     }
-    return { root, warnings, metricInfos, refIds, rangeInfosByRef };
+    return { root, warnings, metricInfos, refIds, rangeInfosByRef, category };
   }
   const infoByRef = new Map(metricInfos.map((info) => [info.refId, info]));
   const processorCache = new Map<string, CellRangeInfo>();
@@ -193,5 +207,5 @@ export function buildModel(
       `Label range override conflict for refId "${refId}": ${conflict.count} cell(s) use the standard range (paths: ${conflict.paths.join(', ')})`
     );
   }
-  return { root, warnings, metricInfos, refIds, rangeInfosByRef };
+  return { root, warnings, metricInfos, refIds, rangeInfosByRef, category };
 }

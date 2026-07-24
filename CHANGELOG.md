@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.0 - 2026-07-24
+
+- Add categorical cell decoration and a legend for label values such as Slurm partitions.
+
 ## 0.3.0 - 2026-07-24
 
 - Add configurable extra tooltip labels, such as Slurm's `partition`, with distinct values collected across each cell.

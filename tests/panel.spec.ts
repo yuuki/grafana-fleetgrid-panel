@@ -226,6 +226,48 @@ async function findCellPointMatching(
   throw new Error('no matching cell found while probing the canvas');
 }
 
+async function findCategoryTopPoint(
+  canvas: Locator,
+  panel: Locator,
+  xStart: number,
+  xEnd: number,
+  predicate: (path: CellPath) => boolean
+): Promise<{ x: number; y: number }> {
+  for (let y = 0; y <= 40; y += 5) {
+    for (let x = xStart; x <= xEnd; x += 3) {
+      const path = await readPath(canvas, panel, x, y, 120);
+      if (!path || !predicate(path)) {
+        continue;
+      }
+      let top = y;
+      while (top > 0) {
+        const above = await readPath(canvas, panel, x, top - 1, 120);
+        if (!above || !predicate(above)) {
+          break;
+        }
+        top -= 1;
+      }
+      return { x, y: top };
+    }
+  }
+  throw new Error('no category cell found while probing the canvas');
+}
+
+async function canvasPixelAt(canvas: Locator, point: { x: number; y: number }): Promise<string> {
+  return canvas.evaluate((el, cssPoint) => {
+    const c = el as HTMLCanvasElement;
+    const ctx = c.getContext('2d');
+    const rect = c.getBoundingClientRect();
+    if (!ctx || rect.width === 0 || rect.height === 0) {
+      throw new Error('canvas is not measurable');
+    }
+    const x = Math.min(c.width - 1, Math.max(0, Math.round(cssPoint.x * (c.width / rect.width))));
+    const y = Math.min(c.height - 1, Math.max(0, Math.round(cssPoint.y * (c.height / rect.height))));
+    const data = ctx.getImageData(x, y, 1, 1).data;
+    return `${data[0]},${data[1]},${data[2]}`;
+  }, point);
+}
+
 /** Finds the vertical center of each requested zone without assuming panel padding or cell height. */
 async function findZoneCellPoints(
   canvas: Locator,
@@ -370,6 +412,50 @@ test('hover tooltip lists every metric with its configured unit', async ({
   // Query A = watt, query B = celsius (override). Both appear in the tooltip with units.
   expect(hit.text).toMatch(/\d+(\.\d+)?\s*W\b/);
   expect(hit.text).toContain('°C');
+});
+
+test('shows categorical legend and paints distinct category top bars', async ({
+  gotoDashboardPage,
+  readProvisionedDashboard,
+}) => {
+  test.setTimeout(60_000);
+  const dashboard = await readProvisionedDashboard({ fileName: FILE });
+  const dashboardPage = await gotoDashboardPage({ uid: dashboard.uid });
+  const panel = await dashboardPage.getPanelByTitle('Category Mode');
+  // Open the dedicated panel directly because Grafana does not mount dashboard rows below the viewport.
+  const page = panel.locator.page();
+  const panelUrl = new URL(page.url());
+  panelUrl.searchParams.set('viewPanel', '6');
+  await page.goto(panelUrl.toString());
+  await expect(panel.locator).toBeVisible();
+  const canvas = panel.locator.locator('canvas');
+  await expect(canvas).toBeVisible();
+  await expect(panel.locator.getByTestId('category-legend-a')).toBeVisible();
+  await expect(panel.locator.getByTestId('category-legend-b')).toBeVisible();
+  await expect.poll(() => isPainted(canvas)).toBe(true);
+
+  const box = await canvas.boundingBox();
+  if (!box) {
+    throw new Error('canvas has no bounding box');
+  }
+  const zoneA = await findCategoryTopPoint(
+    canvas,
+    panel.locator,
+    4,
+    40,
+    (path) => path.zone === 'zone-a' && path.host === 'node-a1' && path.gpu === 'gpu0'
+  );
+  const zoneBStart = Math.floor(box.width / 2);
+  const zoneB = await findCategoryTopPoint(
+    canvas,
+    panel.locator,
+    zoneBStart,
+    zoneBStart + 50,
+    (path) => path.zone === 'zone-b' && path.host === 'node-b1' && path.gpu === 'gpu0'
+  );
+  expect(await canvasPixelAt(canvas, { x: zoneA.x, y: zoneA.y })).not.toBe(
+    await canvasPixelAt(canvas, { x: zoneB.x, y: zoneB.y })
+  );
 });
 
 test('renders the provisioned 2 / 10 / 2 grid in row-major order', async ({

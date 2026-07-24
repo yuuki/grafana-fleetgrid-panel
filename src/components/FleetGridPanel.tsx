@@ -14,6 +14,7 @@ import { CellTooltip } from './CellTooltip';
 import { DrilldownPopover } from './DrilldownPopover';
 import { RangeLegend } from './RangeLegend';
 import { SplitLegend } from './SplitLegend';
+import { CategoryLegend } from './CategoryLegend';
 import { placeOverlay, VisibleBounds } from './overlay';
 import { cellRangeFor } from '../data/cellRange';
 
@@ -139,6 +140,8 @@ export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) =>
         displayMode,
         showValues: options.showValues,
         missingColor: options.missingColor,
+        category: model.category,
+        categoryStyle: options.categoryStyle ?? 'border',
         theme,
         scrollTop,
         viewportH: bodyH,
@@ -291,6 +294,7 @@ export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) =>
               />
             </>
           )}
+          {model.category && options.showCategoryLegend !== false && <CategoryLegend category={model.category} />}
         </div>
       )}
       {model.warnings.length > 0 && (
