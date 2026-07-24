@@ -397,6 +397,7 @@ export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) =>
             cell={hover.cell}
             metricInfos={model.metricInfos}
             missingColor={options.missingColor}
+            tooltipLabels={options.tooltipLabels}
             x={hover.x}
             y={hover.y}
             minX={visibleBounds.minX}

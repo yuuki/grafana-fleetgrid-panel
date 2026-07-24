@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0 - 2026-07-24
+
+- Add configurable extra tooltip labels, such as Slurm's `partition`, with distinct values collected across each cell.
+
 ## 0.2.4 - 2026-07-23
 
 - Update the transitive `fast-uri` dependency to 3.1.4 to resolve CVE-2026-16221 and restore release validation.
