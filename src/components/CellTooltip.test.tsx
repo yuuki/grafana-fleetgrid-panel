@@ -100,6 +100,34 @@ describe('CellTooltip', () => {
     expect(screen.getByRole('tooltip', { name: 'host: node-a017' })).toBeInTheDocument();
   });
 
+  it('renders configured extra label values and includes them in the accessible name', () => {
+    const infos = buildMetricInfos([frames[0]], theme, 'browser');
+    const cell = {
+      path: ['zone-a'],
+      labels: { zone: 'zone-a' },
+      labelValues: new Map([
+        ['partition', ['a', 'b']],
+        ['queue', []],
+      ]),
+      values: new Map<string, number | null>([['A', 503]]),
+    };
+
+    render(
+      <CellTooltip
+        cell={cell}
+        tooltipLabels={['partition', 'queue']}
+        metricInfos={infos}
+        missingColor="#444"
+        x={0}
+        y={0}
+      />
+    );
+
+    expect(screen.getByText('partition: a, b')).toBeInTheDocument();
+    expect(screen.queryByText(/^queue:/)).not.toBeInTheDocument();
+    expect(screen.getByRole('tooltip', { name: 'zone: zone-a, partition: a, b' })).toBeInTheDocument();
+  });
+
   it('uses all hierarchy label rows when placing the tooltip', () => {
     const infos = buildMetricInfos([frames[0]], theme, 'browser');
     const cell = {

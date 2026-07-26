@@ -205,6 +205,27 @@ async function findCellPoint(canvas: Locator, panel: Locator): Promise<{ x: numb
   throw new Error('no cell found while probing the canvas');
 }
 
+/** Scans the same candidate points as findCellPoint and returns the first point whose tooltip matches the predicate. */
+async function findCellPointMatching(
+  canvas: Locator,
+  panel: Locator,
+  predicate: (path: CellPath) => boolean
+): Promise<{ x: number; y: number }> {
+  const box = await canvas.boundingBox();
+  if (!box) {
+    throw new Error('canvas has no bounding box');
+  }
+  for (let y = 4; y <= 40; y += 5) {
+    for (let x = 4; x <= 40; x += 3) {
+      const path = await readPath(canvas, panel, x, y, 120);
+      if (path && predicate(path)) {
+        return { x, y };
+      }
+    }
+  }
+  throw new Error('no matching cell found while probing the canvas');
+}
+
 /** Finds the vertical center of each requested zone without assuming panel padding or cell height. */
 async function findZoneCellPoints(
   canvas: Locator,
@@ -325,6 +346,7 @@ test('hover tooltip lists every metric with its configured unit', async ({
   gotoDashboardPage,
   readProvisionedDashboard,
 }) => {
+  test.setTimeout(60_000);
   const dashboard = await readProvisionedDashboard({ fileName: FILE });
   const dashboardPage = await gotoDashboardPage({ uid: dashboard.uid });
   const panel = await dashboardPage.getPanelByTitle('FleetGrid');
@@ -335,7 +357,16 @@ test('hover tooltip lists every metric with its configured unit', async ({
   const hit = await readPath(canvas, panel.locator, point.x, point.y);
   expect(hit).not.toBeNull();
   expect(hit.text).toMatch(/zone:\s*zone-a\s+host:\s*node-a\d+\s+gpu:\s*gpu\d/i);
+  expect(hit.text).toContain('partition: a');
   expect(hit.text).not.toMatch(/zone-a\s*\/\s*\d+\s*\/\s*gpu\d/i);
+  const multiPoint = await findCellPointMatching(
+    canvas,
+    panel.locator,
+    (path) => path.host === 'node-a1' && path.gpu === 'gpu0'
+  );
+  const multiHit = await readPath(canvas, panel.locator, multiPoint.x, multiPoint.y);
+  expect(multiHit).not.toBeNull();
+  expect(multiHit!.text).toContain('partition: a, b');
   // Query A = watt, query B = celsius (override). Both appear in the tooltip with units.
   expect(hit.text).toMatch(/\d+(\.\d+)?\s*W\b/);
   expect(hit.text).toContain('°C');

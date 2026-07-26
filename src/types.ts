@@ -36,6 +36,8 @@ export interface FleetGridOptions {
   displayMode: DisplayMode;
   defaultMetric?: string;
   showValues: boolean;
+  /** Extra label names, e.g. 'partition', listed in the cell tooltip. */
+  tooltipLabels?: string[];
   missingColor: string;
   spatialAggregation: SpatialAggregation;
   /** ReducerID (e.g. 'lastNotNull') — reduce along the time axis */
@@ -70,6 +72,8 @@ export interface CellModel {
    * Always set on the production path (attachCells). May be omitted for display-only/lightweight fixtures.
    */
   labelSets?: Array<Record<string, string>>;
+  /** Distinct values per configured extra tooltip label, including null-valued rows. */
+  labelValues?: Map<string, string[]>;
   /** Complete source labels that contributed a non-null value, kept separate per query. */
   sourceLabelSetsByRef?: Map<string, Array<Record<string, string>>>;
   values: Map<string, number | null>;

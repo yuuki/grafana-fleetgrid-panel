@@ -46,6 +46,46 @@ describe('buildModel', () => {
     expect(leaf.cell!.values.get('A')).toBe(503);
   });
 
+  it('populates configured tooltip label values and omits them when unconfigured', () => {
+    const configured = buildModel(
+      [
+        toDataFrame({
+          refId: 'A',
+          name: 'power',
+          fields: [
+            { name: 'Time', type: FieldType.time, values: [1000] },
+            {
+              name: 'Value',
+              type: FieldType.number,
+              values: [10],
+              labels: { zone: 'zone-a', gpu: '0', partition: 'gpu' },
+            },
+          ],
+        }),
+        toDataFrame({
+          refId: 'A',
+          name: 'power',
+          fields: [
+            { name: 'Time', type: FieldType.time, values: [1000] },
+            {
+              name: 'Value',
+              type: FieldType.number,
+              values: [20],
+              labels: { zone: 'zone-a', gpu: '1', partition: 'batch' },
+            },
+          ],
+        }),
+      ],
+      { ...options, levels: [{ ...DEFAULT_LEVEL, label: 'zone' }], tooltipLabels: ['partition'] },
+      theme,
+      'browser'
+    );
+    expect(configured.root.children[0].cell!.labelValues).toEqual(new Map([['partition', ['batch', 'gpu']]]));
+
+    const unconfigured = buildModel([frame('A', 'zone-a', '0', 10)], options, theme, 'browser');
+    expect(unconfigured.root.children[0].children[0].cell!.labelValues).toBeUndefined();
+  });
+
   it('orders metric infos by configured refId order, not by series appearance order', () => {
     // Even if data.series is in reverse order from targets (B first), the legend/split zones align in refId order (A,B)
     const m = buildModel([frame('B', 'zone-a', '0', 61), frame('A', 'zone-a', '0', 503)], options, theme, 'browser', [

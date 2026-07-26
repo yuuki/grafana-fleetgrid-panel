@@ -30,7 +30,8 @@ export function attachCells(
   levels: LevelDef[],
   agg: SpatialAggregation,
   refIds: string[] = collectRefIds(rows),
-  captureSourceLabels = false
+  captureSourceLabels = false,
+  extraLabelKeys: string[] = []
 ): void {
   // pathKey → { all original label sets, refId → raw value list }
   interface Bucket {
@@ -39,6 +40,7 @@ export function attachCells(
     byRef: Map<string, number[]>;
     sourceLabelSetsByRef?: Map<string, Array<Record<string, string>>>;
     seenSourceLabelSetsByRef?: Map<string, Set<string>>;
+    labelValues?: Map<string, Set<string>>;
   }
   const buckets = new Map<string, Bucket>();
   for (const row of rows) {
@@ -65,6 +67,8 @@ export function attachCells(
         byRef: new Map(),
         sourceLabelSetsByRef: captureSourceLabels ? new Map() : undefined,
         seenSourceLabelSetsByRef: captureSourceLabels ? new Map() : undefined,
+        labelValues:
+          extraLabelKeys.length > 0 ? new Map(extraLabelKeys.map((key) => [key, new Set<string>()])) : undefined,
       };
       buckets.set(pk, bucket);
     }
@@ -78,6 +82,12 @@ export function attachCells(
     if (!bucket.seenLabelSets.has(repKey)) {
       bucket.seenLabelSets.add(repKey);
       bucket.labelSets.push(rep);
+    }
+    for (const key of extraLabelKeys) {
+      const value = row.labels[key];
+      if (value !== undefined && value !== '') {
+        bucket.labelValues?.get(key)?.add(value);
+      }
     }
     if (row.value === null) {
       continue;
@@ -111,11 +121,21 @@ export function attachCells(
         values.set(refId, list && list.length > 0 ? aggregate(list, agg) : null);
       }
       const labelSets = bucket?.labelSets ?? [];
+      const labelValues =
+        extraLabelKeys.length > 0
+          ? new Map(
+              extraLabelKeys.map((key) => [
+                key,
+                [...(bucket?.labelValues?.get(key) ?? [])].sort((a, b) => a.localeCompare(b)),
+              ])
+            )
+          : undefined;
       // labels is the representative original value for backward compatibility (the first set)
       node.cell = {
         path: node.path,
         labels: labelSets[0] ?? {},
         labelSets,
+        ...(labelValues ? { labelValues } : {}),
         ...(captureSourceLabels ? { sourceLabelSetsByRef: bucket?.sourceLabelSetsByRef ?? new Map() } : {}),
         values,
       };
