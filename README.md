@@ -20,11 +20,11 @@ The example shows two zones and 200 nodes (100 per zone), with four GPU cells pe
 
 ## Compatibility
 
-| Requirement | Value |
-| --- | --- |
-| Grafana | `>= 11.6.0` |
-| Data source | Prometheus / VictoriaMetrics |
-| Query type | Instant (recommended) or Range |
+| Requirement | Value                          |
+| ----------- | ------------------------------ |
+| Grafana     | `>= 11.6.0`                    |
+| Data source | Prometheus / VictoriaMetrics   |
+| Query type  | Instant (recommended) or Range |
 
 Coloring, units, and drilldown rely on Grafana's standard field config, so any data source that produces labeled numeric series can work, but the plugin is designed for Prometheus / VictoriaMetrics. The automated end-to-end tests run against Grafana's built-in TestData data source; verification against a live Prometheus / VictoriaMetrics instance — including the instant-query drilldown re-query — is still outstanding and recommended before production use.
 
@@ -48,11 +48,11 @@ Every cell is built from the **union** of all queries, so a node present in only
 
 Open the panel editor and add hierarchy levels under **Hierarchy**. The editor lists the label keys found in your query results and, for each level, shows the detected group count and sample values so misconfiguration is visible immediately.
 
-| Level | Label | Extract | Layout |
-| --- | --- | --- | --- |
-| 1 | `zone` | As is | Grid (columns: 2) |
-| 2 | `host` | Trailing number | Grid (columns: 10) |
-| 3 | `gpu` | As is | Grid (columns: 2) |
+| Level | Label  | Extract         | Layout             |
+| ----- | ------ | --------------- | ------------------ |
+| 1     | `zone` | As is           | Grid (columns: 2)  |
+| 2     | `host` | Trailing number | Grid (columns: 10) |
+| 3     | `gpu`  | As is           | Grid (columns: 2)  |
 
 This `2 / 10 / 2` configuration reproduces a two-column top level, ten hosts per row within each top-level group, and two GPUs per row within each host. Levels are reorderable and there is no fixed depth limit (about 8 levels is a practical maximum).
 
@@ -70,32 +70,44 @@ When one query needs different limits by zone or pod, add rules under **Color sc
 
 Configured through the **Hierarchy levels** editor. Each level has:
 
-| Setting | Values | Notes |
-| --- | --- | --- |
-| Label | any detected label key | The label to group by at this level |
-| Extract | `As is` / `Trailing number` / `Custom regex` | How to derive the level key from the label value. `Trailing number` turns `node-a004` into `004`; `Custom regex` uses the first capture group (e.g. `node-.+(\d\d\d)`) |
-| Sort | `Natural (asc)` / `Natural (desc)` / `None` | `None` keeps data appearance order |
-| Layout | `Stack` / `Row` / `Flow` / `Grid` | Grid requires a column count |
-| Grid columns | number | Only for the grid layout |
-| Border | on / off | Draw a border around each group |
-| Group label | on / off | Show the group label |
+| Setting      | Values                                       | Notes                                                                                                                                                                  |
+| ------------ | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Label        | any detected label key                       | The label to group by at this level                                                                                                                                    |
+| Extract      | `As is` / `Trailing number` / `Custom regex` | How to derive the level key from the label value. `Trailing number` turns `node-a004` into `004`; `Custom regex` uses the first capture group (e.g. `node-.+(\d\d\d)`) |
+| Sort         | `Natural (asc)` / `Natural (desc)` / `None`  | `None` keeps data appearance order                                                                                                                                     |
+| Layout       | `Stack` / `Row` / `Flow` / `Grid`            | Grid requires a column count                                                                                                                                           |
+| Grid columns | number                                       | Only for the grid layout                                                                                                                                               |
+| Border       | on / off                                     | Draw a border around each group                                                                                                                                        |
+| Group label  | on / off                                     | Show the group label                                                                                                                                                   |
 
 ### Display
 
-| Option | Default | Description |
-| --- | --- | --- |
-| Display mode | `Single` | `Single` shows one metric with a selector; `Split` divides each cell into per-query sub-regions |
-| Default metric (refId) | first query | Which query the selector starts on in single mode |
-| Show values | on | Draw numbers when they fit; hover still shows the value when off or when text does not fit |
-| Extra tooltip labels | empty | Label names whose distinct values are listed in the cell tooltip, for example `partition` |
-| Missing color | `rgb(70,70,70)` | Fill for cells with no sample for the displayed query |
+| Option                 | Default         | Description                                                                                     |
+| ---------------------- | --------------- | ----------------------------------------------------------------------------------------------- |
+| Display mode           | `Single`        | `Single` shows one metric with a selector; `Split` divides each cell into per-query sub-regions |
+| Default metric (refId) | first query     | Which query the selector starts on in single mode                                               |
+| Show values            | on              | Draw numbers when they fit; hover still shows the value when off or when text does not fit      |
+| Extra tooltip labels   | empty           | Label names whose distinct values are listed in the cell tooltip, for example `partition`       |
+| Missing color          | `rgb(70,70,70)` | Fill for cells with no sample for the displayed query                                           |
+
+### Categorical decoration
+
+Categorical decoration assigns a deterministic color to each distinct value of a selected label and draws that color on top of the metric fill. The **Border** style outlines each cell; **Top bar** uses a compact strip at the top of each cell and is useful when cells are small. Border is recommended in split mode because it remains visible around the metric sub-regions. The accompanying legend maps each color to its value and can be hidden independently.
+
+Colors are deterministic for the current sorted value set, but are not pinned across value-set changes: adding a new value that sorts earlier can shift later colors. Cells without the selected label value receive no categorical decoration. For Slurm, set `categoryLabel` to `partition` for the `slurm_node_status` query from [SckyzO/slurm_exporter](https://github.com/SckyzO/slurm_exporter); choose `border` or `topBar` with `categoryStyle` as appropriate.
+
+| Option               | Default  | Description                                                                 |
+| -------------------- | -------- | --------------------------------------------------------------------------- |
+| Category label       | empty    | Label whose values drive categorical cell colors; empty disables decoration |
+| Category style       | `Border` | `Border` or `Top bar` decoration style                                      |
+| Show category legend | on       | Show the categorical color/value legend in the panel header                 |
 
 ### Data
 
-| Option | Default | Description |
-| --- | --- | --- |
-| Spatial aggregation | `Max` | Combines multiple series that fall on the same cell (e.g. when the hierarchy stops above the series granularity). `Max` / `Mean` / `Min` / `Sum` |
-| Reduce calculation | `Last (not null)` | Folds a range query into one current value per series. Limited to reducers that return a number |
+| Option              | Default           | Description                                                                                                                                      |
+| ------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Spatial aggregation | `Max`             | Combines multiple series that fall on the same cell (e.g. when the hierarchy stops above the series granularity). `Max` / `Mean` / `Min` / `Sum` |
+| Reduce calculation  | `Last (not null)` | Folds a range query into one current value per series. Limited to reducers that return a number                                                  |
 
 ### Color scale overrides
 

@@ -6,6 +6,7 @@ export type LevelLayout = 'vertical' | 'horizontal' | 'flow' | 'grid';
 export type SpatialAggregation = 'max' | 'mean' | 'min' | 'sum';
 export type DisplayMode = 'single' | 'split';
 export type RangeMatcherOperator = 'exact' | 'regex';
+export type CategoryDecorationStyle = 'border' | 'topBar';
 
 export interface RangeMatcher {
   label: string;
@@ -38,6 +39,12 @@ export interface FleetGridOptions {
   showValues: boolean;
   /** Extra label names, e.g. 'partition', listed in the cell tooltip. */
   tooltipLabels?: string[];
+  /** Label whose values drive categorical cell decoration. Empty or unset disables it. */
+  categoryLabel?: string;
+  /** Visual style for categorical cell decoration. */
+  categoryStyle?: CategoryDecorationStyle;
+  /** Whether to show the categorical legend. */
+  showCategoryLegend?: boolean;
   missingColor: string;
   spatialAggregation: SpatialAggregation;
   /** ReducerID (e.g. 'lastNotNull') — reduce along the time axis */

@@ -5,6 +5,7 @@ import { LevelsEditor } from './options/LevelsEditor';
 import { ReduceCalcEditor } from './options/ReduceCalcEditor';
 import { RangeOverridesEditor } from './options/RangeOverridesEditor';
 import { TooltipLabelsEditor } from './options/TooltipLabelsEditor';
+import { CategoryLabelEditor } from './options/CategoryLabelEditor';
 
 // useFieldConfig() enables the standard Field settings (Color scheme / Thresholds / Unit / Min-Max / Data Links / Overrides).
 // Without this, this plugin's entire color/unit design would not function.
@@ -44,6 +45,32 @@ export const plugin = new PanelPlugin<FleetGridOptions>(FleetGridPanel).useField
       category: ['Display'],
       editor: TooltipLabelsEditor,
       defaultValue: [],
+    })
+    .addCustomEditor({
+      id: 'categoryLabel',
+      path: 'categoryLabel',
+      name: 'Category label',
+      category: ['Category decoration'],
+      editor: CategoryLabelEditor,
+      defaultValue: '',
+    })
+    .addRadio({
+      path: 'categoryStyle',
+      name: 'Category style',
+      category: ['Category decoration'],
+      defaultValue: 'border',
+      settings: {
+        options: [
+          { value: 'border', label: 'Border' },
+          { value: 'topBar', label: 'Top bar' },
+        ],
+      },
+    })
+    .addBooleanSwitch({
+      path: 'showCategoryLegend',
+      name: 'Show category legend',
+      category: ['Category decoration'],
+      defaultValue: true,
     })
     .addColorPicker({
       path: 'missingColor',
