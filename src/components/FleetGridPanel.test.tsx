@@ -150,6 +150,42 @@ describe('FleetGridPanel', () => {
     expect(screen.queryByTestId('category-legend-zone-a')).not.toBeInTheDocument();
   });
 
+  it('toggles category selection and redraws the canvas', () => {
+    const p = makeProps([series('A', 'power', 'zone-a'), series('A', 'power', 'zone-b')]);
+    p.options.categoryLabel = 'zone';
+    render(<FleetGridPanel {...p} />);
+    const canvas = document.querySelector('canvas')!;
+    const context = canvas.getContext('2d') as unknown as { __getEvents(): unknown[] };
+    const before = context.__getEvents().length;
+    fireEvent.click(screen.getByTestId('category-legend-zone-a'));
+    expect(screen.getByTestId('category-legend-zone-a')).toHaveAttribute('aria-pressed', 'true');
+    expect(context.__getEvents().length).toBeGreaterThan(before);
+  });
+
+  it('resets category selection when the category label changes and ignores stale values', () => {
+    const frame = toDataFrame({
+      refId: 'A',
+      name: 'power',
+      fields: [{ name: 'Value', type: FieldType.number, values: [1], labels: { zone: 'a', partition: 'a' } }],
+    });
+    const p = makeProps([frame]);
+    p.options.categoryLabel = 'zone';
+    const view = render(<FleetGridPanel {...p} />);
+    fireEvent.click(screen.getByTestId('category-legend-a'));
+    expect(screen.getByTestId('category-legend-a')).toHaveAttribute('aria-pressed', 'true');
+    p.options.categoryLabel = 'partition';
+    view.rerender(<FleetGridPanel {...p} />);
+    expect(screen.getByTestId('category-legend-a')).toHaveAttribute('aria-pressed', 'false');
+
+    const stale = makeProps([series('A', 'power', 'zone-b')]);
+    stale.options.categoryLabel = 'zone';
+    view.rerender(<FleetGridPanel {...stale} />);
+    const alphaValues = ((document.querySelector('canvas')!.getContext('2d') as unknown as { __getEvents(): Array<{ type: string; props: { value: number } }> }).__getEvents())
+      .filter((event) => event.type === 'globalAlpha')
+      .map((event) => event.props.value);
+    expect(alphaValues).not.toContain(0.22);
+  });
+
   it('uses content coordinates (incl. scrollLeft) for hover hit testing', () => {
     // Same refId, 2 zones side by side as 2 cells (flow, s=40 → zone-a:[0,40), zone-b:[41,81)). No header since there's only one refId.
     render(<FleetGridPanel {...makeProps([series('A', 'power', 'zone-a'), series('A', 'power', 'zone-b')])} />);

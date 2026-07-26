@@ -96,6 +96,8 @@ Categorical decoration assigns a deterministic color to each distinct value of a
 
 Colors are deterministic for the current sorted value set, but are not pinned across value-set changes: adding a new value that sorts earlier can shift later colors. Cells without the selected label value receive no categorical decoration. For Slurm, set `categoryLabel` to `partition` for the `slurm_node_status` query from [SckyzO/slurm_exporter](https://github.com/SckyzO/slurm_exporter); choose `border` or `topBar` with `categoryStyle` as appropriate.
 
+Click legend values to highlight matching cells; selections toggle and can be combined, with multi-value cells matching when any value is selected. Use **Clear** to remove the selection. Dimmed cells remain hoverable and clickable, and this view-only selection is not saved to the dashboard.
+
 | Option               | Default  | Description                                                                 |
 | -------------------- | -------- | --------------------------------------------------------------------------- |
 | Category label       | empty    | Label whose values drive categorical cell colors; empty disables decoration |

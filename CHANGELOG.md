@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.0 - 2026-07-24
+
+- Add interactive categorical legend selection to highlight matching cells and dim the rest.
+
 ## 0.4.0 - 2026-07-24
 
 - Add categorical cell decoration and a legend for label values such as Slurm partitions.
