@@ -98,6 +98,16 @@ Colors are deterministic for the current sorted value set, but are not pinned ac
 
 Click legend values to highlight matching cells; selections toggle and can be combined, with multi-value cells matching when any value is selected. Use **Clear** to remove the selection. Dimmed cells remain hoverable and clickable, and this view-only selection is not saved to the dashboard.
 
+#### Categorical decoration and legend highlighting
+
+![Categorical decoration with top-bar labels](./src/img/fleetgrid-category-topbar.png)
+
+The `partition` label adds a colored top bar to each cell. The category legend maps the colors to `a` and `b`, while the metric fill continues to show the selected metric.
+
+![Legend selection highlights matching cells](./src/img/fleetgrid-category-highlight.png)
+
+Clicking `b` in the category legend keeps matching cells bright and dims non-matching cells. Click **Clear** to restore the full grid.
+
 | Option               | Default  | Description                                                                 |
 | -------------------- | -------- | --------------------------------------------------------------------------- |
 | Category label       | empty    | Label whose values drive categorical cell colors; empty disables decoration |
