@@ -1,5 +1,11 @@
 # FleetGrid
 
+[![CI](https://github.com/yuuki/grafana-fleetgrid-panel/actions/workflows/ci.yml/badge.svg)](https://github.com/yuuki/grafana-fleetgrid-panel/actions/workflows/ci.yml)
+[![Grafana compatibility](https://github.com/yuuki/grafana-fleetgrid-panel/actions/workflows/is-compatible.yml/badge.svg)](https://github.com/yuuki/grafana-fleetgrid-panel/actions/workflows/is-compatible.yml)
+[![Release](https://github.com/yuuki/grafana-fleetgrid-panel/actions/workflows/release.yml/badge.svg)](https://github.com/yuuki/grafana-fleetgrid-panel/actions/workflows/release.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
+[![AI-assisted](https://img.shields.io/badge/AI--assisted-8A2BE2)](https://openai.com/)
+
 A Grafana panel plugin that renders nested physical topologies — such as zones, hosts, and GPUs — as a hierarchical grid, and colors each cell by a Prometheus / VictoriaMetrics metric. It is designed for a bird's-eye view of large AI / HPC clusters, where hundreds of nodes and thousands of cells need to be scanned at a glance.
 
 The panel draws every cell on a single `<canvas>` and overlays the tooltip, drilldown popover, legend, and metric selector as React DOM. Keeping the cells off the DOM is a deliberate design choice: the number of DOM nodes stays constant regardless of cell count, which avoids the per-cell React re-render and browser layout cost that a DOM-based grid would incur at the design target of a few thousand cells (up to ~15,000 sub-regions in split mode).
