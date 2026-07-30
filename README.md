@@ -104,6 +104,8 @@ Two styles are available. **Bottom strip** (the default) paints a full-width ban
 
 Colors are deterministic for the current sorted value set, but are not pinned across value-set changes: adding a new value that sorts earlier can shift later colors. Cells without the selected label value receive no categorical decoration. For Slurm, set `categoryLabel` to `partition` for the `slurm_node_status` query from [SckyzO/slurm_exporter](https://github.com/SckyzO/slurm_exporter); choose `strip` or `border` with `categoryStyle` as appropriate.
 
+Existing dashboards that use the legacy `categoryStyle: "topBar"` value are migrated to `strip` (Bottom strip) when loaded. The `border` value remains valid and uses the redesigned Outline rendering.
+
 Legend chips highlight matching cells: **hovering** a chip previews the highlight for that value, and **clicking** locks it in. Locked selections toggle and can be combined, with multi-value cells matching when any value is selected; a hover temporarily overrides the locked selection and reverts when the pointer leaves. Highlighted cells are double-encoded — matching cells keep full brightness and gain a colored ring, while the rest dim. Use **Clear** to remove the locked selection. Dimmed cells remain hoverable and clickable, and this view-only selection is not saved to the dashboard.
 
 #### Categorical decoration and legend highlighting
@@ -118,10 +120,10 @@ The `partition` label decorates each cell with its category color. The category 
 
 Selecting `b` in the category legend keeps matching cells bright and dims non-matching cells. Click **Clear** to restore the full grid.
 
-| Option               | Default  | Description                                                                 |
-| -------------------- | -------- | --------------------------------------------------------------------------- |
+| Option               | Default        | Description                                                                 |
+| -------------------- | -------------- | --------------------------------------------------------------------------- |
 | Category label       | empty          | Label whose values drive categorical cell colors; empty disables decoration |
-| Category style       | `Bottom strip` | `Bottom strip` (band on the lower edge) or `Outline` (framed with a gap)     |
+| Category style       | `Bottom strip` | `Bottom strip` (band on the lower edge) or `Outline` (framed with a gap)    |
 | Show category legend | on             | Show the categorical color/value legend in the panel header                 |
 
 ### Data
