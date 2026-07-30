@@ -66,12 +66,9 @@ export function buildModel(
   visit(root);
 
   const metricInfos = buildMetricInfos(frames, theme, timeZone, ranges);
-  const category = options.categoryLabel ? buildCategoryModel(root, options.categoryLabel, theme) : undefined;
-  if (category && category.values.length > theme.visualization.palette.length) {
-    warnings.push(
-      `Category colors repeat: ${category.values.length} values exceed the ${theme.visualization.palette.length}-color palette`
-    );
-  }
+  // Category colors come from a fixed cool palette; the 5th+ values intentionally fold into a
+  // single "other" bucket (see categories.ts), so there is no palette-exhaustion warning here.
+  const category = options.categoryLabel ? buildCategoryModel(root, options.categoryLabel) : undefined;
   // Fix the legend/split-zone order to the refId order per spec. buildMetricInfos builds MetricInfo
   // in frame-scan order, so the order breaks if data.series differs from the targets order. Sort by refIds order
   // (a refId not in refIds is pushed to the end, relying on Array.sort's stability to preserve relative order).

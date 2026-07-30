@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { DataFrame, Field, LinkModel, PanelProps } from '@grafana/data';
 import { PanelDataErrorView } from '@grafana/runtime';
 import { RadioButtonGroup, useTheme2 } from '@grafana/ui';
-import { CellModel, FleetGridOptions } from '../types';
+import { CellModel, FleetGridOptions, normalizeCategoryStyle } from '../types';
 import { buildModel } from '../data/model';
 import { computeLayout } from '../layout/layout';
 import { renderCanvas } from '../render/renderer';
@@ -49,6 +49,7 @@ export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) =>
   const [scrollTop, setScrollTop] = useState(0);
   const [selected, setSelected] = useState<string | undefined>(options.defaultMetric || undefined);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [hoverCategory, setHoverCategory] = useState<string | undefined>(undefined);
   const [hover, setHover] = useState<{ cell: CellModel; x: number; y: number } | null>(null);
   // Popover/link menu origins are kept in content coordinates. Visible bounds are measured separately so an open overlay follows panel resizes.
   const [popover, setPopover] = useState<{
@@ -87,11 +88,32 @@ export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) =>
     () => selectedCategories.filter((value) => model.category?.colorByValue.has(value) ?? false),
     [selectedCategories, model.category]
   );
+  // The category legend is the only source of hover, so hover is meaningful only while it is shown.
+  const categoryLegendVisible = !!model.category && options.showCategoryLegend !== false;
+  // Honor a hover only while the legend is visible and the value still exists in the current category model,
+  // so a stale hover (chip unmounted by hiding the legend, a category-model change, or a data update that
+  // never fired mouseleave/blur) can't leave a highlight stuck on.
+  const effectiveHover =
+    categoryLegendVisible && hoverCategory && (model.category?.colorByValue.has(hoverCategory) ?? false)
+      ? hoverCategory
+      : undefined;
   useEffect(() => {
-    // The selection is view-only state and must be cleared when its category meaning changes.
+    // The selection/hover are view-only state and must be cleared when the category meaning changes.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedCategories([]);
+    setHoverCategory(undefined);
   }, [options.categoryLabel]);
+  useEffect(() => {
+    // Discard a lingering hover as soon as it stops being valid — the legend is hidden, or the hovered value
+    // dropped out of the current category model (e.g. a data update removed just that value). Otherwise the
+    // stale value survives and would re-fire, with no mouse interaction, if the same value later returns.
+    // Guarded, so it settles in one pass rather than cascading.
+    const hoverStillValid = categoryLegendVisible && (model.category?.colorByValue.has(hoverCategory ?? '') ?? false);
+    if (hoverCategory !== undefined && !hoverStillValid) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setHoverCategory(undefined);
+    }
+  }, [categoryLegendVisible, model.category, hoverCategory]);
 
   // displayMode was already registered in Task 14, but dashboards saved before that registration lack the key. Normalize it to single by default
   const displayMode = options.displayMode ?? 'single';
@@ -151,14 +173,15 @@ export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) =>
         showValues: options.showValues,
         missingColor: options.missingColor,
         category: model.category,
-        categoryStyle: options.categoryStyle ?? 'border',
+        categoryStyle: normalizeCategoryStyle(options.categoryStyle),
         selectedCategoryValues: effectiveSelection,
+        hoverCategoryValue: effectiveHover,
         theme,
         scrollTop,
         viewportH: bodyH,
       });
     }
-  }, [layout, model, selectedRefId, displayMode, options, theme, scrollTop, bodyH, effectiveSelection]);
+  }, [layout, model, selectedRefId, displayMode, options, theme, scrollTop, bodyH, effectiveSelection, effectiveHover]);
 
   // When panel data updates, discard the cache/error/loading state and advance the generation (cache is invalidated per panel via requestId).
   // Advancing the generation ensures that responses from stale in-flight requests (success/failure/finally) are reliably discarded by the guard downstream.
@@ -305,7 +328,7 @@ export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) =>
               />
             </>
           )}
-          {model.category && options.showCategoryLegend !== false && (
+          {categoryLegendVisible && model.category && (
             <CategoryLegend
               category={model.category}
               selectedValues={effectiveSelection}
@@ -315,6 +338,7 @@ export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) =>
                 )
               }
               onClear={() => setSelectedCategories([])}
+              onHover={setHoverCategory}
             />
           )}
         </div>

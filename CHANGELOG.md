@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Redesign categorical decoration: replace the cycling theme palette with a fixed cool palette (blue/purple/cyan/magenta) that stays clear of the heatmap's warm magnitude colors, folding the 5th+ values into a single neutral "other" color.
+- Replace the `Top bar` category style with a default `Bottom strip` (band on the cell's lower edge) and reshape `Outline` (renamed from `Border`) to frame each cell with a background gap so the color no longer bleeds into the fill. A migration rewrites the legacy `topBar` value to `Bottom strip` so provisioned dashboards keep a selected style. Decoration, highlight rings, and split-cell tiles are drawn on device-pixel boundaries so they stay crisp at any display scaling, and their thickness shrinks on small or heavily split cells so every metric tile keeps a visible sliver of fill.
+- Highlight categorical cells on legend hover in addition to click, ringing matching cells in the category color for clearer double-encoding alongside the dim.
+
 ## 0.5.0 - 2026-07-24
 
 - Add interactive categorical legend selection to highlight matching cells and dim the rest.

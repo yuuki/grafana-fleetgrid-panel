@@ -128,44 +128,27 @@ describe('buildModel', () => {
     );
   });
 
-  it('warns when category values exceed the visualization palette', () => {
-    const smallPaletteTheme = {
-      ...theme,
-      visualization: { ...theme.visualization, palette: ['red'] },
-    } as typeof theme;
+  it('folds more than four category values into a single overflow color without warning', () => {
+    const partitionFrame = (zone: string, partition: string) =>
+      toDataFrame({
+        refId: 'A',
+        fields: [
+          { name: 'Time', type: FieldType.time, values: [1000] },
+          { name: 'Value', type: FieldType.number, values: [1], labels: { zone, gpu: '0', partition } },
+        ],
+      });
     const m = buildModel(
-      [
-        toDataFrame({
-          refId: 'A',
-          fields: [
-            { name: 'Time', type: FieldType.time, values: [1000] },
-            {
-              name: 'Value',
-              type: FieldType.number,
-              values: [1],
-              labels: { zone: 'zone-a', gpu: '0', partition: 'one' },
-            },
-          ],
-        }),
-        toDataFrame({
-          refId: 'A',
-          fields: [
-            { name: 'Time', type: FieldType.time, values: [1000] },
-            {
-              name: 'Value',
-              type: FieldType.number,
-              values: [2],
-              labels: { zone: 'zone-b', gpu: '0', partition: 'other' },
-            },
-          ],
-        }),
-      ],
+      ['a', 'b', 'c', 'd', 'e'].map((partition, i) => partitionFrame(`zone-${i}`, partition)),
       { ...options, levels: [{ ...DEFAULT_LEVEL, label: 'zone' }], categoryLabel: 'partition' },
-      smallPaletteTheme,
+      theme,
       'browser'
     );
 
-    expect(m.warnings).toContain('Category colors repeat: 2 values exceed the 1-color palette');
+    // The 5th value collapses to the shared "other" color; folding is intentional, so no warning is emitted.
+    expect(m.warnings).toEqual([]);
+    const colors = m.category!.colorByValue;
+    expect(new Set([colors.get('a'), colors.get('b'), colors.get('c'), colors.get('d')]).size).toBe(4);
+    expect(colors.get('e')).toBe('#8E9AAF');
   });
 
   it('orders metric infos by configured refId order, not by series appearance order', () => {

@@ -162,6 +162,93 @@ describe('FleetGridPanel', () => {
     expect(context.__getEvents().length).toBeGreaterThan(before);
   });
 
+  it('highlights on legend hover and releases the highlight on mouse leave', () => {
+    const p = makeProps([series('A', 'power', 'zone-a'), series('A', 'power', 'zone-b')]);
+    p.options.categoryLabel = 'zone';
+    render(<FleetGridPanel {...p} />);
+    // The canvas mock accumulates events across renders. Each renderCanvas starts with one clearRect, so slice
+    // after the last clearRect to inspect the most recent frame, and count clearRects to prove a new frame drew.
+    const events = () =>
+      (
+        document.querySelector('canvas')!.getContext('2d') as unknown as {
+          __getEvents(): Array<{ type: string; props: { value?: number } }>;
+        }
+      ).__getEvents();
+    const frameCount = () => events().filter((e) => e.type === 'clearRect').length;
+    const lastFrameHasDim = () => {
+      const all = events();
+      const start = all.map((e) => e.type).lastIndexOf('clearRect');
+      return all.slice(start).some((e) => e.type === 'globalAlpha' && e.props.value === 0.22);
+    };
+
+    // No selection and no hover: the current frame dims nothing.
+    expect(lastFrameHasDim()).toBe(false);
+    // Hovering a chip redraws and dims the non-matching cell in the new frame.
+    const beforeHover = frameCount();
+    fireEvent.pointerEnter(screen.getByTestId('category-legend-zone-a'), { pointerType: 'mouse' });
+    expect(frameCount()).toBeGreaterThan(beforeHover);
+    expect(lastFrameHasDim()).toBe(true);
+    // Leaving redraws again, and that fresh frame has no dim — the highlight is gone, not merely stale.
+    const beforeLeave = frameCount();
+    fireEvent.pointerLeave(screen.getByTestId('category-legend-zone-a'));
+    expect(frameCount()).toBeGreaterThan(beforeLeave);
+    expect(lastFrameHasDim()).toBe(false);
+  });
+
+  it('drops a lingering hover highlight when the legend is hidden without a pointer leave', () => {
+    const p = makeProps([series('A', 'power', 'zone-a'), series('A', 'power', 'zone-b')]);
+    p.options.categoryLabel = 'zone';
+    const view = render(<FleetGridPanel {...p} />);
+    fireEvent.pointerEnter(screen.getByTestId('category-legend-zone-a'), { pointerType: 'mouse' });
+    const lastFrameHasDim = () => {
+      const all = (
+        document.querySelector('canvas')!.getContext('2d') as unknown as {
+          __getEvents(): Array<{ type: string; props: { value?: number } }>;
+        }
+      ).__getEvents();
+      const start = all.map((e) => e.type).lastIndexOf('clearRect');
+      return all.slice(start).some((e) => e.type === 'globalAlpha' && e.props.value === 0.22);
+    };
+    expect(lastFrameHasDim()).toBe(true);
+
+    // Hiding the legend unmounts the chip, so no mouseleave/blur fires; the highlight must still clear.
+    const hidden = makeProps([series('A', 'power', 'zone-a'), series('A', 'power', 'zone-b')]);
+    hidden.options.categoryLabel = 'zone';
+    hidden.options.showCategoryLegend = false;
+    view.rerender(<FleetGridPanel {...hidden} />);
+    expect(screen.queryByTestId('category-legend-zone-a')).not.toBeInTheDocument();
+    expect(lastFrameHasDim()).toBe(false);
+  });
+
+  it('does not re-fire a hover highlight when its value leaves and later returns', () => {
+    const lastFrameHasDim = () => {
+      const all = (
+        document.querySelector('canvas')!.getContext('2d') as unknown as {
+          __getEvents(): Array<{ type: string; props: { value?: number } }>;
+        }
+      ).__getEvents();
+      const start = all.map((e) => e.type).lastIndexOf('clearRect');
+      return all.slice(start).some((e) => e.type === 'globalAlpha' && e.props.value === 0.22);
+    };
+
+    const both = makeProps([series('A', 'power', 'zone-a'), series('A', 'power', 'zone-b')]);
+    both.options.categoryLabel = 'zone';
+    const view = render(<FleetGridPanel {...both} />);
+    fireEvent.pointerEnter(screen.getByTestId('category-legend-zone-b'), { pointerType: 'mouse' });
+    expect(lastFrameHasDim()).toBe(true);
+
+    // A data update removes the hovered value (zone-b); its legend chip unmounts without a pointer leave.
+    const onlyA = makeProps([series('A', 'power', 'zone-a')]);
+    onlyA.options.categoryLabel = 'zone';
+    view.rerender(<FleetGridPanel {...onlyA} />);
+
+    // zone-b returns. Without any fresh pointer interaction, the old hover must not resurrect the highlight.
+    const backAgain = makeProps([series('A', 'power', 'zone-a'), series('A', 'power', 'zone-b')]);
+    backAgain.options.categoryLabel = 'zone';
+    view.rerender(<FleetGridPanel {...backAgain} />);
+    expect(lastFrameHasDim()).toBe(false);
+  });
+
   it('resets category selection when the category label changes and ignores stale values', () => {
     const frame = toDataFrame({
       refId: 'A',

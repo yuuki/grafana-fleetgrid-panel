@@ -6,7 +6,17 @@ export type LevelLayout = 'vertical' | 'horizontal' | 'flow' | 'grid';
 export type SpatialAggregation = 'max' | 'mean' | 'min' | 'sum';
 export type DisplayMode = 'single' | 'split';
 export type RangeMatcherOperator = 'exact' | 'regex';
-export type CategoryDecorationStyle = 'border' | 'topBar';
+export type CategoryDecorationStyle = 'strip' | 'border';
+
+/**
+ * Normalize a persisted categoryStyle to the current union.
+ * Dashboards saved before the redesign may hold the legacy 'topBar' value; it (and any
+ * unset value) maps to the new default 'strip'. Legacy 'border' carries over unchanged
+ * to the redesigned border rendering.
+ */
+export function normalizeCategoryStyle(style: string | undefined): CategoryDecorationStyle {
+  return style === 'border' ? 'border' : 'strip';
+}
 
 export interface RangeMatcher {
   label: string;
