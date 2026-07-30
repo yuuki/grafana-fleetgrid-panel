@@ -98,27 +98,31 @@ Configured through the **Hierarchy levels** editor. Each level has:
 
 ### Categorical decoration
 
-Categorical decoration assigns a deterministic color to each distinct value of a selected label and draws that color on top of the metric fill. The **Border** style outlines each cell; **Top bar** uses a compact strip at the top of each cell and is useful when cells are small. Border is recommended in split mode because it remains visible around the metric sub-regions. The accompanying legend maps each color to its value and can be hidden independently.
+Categorical decoration assigns a color to each distinct value of a selected label and draws it alongside the metric fill. Colors come from a fixed cool palette (blue, purple, cyan, magenta) chosen so they stay hue-orthogonal to the warm green→yellow→orange→red heatmap fill — the category signal never reads as magnitude. The fifth and later sorted values fold into a single neutral "other" grey rather than introducing more hues that would be hard to tell apart.
 
-Colors are deterministic for the current sorted value set, but are not pinned across value-set changes: adding a new value that sorts earlier can shift later colors. Cells without the selected label value receive no categorical decoration. For Slurm, set `categoryLabel` to `partition` for the `slurm_node_status` query from [SckyzO/slurm_exporter](https://github.com/SckyzO/slurm_exporter); choose `border` or `topBar` with `categoryStyle` as appropriate.
+Two styles are available. **Bottom strip** (the default) paints a full-width band along the lower edge of each cell, giving a stable base line that stays clear of the centered value text. **Outline** draws a colored frame around each cell with a thin background gap inside it, so the frame color never bleeds into the metric fill; it remains visible in split mode around the metric sub-regions. The accompanying legend maps each color to its value and can be hidden independently.
 
-Click legend values to highlight matching cells; selections toggle and can be combined, with multi-value cells matching when any value is selected. Use **Clear** to remove the selection. Dimmed cells remain hoverable and clickable, and this view-only selection is not saved to the dashboard.
+Colors are deterministic for the current sorted value set, but are not pinned across value-set changes: adding a new value that sorts earlier can shift later colors. Cells without the selected label value receive no categorical decoration. For Slurm, set `categoryLabel` to `partition` for the `slurm_node_status` query from [SckyzO/slurm_exporter](https://github.com/SckyzO/slurm_exporter); choose `strip` or `border` with `categoryStyle` as appropriate.
+
+Legend chips highlight matching cells: **hovering** a chip previews the highlight for that value, and **clicking** locks it in. Locked selections toggle and can be combined, with multi-value cells matching when any value is selected; a hover temporarily overrides the locked selection and reverts when the pointer leaves. Highlighted cells are double-encoded — matching cells keep full brightness and gain a colored ring, while the rest dim. Use **Clear** to remove the locked selection. Dimmed cells remain hoverable and clickable, and this view-only selection is not saved to the dashboard.
 
 #### Categorical decoration and legend highlighting
 
-![Categorical decoration with top-bar labels](./src/img/fleetgrid-category-topbar.png)
+> Note: the screenshots below were captured from an earlier release and show the previous top-bar decoration, the old category palette, and no highlight ring. They illustrate the concept; the current defaults are the bottom strip, the fixed cool palette, and ringed highlights described above.
 
-The `partition` label adds a colored top bar to each cell. The category legend maps the colors to `a` and `b`, while the metric fill continues to show the selected metric.
+![Categorical decoration labels each cell by its partition](./src/img/fleetgrid-category-topbar.png)
+
+The `partition` label decorates each cell with its category color. The category legend maps the colors to `a` and `b`, while the metric fill continues to show the selected metric.
 
 ![Legend selection highlights matching cells](./src/img/fleetgrid-category-highlight.png)
 
-Clicking `b` in the category legend keeps matching cells bright and dims non-matching cells. Click **Clear** to restore the full grid.
+Selecting `b` in the category legend keeps matching cells bright and dims non-matching cells. Click **Clear** to restore the full grid.
 
 | Option               | Default  | Description                                                                 |
 | -------------------- | -------- | --------------------------------------------------------------------------- |
-| Category label       | empty    | Label whose values drive categorical cell colors; empty disables decoration |
-| Category style       | `Border` | `Border` or `Top bar` decoration style                                      |
-| Show category legend | on       | Show the categorical color/value legend in the panel header                 |
+| Category label       | empty          | Label whose values drive categorical cell colors; empty disables decoration |
+| Category style       | `Bottom strip` | `Bottom strip` (band on the lower edge) or `Outline` (framed with a gap)     |
+| Show category legend | on             | Show the categorical color/value legend in the panel header                 |
 
 ### Data
 

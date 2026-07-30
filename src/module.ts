@@ -1,5 +1,5 @@
 import { PanelPlugin } from '@grafana/data';
-import { FleetGridOptions } from './types';
+import { FleetGridOptions, normalizeCategoryStyle } from './types';
 import { FleetGridPanel } from './components/FleetGridPanel';
 import { LevelsEditor } from './options/LevelsEditor';
 import { ReduceCalcEditor } from './options/ReduceCalcEditor';
@@ -58,11 +58,11 @@ export const plugin = new PanelPlugin<FleetGridOptions>(FleetGridPanel).useField
       path: 'categoryStyle',
       name: 'Category style',
       category: ['Category decoration'],
-      defaultValue: 'border',
+      defaultValue: 'strip',
       settings: {
         options: [
-          { value: 'border', label: 'Border' },
-          { value: 'topBar', label: 'Top bar' },
+          { value: 'strip', label: 'Bottom strip' },
+          { value: 'border', label: 'Outline' },
         ],
       },
     })
@@ -110,4 +110,19 @@ export const plugin = new PanelPlugin<FleetGridOptions>(FleetGridPanel).useField
       editor: RangeOverridesEditor,
       defaultValue: [],
     })
+);
+
+// Persist the categoryStyle migration into the saved model, not just at draw time: the options editor binds
+// its radio to the stored value, so a legacy 'topBar' (e.g. in provisioned dashboards) would otherwise leave
+// the control unselected. Normalize 'topBar'/unset → 'strip' and carry 'border' over. shouldMigrate opts in
+// whenever the stored value isn't already a current one, so it runs even without a plugin version bump.
+plugin.setMigrationHandler(
+  (panel) => ({
+    ...panel.options,
+    categoryStyle: normalizeCategoryStyle(panel.options?.categoryStyle as string | undefined),
+  }),
+  (panel) => {
+    const style = (panel.options as FleetGridOptions | undefined)?.categoryStyle as string | undefined;
+    return style !== 'strip' && style !== 'border';
+  }
 );
