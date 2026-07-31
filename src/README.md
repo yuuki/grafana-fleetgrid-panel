@@ -34,7 +34,7 @@ Cells are built from the union of all queries, so a node present in only one que
 ## Source and documentation
 
 Source code, the full options reference, and the development guide are on GitHub:
-[github.com/yuuki/grafana-clusterview-panel](https://github.com/yuuki/grafana-clusterview-panel).
+[github.com/yuuki/grafana-fleetgrid-panel](https://github.com/yuuki/grafana-fleetgrid-panel).
 
 ## License
 
