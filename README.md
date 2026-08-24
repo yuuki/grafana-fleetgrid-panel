@@ -208,6 +208,8 @@ Grid layouts fill groups in row-major order within each parent: with two columns
 
 Cell size is auto-fitted between **6 px** and **40 px** by scanning candidate sizes from large to small and taking the largest that fits the panel. If even 6 px cells do not fit, the size is pinned to 6 px. The panel then scrolls **vertically** when the content is taller than the panel and **horizontally** when it is wider. While scrolling vertically, the current top-most level's group label stays pinned to the top — but only when that top level has its **Group label** enabled, since otherwise there is no label to pin.
 
+On Grafana Auto Grid with **Auto fit content**, the panel ignores the allocated height and instead uses the width-constrained cell size (usually 40 px) so the panel chrome shrinks to the grid. Min/max height and overflow stay on the Auto Grid cell. Classic / custom grid layouts still use the fixed panel height.
+
 ## Deployment
 
 The plugin is not yet published to the Grafana catalog and its release builds are unsigned, so it must be installed manually.

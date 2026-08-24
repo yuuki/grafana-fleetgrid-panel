@@ -110,6 +110,9 @@ The layout engine recursively measures the tree under a candidate cell size and 
 **Decision: descending linear scan, not binary search.**
 *Rationale:* binary search was the original plan and was rejected in review with a counterexample: nested `flow` layouts wrap, so `fits(size)` is **not monotonic** — a larger cell can change wrapping and produce a *smaller* total height. Binary search over a non-monotonic predicate returns wrong answers; 69 cheap measurements per layout pass are negligible, and the scan is trivially correct.
 
+**Decision: Auto Grid fit-content inverts the height contract; classic grid is unchanged.**
+*Rationale:* Grafana's Auto Grid can size a panel to its content only when the plugin calls `PanelPlugin.setFitContentSupport()` and, when `props.fitContent` is set, renders in normal flow without using `height`. That prop is absent from `@grafana/data` 12.4 / Grafana 11.6–13.2, so the plugin duck-types the method and the prop and does not raise `grafanaDependency`. Fit-content passes an unbounded height into `computeLayout`, so cell size is constrained by width only (typically `S_MAX`) and `contentHeight` becomes the body's explicit height. Min/max and overflow stay on the Auto Grid cell; the plugin does not grow cells to fill leftover min-height or match-row space. Classic / custom grid keeps the existing "fit the given box" path.
+
 Cell value text is drawn only when it fits: font size `clamp(cellHeight × 0.38, 9, 15)` px and text width + 4 px ≤ cell width, preferring the unit-formatted string, then the bare number, then nothing. Text color uses `theme.colors.getContrastText` against the cell color.
 
 ## 8. Multi-metric display

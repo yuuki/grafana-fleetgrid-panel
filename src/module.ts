@@ -7,6 +7,14 @@ import { RangeOverridesEditor } from './options/RangeOverridesEditor';
 import { TooltipLabelsEditor } from './options/TooltipLabelsEditor';
 import { CategoryLabelEditor } from './options/CategoryLabelEditor';
 
+// Hosts older than the Auto Grid fit-content API lack this method. Duck-type so
+// the plugin still loads; Grafana only offers "Auto fit" when the method exists
+// and is called. Do not bump @grafana/data just to type this.
+export function declareFitContentSupport(target: object): void {
+  const candidate = target as { setFitContentSupport?: (enabled?: boolean) => unknown };
+  candidate.setFitContentSupport?.();
+}
+
 // useFieldConfig() enables the standard Field settings (Color scheme / Thresholds / Unit / Min-Max / Data Links / Overrides).
 // Without this, this plugin's entire color/unit design would not function.
 export const plugin = new PanelPlugin<FleetGridOptions>(FleetGridPanel).useFieldConfig().setPanelOptions((builder) =>
@@ -126,3 +134,5 @@ plugin.setMigrationHandler(
     return style !== 'strip' && style !== 'border';
   }
 );
+
+declareFitContentSupport(plugin);
