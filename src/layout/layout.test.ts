@@ -93,6 +93,34 @@ describe('computeLayout', () => {
     expect(r.contentHeight).toBeGreaterThan(100);
   });
 
+  it('ignores vertical space and sizes to content when height is unbounded', () => {
+    const keys = Array.from({ length: 100 }, (_, i) => String(i));
+    const wide: LevelDef[] = [
+      { ...DEFAULT_LEVEL, label: 'zone', layout: 'vertical' },
+      { ...DEFAULT_LEVEL, label: 'gpu', layout: 'grid', gridColumns: 2 },
+    ];
+    const constrained = computeLayout(tree([['zone-a']], keys), wide, 200, 100);
+    const unbounded = computeLayout(tree([['zone-a']], keys), wide, 200, Number.POSITIVE_INFINITY);
+    expect(constrained.cellSize).toBe(S_MIN);
+    expect(constrained.scrollable).toBe(true);
+    expect(unbounded.cellSize).toBe(S_MAX);
+    expect(unbounded.scrollable).toBe(false);
+    expect(unbounded.contentHeight).toBeGreaterThan(constrained.contentHeight);
+  });
+
+  it('still shrinks cells when only the width is tight under an unbounded height', () => {
+    const keys = Array.from({ length: 10 }, (_, i) => String(i));
+    const wide: LevelDef[] = [
+      { ...DEFAULT_LEVEL, label: 'zone', layout: 'vertical', showLabel: false },
+      { ...DEFAULT_LEVEL, label: 'gpu', layout: 'horizontal', showLabel: false },
+    ];
+    // 10 cells in one horizontal row cannot fit at S_MAX in 80px, so width still forces a shrink.
+    const r = computeLayout(tree([['zone-a']], keys), wide, 80, Number.POSITIVE_INFINITY);
+    expect(r.cellSize).toBeLessThan(S_MAX);
+    expect(r.cellSize).toBeGreaterThanOrEqual(S_MIN);
+    expect(r.scrollable).toBe(false);
+  });
+
   it('places children left-to-right in horizontal layout', () => {
     const cfg: LevelDef[] = [
       { ...DEFAULT_LEVEL, label: 'zone', layout: 'horizontal', showLabel: false },

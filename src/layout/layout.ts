@@ -67,6 +67,9 @@ export function computeLayout(
   height: number
 ): LayoutResult {
   const measure = (s: number): Size => layoutNode(root, levels, s, width, 0, 0, null);
+  // An unbounded height (Infinity) is the fit-content path: only width constrains cell
+  // size, contentHeight becomes the panel's natural height, and the result is not
+  // vertically scrollable. The host's Auto Grid cell then enforces min/max via CSS.
   const fits = (s: number) => {
     const m = measure(s);
     return m.w <= width && m.h <= height;

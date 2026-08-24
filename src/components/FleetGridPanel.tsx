@@ -37,8 +37,12 @@ const measureVisibleBounds = (el: HTMLElement): VisibleBounds => {
 const sameVisibleBounds = (a: VisibleBounds, b: VisibleBounds): boolean =>
   a.minX === b.minX && a.minY === b.minY && a.maxX === b.maxX && a.maxY === b.maxY;
 
-export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) => {
-  const { data, width, height, options, timeZone } = props;
+// fitContent is on PanelProps only after the Auto Grid API lands in @grafana/data.
+// Older hosts omit it; treat missing as false so the fixed-height path stays default.
+type FleetGridPanelProps = PanelProps<FleetGridOptions> & { fitContent?: boolean };
+
+export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
+  const { data, width, height, options, timeZone, fitContent } = props;
   const theme = useTheme2();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
@@ -141,6 +145,16 @@ export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) =>
   // If there's a warning (e.g. partial exclusion), also subtract the banner height
   const warnH = model.warnings.length > 0 ? WARN_H : 0;
   const bodyH = Math.max(0, height - headerH - warnH);
+  // Fit-content: Grafana's innerHeight is 0 by design. Ignore it and lay out at
+  // unbounded height so cell size follows width (typically S_MAX) and contentHeight
+  // becomes the panel's natural height. The Auto Grid cell CSS enforces min/max.
+  const layoutHeight = fitContent ? Number.POSITIVE_INFINITY : bodyH;
+
+  const layout = useMemo(
+    () => computeLayout(model.root, options.levels, width, layoutHeight),
+    [model.root, options.levels, width, layoutHeight]
+  );
+  const viewportH = fitContent ? layout.contentHeight : bodyH;
 
   useLayoutEffect(() => {
     if (!scrollElement) {
@@ -154,12 +168,8 @@ export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) =>
       return () => observer.disconnect();
     }
     return undefined;
-  }, [scrollElement, width, bodyH, updateVisibleBounds]);
+  }, [scrollElement, width, viewportH, updateVisibleBounds]);
 
-  const layout = useMemo(
-    () => computeLayout(model.root, options.levels, width, bodyH),
-    [model.root, options.levels, width, bodyH]
-  );
   const selectedRefId = selected && model.refIds.includes(selected) ? selected : (model.refIds[0] ?? 'A');
   const selectedMetricInfo = model.metricInfos.find((info) => info.refId === selectedRefId);
 
@@ -178,10 +188,10 @@ export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) =>
         hoverCategoryValue: effectiveHover,
         theme,
         scrollTop,
-        viewportH: bodyH,
+        viewportH,
       });
     }
-  }, [layout, model, selectedRefId, displayMode, options, theme, scrollTop, bodyH, effectiveSelection, effectiveHover]);
+  }, [layout, model, selectedRefId, displayMode, options, theme, scrollTop, viewportH, effectiveSelection, effectiveHover]);
 
   // When panel data updates, discard the cache/error/loading state and advance the generation (cache is invalidated per panel via requestId).
   // Advancing the generation ensures that responses from stale in-flight requests (success/failure/finally) are reliably discarded by the guard downstream.
@@ -297,7 +307,7 @@ export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) =>
   }
 
   return (
-    <div style={{ width, height, overflow: 'hidden' }}>
+    <div style={{ width, height: fitContent ? 'auto' : height, overflow: 'hidden' }}>
       {showHeader && (
         <div
           ref={headerRef}
@@ -370,7 +380,7 @@ export const FleetGridPanel: React.FC<PanelProps<FleetGridOptions>> = (props) =>
         ref={setScrollRef}
         style={{
           width,
-          height: bodyH,
+          height: viewportH,
           position: 'relative',
           overflowY: layout.scrollable ? 'auto' : 'hidden',
           // For configurations that don't fit within the width even at S_MIN (e.g. too many columns), prevent clipping with horizontal scroll

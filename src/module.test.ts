@@ -1,4 +1,4 @@
-import { plugin } from './module';
+import { declareFitContentSupport, plugin } from './module';
 import { FleetGridOptions } from './types';
 
 // The migration handler and its gate are stored on the plugin by setMigrationHandler.
@@ -27,5 +27,17 @@ describe('categoryStyle migration', () => {
     expect(shouldMigrate({})).toBe(true);
     expect(shouldMigrate({ categoryStyle: 'strip' })).toBe(false);
     expect(shouldMigrate({ categoryStyle: 'border' })).toBe(false);
+  });
+});
+
+describe('declareFitContentSupport', () => {
+  it('is a no-op on hosts that lack setFitContentSupport', () => {
+    expect(() => declareFitContentSupport({})).not.toThrow();
+  });
+
+  it('calls setFitContentSupport when the host provides it', () => {
+    const setFitContentSupport = jest.fn();
+    declareFitContentSupport({ setFitContentSupport });
+    expect(setFitContentSupport).toHaveBeenCalledTimes(1);
   });
 });

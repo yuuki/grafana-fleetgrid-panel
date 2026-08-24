@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { FieldType, LoadingState, getDefaultTimeRange, toDataFrame } from '@grafana/data';
+import { S_MAX } from '../layout/layout';
 import { DEFAULT_LEVEL } from '../types';
 import { FleetGridPanel } from './FleetGridPanel';
 import { fetchDrilldownFrames } from '../drilldown/requery';
@@ -73,6 +74,23 @@ describe('FleetGridPanel', () => {
     p.height = 20;
     render(<FleetGridPanel {...p} />);
     expect(document.querySelector('canvas')!.parentElement).toHaveStyle({ height: '0px' });
+  });
+
+  it('sizes the scroll container to content when fitContent is set, even if height is 0', () => {
+    const p = makeProps([series('A', 'power', 'zone-a')]);
+    p.height = 0;
+    p.fitContent = true;
+    render(<FleetGridPanel {...p} />);
+    const scroll = document.querySelector('canvas')!.parentElement as HTMLElement;
+    expect(scroll).toHaveStyle({ height: `${S_MAX}px` });
+    expect(scroll.parentElement).toHaveStyle({ height: 'auto' });
+  });
+
+  it('does not stretch cells to fill a tall panel when fitContent is set', () => {
+    const p = makeProps([series('A', 'power', 'zone-a')]);
+    p.fitContent = true;
+    render(<FleetGridPanel {...p} />);
+    expect(document.querySelector('canvas')!.parentElement).toHaveStyle({ height: `${S_MAX}px` });
   });
 
   it('uses a measured wrapped header height when sizing the scroll container', () => {
