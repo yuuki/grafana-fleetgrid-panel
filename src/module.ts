@@ -124,6 +124,11 @@ export const plugin = new PanelPlugin<FleetGridOptions>(FleetGridPanel).useField
 // its radio to the stored value, so a legacy 'topBar' (e.g. in provisioned dashboards) would otherwise leave
 // the control unselected. Normalize 'topBar'/unset → 'strip' and carry 'border' over. shouldMigrate opts in
 // whenever the stored value isn't already a current one, so it runs even without a plugin version bump.
+//
+// Levitate currently flags this call as incompatible with @grafana/data 13.x because
+// PanelMigrationHandler was rewritten from an interface to a type alias. The runtime
+// signature is unchanged; the known false positive is listed in .levignore.js (see #42).
+// Do not drop this handler to "fix" CI.
 plugin.setMigrationHandler(
   (panel) => ({
     ...panel.options,

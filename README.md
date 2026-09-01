@@ -34,6 +34,8 @@ The example shows two zones and 200 nodes (100 per zone), with four GPU cells pe
 
 Coloring, units, and drilldown rely on Grafana's standard field config, so any data source that produces labeled numeric series can work, but the plugin is designed for Prometheus / VictoriaMetrics. The automated end-to-end tests run against Grafana's built-in TestData data source; verification against a live Prometheus / VictoriaMetrics instance — including the instant-query drilldown re-query — is still outstanding and recommended before production use.
 
+The Latest Grafana API compatibility check compares local `@grafana/*` types against the latest published versions. A known Levitate false positive on `PanelPlugin.setMigrationHandler` (interface → type alias in Grafana 13) is listed in `.levignore.js`; other incompatibilities still fail CI. Reproduce locally with `npm run compat`.
+
 ## Quick start
 
 ### 1. Add queries

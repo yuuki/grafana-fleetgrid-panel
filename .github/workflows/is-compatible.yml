@@ -1,11 +1,17 @@
 name: Latest Grafana API compatibility check
 on: [pull_request]
 
+# Levitate compares local @grafana/* types against the latest published versions.
+# Keep fail-if-incompatible: yes so real API breaks still block the PR.
+# Known type-only false positives belong in .levignore.js (see #42), not here.
+# Reproduce locally with `npm run compat`.
 jobs:
   compatibilitycheck:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # Sticky Levitate report on the PR when a real incompatibility remains.
+      pull-requests: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -33,5 +39,6 @@ jobs:
         uses: grafana/plugin-actions/is-compatible@is-compatible/v1.0.4
         with:
           module: ${{ steps.find-module-ts.outputs.modulets }}
-          comment-pr: 'no'
+          comment-pr: 'yes'
+          skip-comment-if-compatible: 'yes'
           fail-if-incompatible: 'yes'
