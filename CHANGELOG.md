@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.0 - 2026-11-03
+
+- Support Grafana Auto Grid fit-content so the panel can shrink to its grid.
+- Require Node.js 26 for development and CI, and update build and test dependencies.
+
 ## 0.3.1 - 2026-07-31
 
 - Redesign categorical decoration: replace the cycling theme palette with a fixed cool palette (blue/purple/cyan/magenta) that stays clear of the heatmap's warm magnitude colors, folding the 5th+ values into a single neutral "other" color.
