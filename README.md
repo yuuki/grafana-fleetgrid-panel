@@ -269,7 +269,7 @@ Restart Grafana, then add a panel and confirm **FleetGrid** appears in the visua
 
 ## Development
 
-**Prerequisites:** Node.js `>= 22` (see `.nvmrc`) and Docker (for `npm run server` and the e2e Grafana instance). Before the first `npm run e2e`, install the Playwright browser once with `npx playwright install chromium`.
+**Prerequisites:** Node.js `>= 26` (see `.nvmrc`) and Docker (for `npm run server` and the e2e Grafana instance). Before the first `npm run e2e`, install the Playwright browser once with `npx playwright install chromium`.
 
 ```bash
 npm install
