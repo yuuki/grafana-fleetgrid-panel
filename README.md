@@ -295,7 +295,12 @@ GRAFANA_VERSION=11.6.0 npm run server
 
 # End-to-end tests (Playwright, @grafana/plugin-e2e) — needs a running server
 npm run e2e
+
+# Cognitive / Cyclomatic complexity (needs the cccc binary, see below)
+cccc --table src
 ```
+
+Function complexity is measured with [cccc](https://github.com/moznion/cccc), and the `Complexity` workflow fails when any function exceeds the `max-cognitive` / `max-cyclomatic` thresholds in `cccc.toml`. To run it locally, download a binary from the [cccc releases](https://github.com/moznion/cccc/releases) or install it with `cargo install cccc-cli`.
 
 The build uses the webpack configuration provided in `.config/`. Data transformation (`src/data`), layout (`src/layout`), and hit testing (`src/render`) are pure functions verified directly with Jest; the canvas render layer is intentionally thin.
 

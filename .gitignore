@@ -51,3 +51,6 @@ ci/
 
 # Orchestration scratch (never commit)
 .superpowers/
+
+# cccc results cache (only written with --cache)
+.cccc.cache
