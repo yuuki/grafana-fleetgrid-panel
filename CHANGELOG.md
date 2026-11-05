@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1 - 2026-11-05
+
+- Update the transitive `browserslist`, `fast-uri`, `js-yaml`, `nanoid` and `source-map-js` dependencies to resolve the high severity advisories that failed release validation. v0.4.0 was tagged but never released, so this is the first release with the 0.4.0 changes below.
+
 ## 0.4.0 - 2026-11-05
 
 - Support Grafana Auto Grid fit-content so the panel can shrink to its grid.
