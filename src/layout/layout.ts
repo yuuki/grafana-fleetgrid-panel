@@ -53,6 +53,9 @@ interface Size {
   h: number;
 }
 
+// Places one child of the current node at (cx, cy) inside innerAvailW and returns its outer size.
+type ChildBox = (child: HierarchyNode, innerAvailW: number, cx: number, cy: number, emit: Out | null) => Size;
+
 export function normalizeGridColumns(value: number | undefined): number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 1) {
     return 1;
@@ -60,12 +63,7 @@ export function normalizeGridColumns(value: number | undefined): number {
   return Math.floor(value);
 }
 
-export function computeLayout(
-  root: HierarchyNode,
-  levels: LevelDef[],
-  width: number,
-  height: number
-): LayoutResult {
+export function computeLayout(root: HierarchyNode, levels: LevelDef[], width: number, height: number): LayoutResult {
   const measure = (s: number): Size => layoutNode(root, levels, s, width, 0, 0, null);
   // An unbounded height (Infinity) is the fit-content path: only width constrains cell
   // size, contentHeight becomes the panel's natural height, and the result is not
@@ -136,64 +134,112 @@ function layoutNode(
   };
 
   switch (childDef.layout) {
-    case 'vertical': {
-      let w = 0;
-      let h = 0;
-      for (const c of node.children) {
-        const size = childBox(c, availW, x, y + h, out);
-        w = Math.max(w, size.w);
-        h += size.h + gap;
-      }
-      return { w, h: Math.max(0, h - gap) };
-    }
-    case 'horizontal': {
-      let w = 0;
-      let h = 0;
-      for (const c of node.children) {
-        const size = childBox(c, Math.max(0, availW - w), x + w, y, out);
-        h = Math.max(h, size.h);
-        w += size.w + gap;
-      }
-      return { w: Math.max(0, w - gap), h };
-    }
-    case 'flow': {
-      let cx = 0;
-      let cy = 0;
-      let rowH = 0;
-      let maxW = 0;
-      for (const c of node.children) {
-        const m = childBox(c, availW, 0, 0, null);
-        if (cx > 0 && cx + m.w > availW) {
-          cx = 0;
-          cy += rowH + gap;
-          rowH = 0;
-        }
-        childBox(c, availW, x + cx, y + cy, out);
-        cx += m.w + gap;
-        rowH = Math.max(rowH, m.h);
-        maxW = Math.max(maxW, cx - gap);
-      }
-      return { w: maxW, h: cy + rowH };
-    }
-    case 'grid': {
-      const cols = normalizeGridColumns(childDef.gridColumns);
-      let cellW = 0;
-      let cellH = 0;
-      for (const c of node.children) {
-        const m = childBox(c, availW, 0, 0, null);
-        cellW = Math.max(cellW, m.w);
-        cellH = Math.max(cellH, m.h);
-      }
-      node.children.forEach((c, i) => {
-        const col = i % cols;
-        const row = Math.floor(i / cols);
-        childBox(c, availW, x + col * (cellW + gap), y + row * (cellH + gap), out);
-      });
-      const rows = Math.ceil(node.children.length / cols);
-      return {
-        w: node.children.length > 0 ? Math.min(cols, node.children.length) * (cellW + gap) - gap : 0,
-        h: rows > 0 ? rows * (cellH + gap) - gap : 0,
-      };
-    }
+    case 'vertical':
+      return layoutVertical(node.children, childBox, gap, availW, x, y, out);
+    case 'horizontal':
+      return layoutHorizontal(node.children, childBox, gap, availW, x, y, out);
+    case 'flow':
+      return layoutFlow(node.children, childBox, gap, availW, x, y, out);
+    case 'grid':
+      return layoutGrid(node.children, childDef.gridColumns, childBox, gap, availW, x, y, out);
   }
+}
+
+// The per-layout placers below take layoutNode's childBox closure and scalars positionally rather than
+// through a context object, so the hot layout pass allocates nothing beyond what it did inline.
+
+function layoutVertical(
+  children: HierarchyNode[],
+  childBox: ChildBox,
+  gap: number,
+  availW: number,
+  x: number,
+  y: number,
+  out: Out | null
+): Size {
+  let w = 0;
+  let h = 0;
+  for (const c of children) {
+    const size = childBox(c, availW, x, y + h, out);
+    w = Math.max(w, size.w);
+    h += size.h + gap;
+  }
+  return { w, h: Math.max(0, h - gap) };
+}
+
+function layoutHorizontal(
+  children: HierarchyNode[],
+  childBox: ChildBox,
+  gap: number,
+  availW: number,
+  x: number,
+  y: number,
+  out: Out | null
+): Size {
+  let w = 0;
+  let h = 0;
+  for (const c of children) {
+    const size = childBox(c, Math.max(0, availW - w), x + w, y, out);
+    h = Math.max(h, size.h);
+    w += size.w + gap;
+  }
+  return { w: Math.max(0, w - gap), h };
+}
+
+function layoutFlow(
+  children: HierarchyNode[],
+  childBox: ChildBox,
+  gap: number,
+  availW: number,
+  x: number,
+  y: number,
+  out: Out | null
+): Size {
+  let cx = 0;
+  let cy = 0;
+  let rowH = 0;
+  let maxW = 0;
+  for (const c of children) {
+    const m = childBox(c, availW, 0, 0, null);
+    if (cx > 0 && cx + m.w > availW) {
+      cx = 0;
+      cy += rowH + gap;
+      rowH = 0;
+    }
+    childBox(c, availW, x + cx, y + cy, out);
+    cx += m.w + gap;
+    rowH = Math.max(rowH, m.h);
+    maxW = Math.max(maxW, cx - gap);
+  }
+  return { w: maxW, h: cy + rowH };
+}
+
+function layoutGrid(
+  children: HierarchyNode[],
+  gridColumns: number | undefined,
+  childBox: ChildBox,
+  gap: number,
+  availW: number,
+  x: number,
+  y: number,
+  out: Out | null
+): Size {
+  const cols = normalizeGridColumns(gridColumns);
+  let cellW = 0;
+  let cellH = 0;
+  for (const c of children) {
+    const m = childBox(c, availW, 0, 0, null);
+    cellW = Math.max(cellW, m.w);
+    cellH = Math.max(cellH, m.h);
+  }
+  children.forEach((c, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    childBox(c, availW, x + col * (cellW + gap), y + row * (cellH + gap), out);
+  });
+  const rows = Math.ceil(children.length / cols);
+  return {
+    w: children.length > 0 ? Math.min(cols, children.length) * (cellW + gap) - gap : 0,
+    h: rows > 0 ? rows * (cellH + gap) - gap : 0,
+  };
 }
