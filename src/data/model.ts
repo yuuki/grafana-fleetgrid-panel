@@ -1,10 +1,10 @@
 import { DataFrame, GrafanaTheme2, getDisplayProcessor } from '@grafana/data';
-import { CellRangeInfo, FleetGridOptions, HierarchyNode } from '../types';
+import { CellModel, CellRangeInfo, FleetGridOptions, HierarchyNode, RangeOverride } from '../types';
 import { normalizeFrames } from './normalize';
 import { buildHierarchy } from './hierarchy';
 import { attachCells, collectRefIds } from './values';
 import { MetricInfo, buildMetricInfos, normalizeEffectiveRange } from './display';
-import { compileRangeOverrides, resolveCellRangeOverride } from './rangeOverrides';
+import { CompiledRangeOverride, compileRangeOverrides, resolveCellRangeOverride } from './rangeOverrides';
 import { DisplayRangeInfo, rangeSignature } from './cellRange';
 import { buildCategoryModel, CategoryModel } from './categories';
 
@@ -15,6 +15,89 @@ export interface PanelModel {
   refIds: string[];
   rangeInfosByRef: Map<string, DisplayRangeInfo[]>;
   category?: CategoryModel;
+}
+
+// Per-buildModel state shared while resolving override ranges: processors are cached per refId and
+// normalized range so cells that land on the same effective range reuse one display processor.
+interface OverrideRangeContext {
+  processorCache: Map<string, CellRangeInfo>;
+  theme: GrafanaTheme2;
+  timeZone: string;
+}
+
+// When an override pins only one endpoint, normalization keeps that endpoint and moves the other one.
+function preferredEndpoint(override: RangeOverride): 'min' | 'max' | undefined {
+  if (override.min !== undefined && override.max === undefined) {
+    return 'min';
+  }
+  if (override.max !== undefined && override.min === undefined) {
+    return 'max';
+  }
+  return undefined;
+}
+
+function resolveOverrideRange(
+  refId: string,
+  info: MetricInfo,
+  rule: CompiledRangeOverride,
+  ctx: OverrideRangeContext
+): CellRangeInfo {
+  const override = rule.override;
+  const minConfigured = override.min !== undefined || info.minConfigured;
+  const maxConfigured = override.max !== undefined || info.maxConfigured;
+  const normalized = normalizeEffectiveRange(
+    override.min ?? info.configuredMin ?? info.autoMin ?? info.effectiveMin,
+    override.max ?? info.configuredMax ?? info.autoMax ?? info.effectiveMax,
+    minConfigured,
+    maxConfigured,
+    preferredEndpoint(override)
+  );
+  const cacheKey = `${refId}\0${normalized.min}\0${normalized.max}`;
+  let cached = ctx.processorCache.get(cacheKey);
+  if (!cached) {
+    const delta = normalized.max - normalized.min;
+    const field = {
+      ...info.field,
+      config: { ...info.field.config, min: normalized.min, max: normalized.max },
+      state: { ...info.field.state, range: { min: normalized.min, max: normalized.max, delta } },
+    };
+    cached = {
+      effectiveMin: normalized.min,
+      effectiveMax: normalized.max,
+      minConfigured,
+      maxConfigured,
+      processor: getDisplayProcessor({ field, theme: ctx.theme, timeZone: ctx.timeZone }),
+      source: 'override',
+    };
+    ctx.processorCache.set(cacheKey, cached);
+  }
+  return {
+    ...cached,
+    source: 'override',
+    minConfigured,
+    maxConfigured,
+    matchedRuleIndex: rule.index,
+    matchers: override.matchers,
+  };
+}
+
+function setCellRange(cell: CellModel, refId: string, range: CellRangeInfo): void {
+  cell.ranges ??= new Map();
+  cell.ranges.set(refId, range);
+}
+
+// Count conflicting cells per refId, keeping up to 3 example paths for the warning.
+function recordConflict(
+  conflicts: Map<string, { count: number; paths: string[] }>,
+  refId: string,
+  path: string[]
+): void {
+  const conflict = conflicts.get(refId) ?? { count: 0, paths: [] };
+  conflict.count += 1;
+  if (conflict.paths.length < 3) {
+    conflict.paths.push(path.join(' / '));
+  }
+  conflicts.set(refId, conflict);
 }
 
 export function buildModel(
@@ -122,6 +205,7 @@ export function buildModel(
     });
   }
   const conflicts = new Map<string, { count: number; paths: string[] }>();
+  const overrideCtx: OverrideRangeContext = { processorCache, theme, timeZone };
   const attachRanges = (node: HierarchyNode) => {
     node.children.forEach(attachRanges);
     if (!node.cell) {
@@ -140,61 +224,14 @@ export function buildModel(
         const standard = standardByRef.get(refId)!;
         addRangeInfo(refId, standard);
         if (resolution.status === 'conflict') {
-          node.cell.ranges ??= new Map();
-          node.cell.ranges.set(refId, { ...standard, source: 'conflict' });
-          const conflict = conflicts.get(refId) ?? { count: 0, paths: [] };
-          conflict.count += 1;
-          if (conflict.paths.length < 3) {
-            conflict.paths.push(node.path.join(' / '));
-          }
-          conflicts.set(refId, conflict);
+          setCellRange(node.cell, refId, { ...standard, source: 'conflict' });
+          recordConflict(conflicts, refId, node.path);
         }
         continue;
       }
 
-      const override = resolution.rule.override;
-      const minConfigured = override.min !== undefined || info.minConfigured;
-      const maxConfigured = override.max !== undefined || info.maxConfigured;
-      const normalized = normalizeEffectiveRange(
-        override.min ?? info.configuredMin ?? info.autoMin ?? info.effectiveMin,
-        override.max ?? info.configuredMax ?? info.autoMax ?? info.effectiveMax,
-        minConfigured,
-        maxConfigured,
-        override.min !== undefined && override.max === undefined
-          ? 'min'
-          : override.max !== undefined && override.min === undefined
-            ? 'max'
-            : undefined
-      );
-      const cacheKey = `${refId}\0${normalized.min}\0${normalized.max}`;
-      let cached = processorCache.get(cacheKey);
-      if (!cached) {
-        const delta = normalized.max - normalized.min;
-        const field = {
-          ...info.field,
-          config: { ...info.field.config, min: normalized.min, max: normalized.max },
-          state: { ...info.field.state, range: { min: normalized.min, max: normalized.max, delta } },
-        };
-        cached = {
-          effectiveMin: normalized.min,
-          effectiveMax: normalized.max,
-          minConfigured,
-          maxConfigured,
-          processor: getDisplayProcessor({ field, theme, timeZone }),
-          source: 'override',
-        };
-        processorCache.set(cacheKey, cached);
-      }
-      const resolved: CellRangeInfo = {
-        ...cached,
-        source: 'override',
-        minConfigured,
-        maxConfigured,
-        matchedRuleIndex: resolution.rule.index,
-        matchers: override.matchers,
-      };
-      node.cell.ranges ??= new Map();
-      node.cell.ranges.set(refId, resolved);
+      const resolved = resolveOverrideRange(refId, info, resolution.rule, overrideCtx);
+      setCellRange(node.cell, refId, resolved);
       addRangeInfo(refId, resolved);
     }
   };
