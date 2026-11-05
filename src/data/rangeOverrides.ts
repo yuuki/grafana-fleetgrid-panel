@@ -1,4 +1,4 @@
-import { RangeOverride } from '../types';
+import { RangeMatcher, RangeOverride } from '../types';
 
 interface CompiledMatcher {
   label: string;
@@ -17,51 +17,67 @@ export type CellRangeOverrideResolution =
 
 const isFiniteEndpoint = (value: number | undefined): boolean => value === undefined || Number.isFinite(value);
 
+// A persisted rule that cannot be applied: wrong refId type, no matchers, or a missing / non-finite / inverted range.
+function isMalformedOverride(override: RangeOverride | undefined): boolean {
+  return (
+    !override ||
+    (override.refId !== undefined && typeof override.refId !== 'string') ||
+    !Array.isArray(override.matchers) ||
+    override.matchers.length === 0 ||
+    (override.min === undefined && override.max === undefined) ||
+    !isFiniteEndpoint(override.min) ||
+    !isFiniteEndpoint(override.max) ||
+    (override.min !== undefined && override.max !== undefined && override.min >= override.max)
+  );
+}
+
+function isMalformedMatcher(matcher: RangeMatcher | undefined): boolean {
+  return (
+    !matcher ||
+    typeof matcher.label !== 'string' ||
+    matcher.label.trim().length === 0 ||
+    typeof matcher.value !== 'string' ||
+    (matcher.operator !== 'exact' && matcher.operator !== 'regex')
+  );
+}
+
+// Compiles a well-formed matcher; returns null when its regex does not compile.
+function compileMatcher(matcher: RangeMatcher): CompiledMatcher | null {
+  if (matcher.operator === 'exact') {
+    return { label: matcher.label, matches: (value) => value === matcher.value };
+  }
+  try {
+    const regex = new RegExp(matcher.value);
+    return { label: matcher.label, matches: (value) => regex.test(value) };
+  } catch {
+    return null;
+  }
+}
+
+// Compiles every matcher of a rule; returns null as soon as one is malformed or has an invalid regex.
+function compileMatchers(matchers: RangeMatcher[]): CompiledMatcher[] | null {
+  const compiled: CompiledMatcher[] = [];
+  for (const matcher of matchers) {
+    const result = isMalformedMatcher(matcher) ? null : compileMatcher(matcher);
+    if (!result) {
+      return null;
+    }
+    compiled.push(result);
+  }
+  return compiled;
+}
+
 export function compileRangeOverrides(overrides: RangeOverride[] | undefined): CompiledRangeOverride[] {
   const compiled: CompiledRangeOverride[] = [];
   if (!Array.isArray(overrides)) {
     return compiled;
   }
   for (const [index, override] of overrides.entries()) {
-    if (
-      !override ||
-      (override.refId !== undefined && typeof override.refId !== 'string') ||
-      !Array.isArray(override.matchers) ||
-      override.matchers.length === 0 ||
-      (override.min === undefined && override.max === undefined) ||
-      !isFiniteEndpoint(override.min) ||
-      !isFiniteEndpoint(override.max) ||
-      (override.min !== undefined && override.max !== undefined && override.min >= override.max)
-    ) {
+    if (isMalformedOverride(override)) {
       continue;
     }
-
-    const matchers: CompiledMatcher[] = [];
-    let valid = true;
-    for (const matcher of override.matchers) {
-      if (
-        !matcher ||
-        typeof matcher.label !== 'string' ||
-        matcher.label.trim().length === 0 ||
-        typeof matcher.value !== 'string' ||
-        (matcher.operator !== 'exact' && matcher.operator !== 'regex')
-      ) {
-        valid = false;
-        break;
-      }
-      if (matcher.operator === 'exact') {
-        matchers.push({ label: matcher.label, matches: (value) => value === matcher.value });
-        continue;
-      }
-      try {
-        const regex = new RegExp(matcher.value);
-        matchers.push({ label: matcher.label, matches: (value) => regex.test(value) });
-      } catch {
-        valid = false;
-        break;
-      }
-    }
-    if (valid) {
+    const matchers = compileMatchers(override.matchers);
+    if (matchers) {
       compiled.push({ index, override, matchers });
     }
   }
