@@ -1,5 +1,5 @@
 import React from 'react';
-import { DataFrame, FieldType, SelectableValue, StandardEditorProps } from '@grafana/data';
+import { DataFrame, Field, FieldType, SelectableValue, StandardEditorProps } from '@grafana/data';
 import {
   Button,
   Combobox,
@@ -33,25 +33,32 @@ export function detectLabelKeys(frames: DataFrame[]): string[] {
   return [...keys];
 }
 
+// Adds the level's key for one raw value, skipping values its extract preset does not match.
+function addExtractedKey(found: Set<string>, raw: string, level: LevelDef): void {
+  const key = extractKey(raw, level);
+  if (key !== null) {
+    found.add(key);
+  }
+}
+
+// Collects keys from a series label named level.label, or from a table string column of that name.
+function collectFieldKeys(found: Set<string>, field: Field, table: boolean, level: LevelDef): void {
+  if (field.type === FieldType.number && field.labels && level.label in field.labels) {
+    addExtractedKey(found, field.labels[level.label], level);
+  }
+  if (table && field.type === FieldType.string && field.name === level.label) {
+    for (const v of field.values) {
+      addExtractedKey(found, String(v), level);
+    }
+  }
+}
+
 export function previewLevel(frames: DataFrame[], level: LevelDef): { count: number; samples: string[] } {
   const found = new Set<string>();
   for (const frame of frames) {
     const table = isTableFrame(frame);
     for (const field of frame.fields) {
-      if (field.type === FieldType.number && field.labels && level.label in field.labels) {
-        const key = extractKey(field.labels[level.label], level);
-        if (key !== null) {
-          found.add(key);
-        }
-      }
-      if (table && field.type === FieldType.string && field.name === level.label) {
-        for (const v of field.values) {
-          const key = extractKey(String(v), level);
-          if (key !== null) {
-            found.add(key);
-          }
-        }
-      }
+      collectFieldKeys(found, field, table, level);
     }
   }
   const sorted = [...found].sort(naturalCompare);
