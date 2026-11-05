@@ -75,13 +75,8 @@ function hasInvalidRegex(matcher: RangeMatcherView): boolean {
   }
 }
 
-export function validateRangeOverride(value: unknown): string[] {
-  const errors: string[] = [];
-  const rule = isRecord(value) ? value : {};
-  const matchers = normalizedMatchers(value);
-  if (rule.refId !== undefined && typeof rule.refId !== 'string') {
-    errors.push('Metric refId must be a string.');
-  }
+// Appends label-condition errors in matcher order (an empty list, then per matcher: label, operator, regex).
+function pushMatcherErrors(matchers: RangeMatcherView[], errors: string[]): void {
   if (matchers.length === 0) {
     errors.push('Add at least one label condition.');
   }
@@ -96,7 +91,10 @@ export function validateRangeOverride(value: unknown): string[] {
       errors.push('Invalid regular expression.');
     }
   }
+}
 
+// Appends min/max errors: missing range, non-finite min, non-finite max, then inverted range.
+function pushRangeErrors(rule: Record<string, unknown>, errors: string[]): void {
   const hasMin = rule.min !== undefined;
   const hasMax = rule.max !== undefined;
   if (!hasMin && !hasMax) {
@@ -117,6 +115,17 @@ export function validateRangeOverride(value: unknown): string[] {
   ) {
     errors.push('Min must be less than max.');
   }
+}
+
+export function validateRangeOverride(value: unknown): string[] {
+  const errors: string[] = [];
+  const rule = isRecord(value) ? value : {};
+  const matchers = normalizedMatchers(value);
+  if (rule.refId !== undefined && typeof rule.refId !== 'string') {
+    errors.push('Metric refId must be a string.');
+  }
+  pushMatcherErrors(matchers, errors);
+  pushRangeErrors(rule, errors);
   return [...new Set(errors)];
 }
 
