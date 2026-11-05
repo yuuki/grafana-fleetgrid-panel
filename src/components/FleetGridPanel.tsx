@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { DataFrame, Field, LinkModel, PanelProps } from '@grafana/data';
+import { DataFrame, Field, GrafanaTheme2, LinkModel, PanelProps } from '@grafana/data';
 import { PanelDataErrorView } from '@grafana/runtime';
 import { RadioButtonGroup, useTheme2 } from '@grafana/ui';
 import { CellModel, FleetGridOptions, normalizeCategoryStyle } from '../types';
-import { buildModel } from '../data/model';
-import { computeLayout } from '../layout/layout';
+import { buildModel, PanelModel } from '../data/model';
+import { MetricInfo } from '../data/display';
+import { CategoryModel } from '../data/categories';
+import { computeLayout, LayoutResult } from '../layout/layout';
 import { renderCanvas } from '../render/renderer';
 import { hitTest } from '../render/hitTest';
 import { splitRects } from '../render/split';
@@ -40,6 +42,155 @@ const sameVisibleBounds = (a: VisibleBounds, b: VisibleBounds): boolean =>
 // fitContent is on PanelProps only after the Auto Grid API lands in @grafana/data.
 // Older hosts omit it; treat missing as false so the fixed-height path stays default.
 type FleetGridPanelProps = PanelProps<FleetGridOptions> & { fitContent?: boolean };
+
+// Honor a hover only while the legend is visible and the value still exists in the current category model,
+// so a stale hover (chip unmounted by hiding the legend, a category-model change, or a data update that
+// never fired mouseleave/blur) can't leave a highlight stuck on.
+function resolveEffectiveHover(
+  legendVisible: boolean,
+  hoverCategory: string | undefined,
+  category: CategoryModel | undefined
+): string | undefined {
+  if (!legendVisible || !hoverCategory) {
+    return undefined;
+  }
+  return category?.colorByValue.has(hoverCategory) ? hoverCategory : undefined;
+}
+
+// Keep the user's selection while it is still one of the panel's refIds; otherwise fall back to the first refId.
+function resolveSelectedRefId(selected: string | undefined, refIds: string[]): string {
+  if (selected && refIds.includes(selected)) {
+    return selected;
+  }
+  return refIds[0] ?? 'A';
+}
+
+function scrollContainerStyle(width: number, viewportH: number, layout: LayoutResult): React.CSSProperties {
+  return {
+    width,
+    height: viewportH,
+    position: 'relative',
+    overflowY: layout.scrollable ? 'auto' : 'hidden',
+    // For configurations that don't fit within the width even at S_MIN (e.g. too many columns), prevent clipping with horizontal scroll
+    overflowX: layout.contentWidth > width ? 'auto' : 'hidden',
+  };
+}
+
+// Shown instead of the canvas when no cell qualifies for rendering: the warnings if any, otherwise a generic data error.
+const NoCellsMessage: React.FC<{ warnings: string[] }> = ({ warnings }) => (
+  <div role="alert" style={{ padding: 8 }}>
+    {warnings.length > 0 ? (
+      warnings.map((w) => (
+        <p key={w} style={{ margin: '2px 0' }}>
+          {w}
+        </p>
+      ))
+    ) : (
+      <p>
+        Could not build numeric cells from the query results. Check that your queries return numeric values and that the
+        hierarchy levels match your labels.
+      </p>
+    )}
+  </div>
+);
+
+// Always show warnings (e.g. partial exclusion) even when cells render successfully. Keep it to a single-line banner so it isn't intrusive.
+const WarningBanner: React.FC<{ warnings: string[]; theme: GrafanaTheme2 }> = ({ warnings, theme }) => {
+  if (warnings.length === 0) {
+    return null;
+  }
+  return (
+    <div
+      role="alert"
+      style={{
+        height: WARN_H,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        overflow: 'hidden',
+        padding: '0 6px',
+        fontSize: 11,
+        color: theme.colors.warning.text,
+        background: theme.colors.warning.transparent,
+      }}
+    >
+      {warnings.map((w) => (
+        <span key={w} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {w}
+        </span>
+      ))}
+    </div>
+  );
+};
+
+interface PanelHeaderProps {
+  headerRef: React.RefObject<HTMLDivElement>;
+  model: PanelModel;
+  isSplit: boolean;
+  selectedRefId: string;
+  selectedMetricInfo: MetricInfo | undefined;
+  onSelectRefId: (refId: string) => void;
+  width: number;
+  categoryLegendVisible: boolean;
+  effectiveSelection: string[];
+  setSelectedCategories: React.Dispatch<React.SetStateAction<string[]>>;
+  onHoverCategory: (value: string | undefined) => void;
+}
+
+const PanelHeader: React.FC<PanelHeaderProps> = ({
+  headerRef,
+  model,
+  isSplit,
+  selectedRefId,
+  selectedMetricInfo,
+  onSelectRefId,
+  width,
+  categoryLegendVisible,
+  effectiveSelection,
+  setSelectedCategories,
+  onHoverCategory,
+}) => (
+  <div ref={headerRef} style={{ minHeight: HEADER_H, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+    {isSplit ? (
+      // In split mode, each position entry carries its own metric range.
+      <SplitLegend metricInfos={model.metricInfos} rangeInfosByRef={model.rangeInfosByRef} />
+    ) : (
+      <>
+        {model.refIds.length > 1 && (
+          <RadioButtonGroup
+            size="sm"
+            // Choices are based on refId. A 0-series query has no metricInfo, so it falls back to using the refId as the display name
+            options={model.refIds.map((refId) => ({
+              value: refId,
+              label: model.metricInfos.find((m) => m.refId === refId)?.name ?? refId,
+            }))}
+            value={selectedRefId}
+            onChange={onSelectRefId}
+          />
+        )}
+        <RangeLegend
+          metricInfo={selectedMetricInfo}
+          metricName={selectedRefId}
+          width={width}
+          rangeInfos={selectedMetricInfo ? model.rangeInfosByRef.get(selectedMetricInfo.refId) : undefined}
+        />
+      </>
+    )}
+    {categoryLegendVisible && model.category && (
+      <CategoryLegend
+        category={model.category}
+        selectedValues={effectiveSelection}
+        onToggle={(value) =>
+          setSelectedCategories((current) =>
+            current.includes(value) ? current.filter((selectedValue) => selectedValue !== value) : [...current, value]
+          )
+        }
+        onClear={() => setSelectedCategories([])}
+        onHover={onHoverCategory}
+      />
+    )}
+  </div>
+);
 
 export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
   const { data, width, height, options, timeZone, fitContent } = props;
@@ -94,13 +245,7 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
   );
   // The category legend is the only source of hover, so hover is meaningful only while it is shown.
   const categoryLegendVisible = !!model.category && options.showCategoryLegend !== false;
-  // Honor a hover only while the legend is visible and the value still exists in the current category model,
-  // so a stale hover (chip unmounted by hiding the legend, a category-model change, or a data update that
-  // never fired mouseleave/blur) can't leave a highlight stuck on.
-  const effectiveHover =
-    categoryLegendVisible && hoverCategory && (model.category?.colorByValue.has(hoverCategory) ?? false)
-      ? hoverCategory
-      : undefined;
+  const effectiveHover = resolveEffectiveHover(categoryLegendVisible, hoverCategory, model.category);
   useEffect(() => {
     // The selection/hover are view-only state and must be cleared when the category meaning changes.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -170,7 +315,7 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
     return undefined;
   }, [scrollElement, width, viewportH, updateVisibleBounds]);
 
-  const selectedRefId = selected && model.refIds.includes(selected) ? selected : (model.refIds[0] ?? 'A');
+  const selectedRefId = resolveSelectedRefId(selected, model.refIds);
   const selectedMetricInfo = model.metricInfos.find((info) => info.refId === selectedRefId);
 
   useEffect(() => {
@@ -191,7 +336,18 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
         viewportH,
       });
     }
-  }, [layout, model, selectedRefId, displayMode, options, theme, scrollTop, viewportH, effectiveSelection, effectiveHover]);
+  }, [
+    layout,
+    model,
+    selectedRefId,
+    displayMode,
+    options,
+    theme,
+    scrollTop,
+    viewportH,
+    effectiveSelection,
+    effectiveHover,
+  ]);
 
   // When panel data updates, discard the cache/error/loading state and advance the generation (cache is invalidated per panel via requestId).
   // Advancing the generation ensures that responses from stale in-flight requests (success/failure/finally) are reliably discarded by the guard downstream.
@@ -288,104 +444,30 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
   // When no cells qualify for rendering at all, don't silently show an empty canvas — state the reason explicitly.
   // If there's a warning, show it; otherwise show a data error to the effect of "unable to build numeric cells" (spec: never silently show an empty display).
   if (layout.cells.length === 0) {
-    return (
-      <div role="alert" style={{ padding: 8 }}>
-        {model.warnings.length > 0 ? (
-          model.warnings.map((w) => (
-            <p key={w} style={{ margin: '2px 0' }}>
-              {w}
-            </p>
-          ))
-        ) : (
-          <p>
-            Could not build numeric cells from the query results. Check that your queries return numeric values and that
-            the hierarchy levels match your labels.
-          </p>
-        )}
-      </div>
-    );
+    return <NoCellsMessage warnings={model.warnings} />;
   }
 
   return (
     <div style={{ width, height: fitContent ? 'auto' : height, overflow: 'hidden' }}>
       {showHeader && (
-        <div
-          ref={headerRef}
-          style={{ minHeight: HEADER_H, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}
-        >
-          {isSplit ? (
-            // In split mode, each position entry carries its own metric range.
-            <SplitLegend metricInfos={model.metricInfos} rangeInfosByRef={model.rangeInfosByRef} />
-          ) : (
-            <>
-              {model.refIds.length > 1 && (
-                <RadioButtonGroup
-                  size="sm"
-                  // Choices are based on refId. A 0-series query has no metricInfo, so it falls back to using the refId as the display name
-                  options={model.refIds.map((refId) => ({
-                    value: refId,
-                    label: model.metricInfos.find((m) => m.refId === refId)?.name ?? refId,
-                  }))}
-                  value={selectedRefId}
-                  onChange={setSelected}
-                />
-              )}
-              <RangeLegend
-                metricInfo={selectedMetricInfo}
-                metricName={selectedRefId}
-                width={width}
-                rangeInfos={selectedMetricInfo ? model.rangeInfosByRef.get(selectedMetricInfo.refId) : undefined}
-              />
-            </>
-          )}
-          {categoryLegendVisible && model.category && (
-            <CategoryLegend
-              category={model.category}
-              selectedValues={effectiveSelection}
-              onToggle={(value) =>
-                setSelectedCategories((current) =>
-                  current.includes(value) ? current.filter((selectedValue) => selectedValue !== value) : [...current, value]
-                )
-              }
-              onClear={() => setSelectedCategories([])}
-              onHover={setHoverCategory}
-            />
-          )}
-        </div>
+        <PanelHeader
+          headerRef={headerRef}
+          model={model}
+          isSplit={isSplit}
+          selectedRefId={selectedRefId}
+          selectedMetricInfo={selectedMetricInfo}
+          onSelectRefId={setSelected}
+          width={width}
+          categoryLegendVisible={categoryLegendVisible}
+          effectiveSelection={effectiveSelection}
+          setSelectedCategories={setSelectedCategories}
+          onHoverCategory={setHoverCategory}
+        />
       )}
-      {model.warnings.length > 0 && (
-        // Always show warnings (e.g. partial exclusion) even when cells render successfully. Keep it to a single-line banner so it isn't intrusive.
-        <div
-          role="alert"
-          style={{
-            height: WARN_H,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            overflow: 'hidden',
-            padding: '0 6px',
-            fontSize: 11,
-            color: theme.colors.warning.text,
-            background: theme.colors.warning.transparent,
-          }}
-        >
-          {model.warnings.map((w) => (
-            <span key={w} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {w}
-            </span>
-          ))}
-        </div>
-      )}
+      <WarningBanner warnings={model.warnings} theme={theme} />
       <div
         ref={setScrollRef}
-        style={{
-          width,
-          height: viewportH,
-          position: 'relative',
-          overflowY: layout.scrollable ? 'auto' : 'hidden',
-          // For configurations that don't fit within the width even at S_MIN (e.g. too many columns), prevent clipping with horizontal scroll
-          overflowX: layout.contentWidth > width ? 'auto' : 'hidden',
-        }}
+        style={scrollContainerStyle(width, viewportH, layout)}
         onScroll={(e) => {
           setScrollTop(e.currentTarget.scrollTop);
           // Close it because scrolling would make the held coordinates diverge from reality
