@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0 - 2026-11-03
+## 0.4.0 - 2026-11-05
 
 - Support Grafana Auto Grid fit-content so the panel can shrink to its grid.
 - Require Node.js 26 for development and CI, and update build and test dependencies.
@@ -11,17 +11,11 @@
 - Replace the `Top bar` category style with a default `Bottom strip` (band on the cell's lower edge) and reshape `Outline` (renamed from `Border`) to frame each cell with a background gap so the color no longer bleeds into the fill. A migration rewrites the legacy `topBar` value to `Bottom strip` so provisioned dashboards keep a selected style. Decoration, highlight rings, and split-cell tiles are drawn on device-pixel boundaries so they stay crisp at any display scaling, and their thickness shrinks on small or heavily split cells so every metric tile keeps a visible sliver of fill.
 - Highlight categorical cells on legend hover in addition to click, ringing matching cells in the category color for clearer double-encoding alongside the dim.
 
-## 0.5.0 - 2026-07-24
-
-- Add interactive categorical legend selection to highlight matching cells and dim the rest.
-
-## 0.4.0 - 2026-07-24
-
-- Add categorical cell decoration and a legend for label values such as Slurm partitions.
-
-## 0.3.0 - 2026-07-24
+## 0.3.0 - 2026-07-27
 
 - Add configurable extra tooltip labels, such as Slurm's `partition`, with distinct values collected across each cell.
+- Add categorical cell decoration and a legend for label values such as Slurm partitions.
+- Add interactive categorical legend selection to highlight matching cells and dim the rest.
 
 ## 0.2.4 - 2026-07-23
 
