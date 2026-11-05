@@ -14,5 +14,10 @@ module.exports = {
     // the call shape is unchanged. Grafana staff recommended ignoring it:
     // https://community.grafana.com/t/compatibility-check-failure/163073
     /PanelPlugin\.setMigrationHandler/,
+    // Grafana 13.3 added a second type parameter with a default to
+    // SetFieldConfigOptionsArgs (TContextOptions = unknown), so Levitate
+    // reports useFieldConfig's parameter type as changed. It is type-only:
+    // this plugin calls useFieldConfig() with no arguments.
+    /PanelPlugin\.useFieldConfig/,
   ],
 };

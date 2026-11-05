@@ -2,7 +2,7 @@
  * Contract test for the Levitate ignore list.
  * The GitHub Action runs `npx @grafana/levitate is-compatible` from the repo
  * root, so `.levignore.js` must stay there and keep ignoring only the known
- * setMigrationHandler false positive.
+ * type-only false positives (setMigrationHandler, useFieldConfig).
  */
 const ignore = require('../.levignore.js') as {
   changes?: Array<RegExp | string>;
@@ -19,10 +19,16 @@ describe('.levignore.js', () => {
     expect(matches(ignore.changes, 'PanelPlugin.setMigrationHandler')).toBe(true);
   });
 
+  it('ignores the Grafana 13.3 type-only change on PanelPlugin.useFieldConfig', () => {
+    expect(matches(ignore.changes, 'PanelPlugin.useFieldConfig')).toBe(true);
+  });
+
   it('does not ignore unrelated Grafana APIs', () => {
     expect(matches(ignore.changes, 'PanelPlugin.setPanelOptions')).toBe(false);
-    expect(matches(ignore.changes, 'PanelPlugin.useFieldConfig')).toBe(false);
+    expect(matches(ignore.changes, 'PanelPlugin.setNoPadding')).toBe(false);
     expect(matches(ignore.removals, 'PanelPlugin.setMigrationHandler')).toBe(false);
+    expect(matches(ignore.removals, 'PanelPlugin.useFieldConfig')).toBe(false);
     expect(matches(ignore.additions, 'PanelPlugin.setMigrationHandler')).toBe(false);
+    expect(matches(ignore.additions, 'PanelPlugin.useFieldConfig')).toBe(false);
   });
 });
