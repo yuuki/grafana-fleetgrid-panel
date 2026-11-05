@@ -1,0 +1,72 @@
+{
+  "repository": "yuuki/grafana-fleetgrid-panel/complexity",
+  "ref": "refs/heads/main",
+  "commit": "40a78e8633109fb03099a2c395b27c4a72c00d70",
+  "base_ref": "refs/heads/main",
+  "timestamp": "2026-11-05T11:34:36.540884529Z",
+  "custom_metrics": [
+    {
+      "key": "code_complexity",
+      "name": "Code Complexity (src)",
+      "metadata": [
+        {
+          "key": "paths",
+          "name": "Analyzed paths",
+          "value": "src"
+        },
+        {
+          "key": "cccc_version",
+          "name": "cccc version",
+          "value": "v1.8.6"
+        }
+      ],
+      "metrics": [
+        {
+          "key": "function_count",
+          "name": "Function count",
+          "value": 375
+        },
+        {
+          "key": "cognitive_sum",
+          "name": "Cognitive: total",
+          "value": 725
+        },
+        {
+          "key": "cognitive_max",
+          "name": "Cognitive: max",
+          "value": 19
+        },
+        {
+          "key": "cognitive_median",
+          "name": "Cognitive: median",
+          "value": 1
+        },
+        {
+          "key": "cognitive_p90",
+          "name": "Cognitive: p90",
+          "value": 5
+        },
+        {
+          "key": "cyclomatic_sum",
+          "name": "Cyclomatic: total",
+          "value": 1099
+        },
+        {
+          "key": "cyclomatic_max",
+          "name": "Cyclomatic: max",
+          "value": 23
+        },
+        {
+          "key": "cyclomatic_median",
+          "name": "Cyclomatic: median",
+          "value": 2
+        },
+        {
+          "key": "cyclomatic_p90",
+          "name": "Cyclomatic: p90",
+          "value": 6
+        }
+      ]
+    }
+  ]
+}
