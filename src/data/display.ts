@@ -98,93 +98,123 @@ export interface MetricInfo {
   frame: DataFrame;
 }
 
+interface NumericFieldRef {
+  field: Field;
+  frame: DataFrame;
+}
+
+function groupFramesByRef(frames: DataFrame[]): Map<string, DataFrame[]> {
+  const byRef = new Map<string, DataFrame[]>();
+  for (const f of frames) {
+    const refId = f.refId ?? 'A';
+    byRef.set(refId, [...(byRef.get(refId) ?? []), f]);
+  }
+  return byRef;
+}
+
+function firstNumericField(group: DataFrame[]): NumericFieldRef | undefined {
+  return group
+    .flatMap((f) => f.fields.map((field) => ({ field, frame: f })))
+    .find(({ field }) => field.type === FieldType.number);
+}
+
+// Min/max over every finite value of the group's numeric fields (+Infinity/-Infinity when there is none).
+function scanNumericRange(group: DataFrame[]): EffectiveRange {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (const f of group) {
+    for (const field of f.fields) {
+      if (field.type !== FieldType.number) {
+        continue;
+      }
+      for (const v of field.values) {
+        if (typeof v !== 'number' || !Number.isFinite(v)) {
+          continue;
+        }
+        min = Math.min(min, v);
+        max = Math.max(max, v);
+      }
+    }
+  }
+  return { min, max };
+}
+
+// Per-refId min/max: prefer rangeByRef derived from cell values, and fall back to scanning frames if unavailable (explicit config always takes precedence)
+function autoRange(group: DataFrame[], preset: { min: number; max: number } | undefined): EffectiveRange {
+  const hasFinitePreset = preset && Number.isFinite(preset.min) && Number.isFinite(preset.max);
+  let { min, max } = hasFinitePreset ? preset : scanNumericRange(group);
+  if (!Number.isFinite(min)) {
+    min = 0;
+    max = 1;
+  }
+  if (min === max) {
+    [min, max] = expandRange(min, 'up');
+  }
+  return { min, max };
+}
+
+function buildMetricInfo(
+  refId: string,
+  group: DataFrame[],
+  firstNumeric: NumericFieldRef,
+  auto: EffectiveRange,
+  theme: GrafanaTheme2,
+  timeZone: string
+): MetricInfo {
+  const { min, max } = auto;
+  const minConfigured = Number.isFinite(firstNumeric.field.config.min);
+  const maxConfigured = Number.isFinite(firstNumeric.field.config.max);
+  const config = { ...firstNumeric.field.config };
+  const normalized = normalizeEffectiveRange(
+    minConfigured ? (config.min as number) : min,
+    maxConfigured ? (config.max as number) : max,
+    minConfigured,
+    maxConfigured
+  );
+  const effMin = normalized.min;
+  const effMax = normalized.max;
+  const delta = effMax - effMin;
+  config.min = effMin;
+  config.max = effMax;
+  // The display processor prioritizes field.state.range over config, so keep both in sync
+  const field: Field = {
+    ...firstNumeric.field,
+    config,
+    state: { ...firstNumeric.field.state, range: { min: effMin, max: effMax, delta } },
+  };
+  const processor = getDisplayProcessor({ field, theme, timeZone });
+
+  return {
+    refId,
+    name: group[0].name ?? refId,
+    autoMin: min,
+    autoMax: max,
+    configuredMin: minConfigured ? (firstNumeric.field.config.min as number) : undefined,
+    configuredMax: maxConfigured ? (firstNumeric.field.config.max as number) : undefined,
+    effectiveMin: effMin,
+    effectiveMax: effMax,
+    minConfigured,
+    maxConfigured,
+    processor,
+    field,
+    frame: firstNumeric.frame,
+  };
+}
+
 export function buildMetricInfos(
   frames: DataFrame[],
   theme: GrafanaTheme2,
   timeZone: string,
   rangeByRef?: Map<string, { min: number; max: number }>
 ): MetricInfo[] {
-  const byRef = new Map<string, DataFrame[]>();
-  for (const f of frames) {
-    const refId = f.refId ?? 'A';
-    byRef.set(refId, [...(byRef.get(refId) ?? []), f]);
-  }
-
   const infos: MetricInfo[] = [];
-  for (const [refId, group] of byRef) {
-    const firstNumeric = group
-      .flatMap((f) => f.fields.map((field) => ({ field, frame: f })))
-      .find(({ field }) => field.type === FieldType.number);
+  for (const [refId, group] of groupFramesByRef(frames)) {
+    const firstNumeric = firstNumericField(group);
     if (!firstNumeric) {
       continue;
     }
-
-    // Per-refId min/max: prefer rangeByRef derived from cell values, and fall back to scanning frames if unavailable (explicit config always takes precedence)
-    const preset = rangeByRef?.get(refId);
-    const hasFinitePreset = preset && Number.isFinite(preset.min) && Number.isFinite(preset.max);
-    let min = hasFinitePreset ? preset.min : Number.POSITIVE_INFINITY;
-    let max = hasFinitePreset ? preset.max : Number.NEGATIVE_INFINITY;
-    if (!hasFinitePreset) {
-      for (const f of group) {
-        for (const field of f.fields) {
-          if (field.type !== FieldType.number) {
-            continue;
-          }
-          for (const v of field.values) {
-            if (typeof v !== 'number' || !Number.isFinite(v)) {
-              continue;
-            }
-            min = Math.min(min, v);
-            max = Math.max(max, v);
-          }
-        }
-      }
-    }
-    if (!Number.isFinite(min)) {
-      min = 0;
-      max = 1;
-    }
-    if (min === max) {
-      [min, max] = expandRange(min, 'up');
-    }
-
-    const minConfigured = Number.isFinite(firstNumeric.field.config.min);
-    const maxConfigured = Number.isFinite(firstNumeric.field.config.max);
-    const config = { ...firstNumeric.field.config };
-    const normalized = normalizeEffectiveRange(
-      minConfigured ? (config.min as number) : min,
-      maxConfigured ? (config.max as number) : max,
-      minConfigured,
-      maxConfigured
-    );
-    const effMin = normalized.min;
-    const effMax = normalized.max;
-    const delta = effMax - effMin;
-    config.min = effMin;
-    config.max = effMax;
-    // The display processor prioritizes field.state.range over config, so keep both in sync
-    const field: Field = {
-      ...firstNumeric.field,
-      config,
-      state: { ...firstNumeric.field.state, range: { min: effMin, max: effMax, delta } },
-    };
-    const processor = getDisplayProcessor({ field, theme, timeZone });
-
-    infos.push({
-      refId,
-      name: group[0].name ?? refId,
-      autoMin: min,
-      autoMax: max,
-      configuredMin: minConfigured ? (firstNumeric.field.config.min as number) : undefined,
-      configuredMax: maxConfigured ? (firstNumeric.field.config.max as number) : undefined,
-      effectiveMin: effMin,
-      effectiveMax: effMax,
-      minConfigured,
-      maxConfigured,
-      processor,
-      field,
-      frame: firstNumeric.frame,
-    });
+    const auto = autoRange(group, rangeByRef?.get(refId));
+    infos.push(buildMetricInfo(refId, group, firstNumeric, auto, theme, timeZone));
   }
   return infos;
 }

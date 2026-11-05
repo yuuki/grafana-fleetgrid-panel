@@ -156,6 +156,49 @@ function dedupeLinks(links: Array<LinkModel<Field>>): Array<LinkModel<Field>> {
   return out;
 }
 
+// Series format: pass calculatedValue since it's a reduced value (Grafana's contract).
+function pushSeriesLinks(
+  out: Array<LinkModel<Field>>,
+  seriesFields: Field[],
+  calculatedValue: DisplayValue | undefined
+): void {
+  for (const field of seriesFields) {
+    if (field.getLinks) {
+      out.push(...field.getLinks({ calculatedValue }));
+    }
+  }
+}
+
+// A row matches when, for some label set, every required label column exists and its value matches (a missing column is a mismatch).
+function rowMatchesAnySet(stringFields: Field[], row: number, sets: Array<Record<string, string>>): boolean {
+  return sets.some((set) =>
+    Object.entries(set).every(([k, v]) => {
+      const col = stringFields.find((f) => f.name === k);
+      return col !== undefined && String(col.values[row]) === v;
+    })
+  );
+}
+
+// Table format: target every row where all required label columns exist and their values match (a missing column is a mismatch).
+// Don't stop at the first matching row — collect links from every matching row (duplicates are collapsed by the trailing dedupe).
+function pushTableLinks(out: Array<LinkModel<Field>>, frame: DataFrame, sets: Array<Record<string, string>>): void {
+  const stringFields = frame.fields.filter((f) => f.type === FieldType.string);
+  if (stringFields.length === 0) {
+    return;
+  }
+  const numberFields = frame.fields.filter((f) => f.type === FieldType.number);
+  for (let row = 0; row < frame.length; row++) {
+    if (!rowMatchesAnySet(stringFields, row, sets)) {
+      continue;
+    }
+    for (const vf of numberFields) {
+      if (vf.getLinks) {
+        out.push(...vf.getLinks({ valueRowIndex: row }));
+      }
+    }
+  }
+}
+
 export function getCellLinks(
   frames: DataFrame[],
   refId: string,
@@ -169,37 +212,12 @@ export function getCellLinks(
       continue;
     }
     // Series format: target every numeric field whose labels match (a wide frame has multiple series).
-    // Pass calculatedValue since it's a reduced value (Grafana's contract).
+    // A frame without any matching series field falls back to the table format.
     const seriesFields = frame.fields.filter((f) => f.type === FieldType.number && matchesAnySet(f.labels, sets));
     if (seriesFields.length > 0) {
-      for (const field of seriesFields) {
-        if (field.getLinks) {
-          out.push(...field.getLinks({ calculatedValue }));
-        }
-      }
-      continue;
-    }
-    // Table format: target every row where all required label columns exist and their values match (a missing column is a mismatch).
-    // Don't stop at the first matching row — collect links from every matching row (duplicates are collapsed by the trailing dedupe).
-    const stringFields = frame.fields.filter((f) => f.type === FieldType.string);
-    if (stringFields.length > 0) {
-      const numberFields = frame.fields.filter((f) => f.type === FieldType.number);
-      for (let row = 0; row < frame.length; row++) {
-        const ok = sets.some((set) =>
-          Object.entries(set).every(([k, v]) => {
-            const col = stringFields.find((f) => f.name === k);
-            return col !== undefined && String(col.values[row]) === v;
-          })
-        );
-        if (!ok) {
-          continue;
-        }
-        for (const vf of numberFields) {
-          if (vf.getLinks) {
-            out.push(...vf.getLinks({ valueRowIndex: row }));
-          }
-        }
-      }
+      pushSeriesLinks(out, seriesFields, calculatedValue);
+    } else {
+      pushTableLinks(out, frame, sets);
     }
   }
   // Prevents a semantically single link from being duplicated per series and either firing repeatedly on immediate execution or flooding the menu with duplicate keys
