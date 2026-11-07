@@ -7,19 +7,20 @@ on:
     tags:
       - 'v*' # Run workflow on version tags, e.g. v1.0.0.
 
-permissions: read-all
+permissions: {}
 
 jobs:
   release:
     permissions:
-      contents: write
+      contents: write # create the GitHub release and upload the plugin archive
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: grafana/plugin-actions/build-plugin@build-plugin/v1.2.1
+      - uses: grafana/plugin-actions/build-plugin@b05ed88ddca828d4700149aeacab32fcaf10caa0 # build-plugin/v1.2.1
         # Uncomment to enable plugin signing
         # (For more info on how to generate the access policy token see https://grafana.com/developers/plugin-tools/publish-a-plugin/sign-a-plugin#generate-an-access-policy-token)
         #with:

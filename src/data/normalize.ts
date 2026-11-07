@@ -63,6 +63,8 @@ export function normalizeFrames(frames: DataFrame[], reduceCalc: string): Normal
 function reduceToValue(field: Field, reduceCalc: string): number | null {
   const stats = reduceField({ field, reducers: [reduceCalc] });
   const v = stats[reduceCalc];
-  // Preserve the contract (number|null) even when a non-numeric reducer like allValues is specified
-  return typeof v !== 'number' || Number.isNaN(v) ? null : v;
+  // Preserve the contract (number|null) even when a non-numeric reducer like allValues is specified.
+  // A non-finite result (lastNotNull over a +Inf sample, or a sum/mean that overflows) is missing,
+  // exactly as on the table path, so it cannot leak into spatial aggregation or range computation.
+  return typeof v === 'number' ? toFiniteNumberOrNull(v) : null;
 }

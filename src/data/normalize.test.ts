@@ -88,6 +88,25 @@ describe('normalizeFrames', () => {
     expect(rows.map((r) => r.value)).toEqual([null, null, 55]);
   });
 
+  it.each([
+    ['lastNotNull', [1, Infinity]],
+    ['last', [1, -Infinity]],
+    ['max', [1, Infinity]],
+    ['min', [1, -Infinity]],
+    ['sum', [Number.MAX_VALUE, Number.MAX_VALUE]],
+  ])('normalizes a non-finite reduced series value (%s of %p) to null', (reduceCalc, values) => {
+    // Found by normalize.property.test.ts: the time-series path used to let ±Infinity through,
+    // while the table path (and the documented contract) treats non-finite values as missing.
+    const frame = toDataFrame({
+      refId: 'A',
+      fields: [
+        { name: 'Time', type: FieldType.time, values: [1000, 2000] },
+        { name: 'Value', type: FieldType.number, values, labels: { zone: 'zone-a' } },
+      ],
+    });
+    expect(normalizeFrames([frame], reduceCalc)[0].value).toBeNull();
+  });
+
   it('returns null value when a series is all null', () => {
     const frame = toDataFrame({
       refId: 'A',

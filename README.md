@@ -298,7 +298,12 @@ npm run e2e
 
 # Cognitive / Cyclomatic complexity (needs the cccc binary, see below)
 cccc --table src
+
+# Everything the pull request CI checks without Docker (see CONTRIBUTING.md)
+make check
 ```
+
+[CONTRIBUTING.md](./CONTRIBUTING.md) describes how to propose a change, and [AGENTS.md](./AGENTS.md) says which checks to run when, and lists the compatibility contracts and the Git conventions. Report security issues as described in [SECURITY.md](./SECURITY.md).
 
 Function complexity is measured with [cccc](https://github.com/moznion/cccc) and tracked as a trend rather than a score: the `Complexity` workflow sends cccc's summary (total, max, median and p90 of each metric) to [octocov](https://github.com/k1LoW/octocov) as custom metrics. octocov comments the before/after values on pull requests and stores a report for every push to `main` on the data-only `octocov` branch. The job summary lists the top functions by complexity. The `max-cognitive` / `max-cyclomatic` thresholds in `cccc.toml` stay as a fixed backstop against extreme outliers, and the workflow fails when a function exceeds them. To run cccc locally, download a binary from the [cccc releases](https://github.com/moznion/cccc/releases) or install it with `cargo install cccc-cli`.
 
