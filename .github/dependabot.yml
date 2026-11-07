@@ -15,7 +15,7 @@ updates:
         - '@grafana/plugin-e2e'
     open-pull-requests-limit: 5
     commit-message:
-      prefix: 'chore'
+      prefix: 'build'
       include: 'scope'
     groups:
       unit-test:
@@ -62,7 +62,8 @@ updates:
     cooldown:
       default-days: 7
     commit-message:
-      prefix: 'chore(ci)'
+      prefix: 'ci'
+      include: 'scope'
     open-pull-requests-limit: 5
     groups:
       github-actions:
