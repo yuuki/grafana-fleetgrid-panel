@@ -54,3 +54,6 @@ ci/
 
 # cccc results cache (only written with --cache)
 .cccc.cache
+
+# osv-scanner results uploaded by the Security workflow (make vuln-sarif)
+osv-scanner.sarif

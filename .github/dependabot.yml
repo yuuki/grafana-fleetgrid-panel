@@ -1,12 +1,15 @@
+# Version updates arrive weekly, grouped, and only after a release has been public for a week
+# (compromised releases are usually pulled within days). Security updates are not delayed by
+# this schedule.
 version: 2
 updates:
   - package-ecosystem: npm
     directory: '/'
     schedule:
       interval: 'weekly'
-    # Wait 5 days before updating to help circumvent supply chain attacks
+    # Wait 7 days before updating to help circumvent supply chain attacks
     cooldown:
-      default-days: 5
+      default-days: 7
       # Exclude plugin-e2e to prevent false positives with canary e2e tests
       exclude:
         - '@grafana/plugin-e2e'
@@ -20,6 +23,7 @@ updates:
           - '@testing-library/*'
           - 'jest*'
           - '@types/jest'
+          - 'fast-check'
       eslint:
         patterns:
           - '@grafana/eslint-config'
@@ -42,11 +46,25 @@ updates:
         update-types:
           - 'minor'
           - 'patch'
+      # Everything not matched above, except major versions, which keep their own pull request
+      # (a dependency joins the first group that matches it).
+      other:
+        patterns:
+          - '*'
+        update-types:
+          - 'minor'
+          - 'patch'
 
   - package-ecosystem: 'github-actions'
     directory: '/'
     schedule:
       interval: 'weekly'
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: 'chore(ci)'
     open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - '*'

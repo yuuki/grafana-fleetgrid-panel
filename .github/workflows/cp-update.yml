@@ -3,18 +3,33 @@ name: Create Plugin Update
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 0 1 * *' # run once a month on the 1st day
+    - cron: '21 5 1 * *' # run once a month on the 1st day (off the top of the hour, when scheduled runs queue up)
 
 # To use this workflow please create a fine-grained personal access token for your repository with:
 # `contents: read and write`
 # `pull requests: read and write`
 # `workflows: read and write`
+#
+# Trust boundary: GH_PAT_TOKEN can push branches, edit workflows and open pull requests, so it must
+# only reach jobs that run code from the default branch. Keep the triggers to schedule and
+# workflow_dispatch (never pull_request, pull_request_target or workflow_run). The action still
+# runs `npm ci` and `@grafana/create-plugin@latest` next to the token; review its pull requests
+# like any other dependency update.
+
+# The action pushes and opens the pull request with GH_PAT_TOKEN, not GITHUB_TOKEN.
+permissions: {}
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read # the action's own checkout of the base branch uses GITHUB_TOKEN
     steps:
-      - uses: grafana/plugin-actions/create-plugin-update@create-plugin-update/v2.0.2
+      - uses: grafana/plugin-actions/create-plugin-update@b82357e85d512c678416146ca4e9f8672bd108da # create-plugin-update/v2.0.2
         with:
           # Make sure to save the token in your repository secrets as `GH_PAT_TOKEN`
           token: ${{ secrets.GH_PAT_TOKEN }}
+          # The action defaults to Node 20, but this repository needs Node >= 26 (.nvmrc, package.json
+          # engines) and @grafana/create-plugin 8.x needs Node >= 22.
+          node-version: '26'

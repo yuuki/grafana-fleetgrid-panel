@@ -9,11 +9,24 @@ on:
     branches:
       - master
       - main
+  workflow_dispatch:
+  schedule:
+    # Weekly (Tuesday 17:06 UTC): the E2E matrix follows the latest Grafana releases, so a run
+    # without any change here still catches a new Grafana version breaking the plugin.
+    - cron: '6 17 * * 2'
+
+# Each job grants itself what it needs.
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
     name: Build, lint and unit tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     outputs:
@@ -24,11 +37,11 @@ jobs:
     env:
       GRAFANA_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_ACCESS_POLICY_TOKEN }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Setup Node.js environment
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '26'
           cache: 'npm'
@@ -42,6 +55,8 @@ jobs:
         run: npm run lint
       - name: Unit tests
         run: npm run test:ci
+      - name: Script tests
+        run: make test-scripts
       - name: Build frontend
         run: npm run build
 
@@ -55,7 +70,7 @@ jobs:
 
       - name: Setup Go environment
         if: steps.check-for-backend.outputs.has-backend == 'true'
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
@@ -123,7 +138,7 @@ jobs:
           ARCHIVE: ${{ steps.metadata.outputs.archive }}
 
       - name: Archive Build
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ steps.metadata.outputs.plugin-id }}-${{ steps.metadata.outputs.plugin-version }}
           path: ${{ steps.metadata.outputs.plugin-id }}
@@ -141,21 +156,21 @@ jobs:
       matrix: ${{ steps.resolve-versions.outputs.matrix }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Resolve Grafana E2E versions
         id: resolve-versions
-        uses: grafana/plugin-actions/e2e-version@e2e-version/v3.0.2
+        uses: grafana/plugin-actions/e2e-version@3ef49643a84470fd25bafeb96701fa0be3be6746 # e2e-version/v3.0.2
 
   playwright-tests:
     needs: [resolve-versions, build]
     timeout-minutes: 15
+    # Nothing in this job uses OIDC or comments on the PR (the report action only uploads an
+    # artifact; publish-report comments), so it needs no id-token or pull-requests permission.
     permissions:
       contents: read
-      id-token: write
-      pull-requests: write
     strategy:
       fail-fast: false
       matrix:
@@ -163,12 +178,12 @@ jobs:
     name: e2e test ${{ matrix.GRAFANA_IMAGE.name }}@${{ matrix.GRAFANA_IMAGE.VERSION }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Download plugin
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
           name: ${{ needs.build.outputs.plugin-id }}-${{ needs.build.outputs.plugin-version }}
@@ -179,7 +194,7 @@ jobs:
           chmod +x ./dist/gpx_*
 
       - name: Setup Node.js environment
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '26'
           cache: 'npm'
@@ -190,10 +205,15 @@ jobs:
       - name: Start Grafana
         run: |
           docker compose pull
-          ANONYMOUS_AUTH_ENABLED=false DEVELOPMENT=false GRAFANA_VERSION=${{ matrix.GRAFANA_IMAGE.VERSION }} GRAFANA_IMAGE=${{ matrix.GRAFANA_IMAGE.NAME }} docker compose up -d
+          docker compose up -d
+        env:
+          ANONYMOUS_AUTH_ENABLED: 'false'
+          DEVELOPMENT: 'false'
+          GRAFANA_VERSION: ${{ matrix.GRAFANA_IMAGE.VERSION }}
+          GRAFANA_IMAGE: ${{ matrix.GRAFANA_IMAGE.NAME }}
 
       - name: Wait for grafana server
-        uses: grafana/plugin-actions/wait-for-grafana@wait-for-grafana/v1.0.5
+        uses: grafana/plugin-actions/wait-for-grafana@4205a0824a13b71fdb9b9b49f28f5f72b754f81f # wait-for-grafana/v1.0.5
         with:
           url: http://localhost:3000/login
 
@@ -205,7 +225,7 @@ jobs:
         run: npm run e2e
 
       - name: Upload e2e test summary
-        uses: grafana/plugin-actions/playwright-gh-pages/upload-report-artifacts@upload-report-artifacts/v1.0.3
+        uses: grafana/plugin-actions/playwright-gh-pages/upload-report-artifacts@2311d422543154f07aa4a01f966243f4ad4de266 # upload-report-artifacts/v1.0.3
         if: ${{ always() && !cancelled() }}
         with:
           upload-report: false
@@ -232,13 +252,13 @@ jobs:
   publish-report:
     if: ${{ always() && !cancelled() }}
     permissions:
-      contents: write
-      id-token: write
-      pull-requests: write
+      contents: write # the deploy action pushes the HTML report to the gh-pages branch
+      pull-requests: write # and comments the result table on the pull request
     needs: [playwright-tests]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Must be false: the deploy-report-pages action runs its own authenticated
           # actions/checkout (ref: gh-pages) and peaceiris/actions-gh-pages pushes with its
@@ -247,6 +267,31 @@ jobs:
           # Authorization headers and GitHub rejects it with HTTP 400 (Duplicate header).
           persist-credentials: false
       - name: Publish report
-        uses: grafana/plugin-actions/playwright-gh-pages/deploy-report-pages@deploy-report-pages/v1.1.0
+        uses: grafana/plugin-actions/playwright-gh-pages/deploy-report-pages@5da62466881cdba091672353cf3c72ca348d01b1 # deploy-report-pages/v1.1.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  workflows:
+    name: Lint and audit workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # actionlint runs through `go run` at the version pinned in the Makefile (this repository
+      # has no go.mod, so the Go version is pinned here); pipx runs the pinned zizmor.
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.3'
+          cache: false
+
+      - name: actionlint and zizmor
+        run: make lint-actions
+        env:
+          # Enables zizmor's online audits (read-only API calls).
+          GH_TOKEN: ${{ github.token }}
