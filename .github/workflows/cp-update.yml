@@ -26,7 +26,7 @@ jobs:
     permissions:
       contents: read # the action's own checkout of the base branch uses GITHUB_TOKEN
     steps:
-      - uses: grafana/plugin-actions/create-plugin-update@b82357e85d512c678416146ca4e9f8672bd108da # create-plugin-update/v2.0.2
+      - uses: grafana/plugin-actions/create-plugin-update@bdc3fc5420eca6f498629a8f5d1f43abf0b8ec26 # create-plugin-update/v2.1.1
         with:
           # Make sure to save the token in your repository secrets as `GH_PAT_TOKEN`
           token: ${{ secrets.GH_PAT_TOKEN }}
