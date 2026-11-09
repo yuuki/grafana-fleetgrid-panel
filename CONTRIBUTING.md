@@ -17,8 +17,9 @@ make check
 
 `make check` runs the checks of the required pull request CI that work on a laptop: type check,
 ESLint, Jest (unit, component and property tests), the deploy script test, the production build and
-the GitHub Actions audit. It needs Node.js 26 (`.nvmrc`), Go (for actionlint) and uv or pipx (for
-zizmor). Run `make help` for the other targets (E2E, property-test exploration, vulnerability
+the GitHub Actions audit, with the coverage of `.github/workflows/actions.lock` (`make lock-actions`
+updates it after a `uses:` line changed). It needs Node.js 26 (`.nvmrc`), Go (for actionlint and
+gh-actions-lock) and uv or pipx (for zizmor). Run `make help` for the other targets (E2E, property-test exploration, vulnerability
 scan); [AGENTS.md](AGENTS.md) explains when each one is needed and lists the compatibility contracts
 (plugin ID, panel option keys) that must not change silently.
 
