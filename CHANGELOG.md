@@ -2,11 +2,11 @@
 
 ## Unreleased
 
+## 0.4.1 - 2026-11-12
+
 - Treat a time series whose reduced value is not finite (for example `Last (not null)` over a `+Inf` sample) as missing, as table results already were, instead of showing `Infinity` and letting it into spatial aggregation.
-
-## 0.4.1 - 2026-11-05
-
 - Update the transitive `browserslist`, `fast-uri`, `js-yaml`, `nanoid` and `source-map-js` dependencies to resolve the high severity advisories that failed release validation. v0.4.0 was tagged but never released, so this is the first release with the 0.4.0 changes below.
+- Releases are built and published by the repository's own workflow instead of `grafana/plugin-actions`' build-plugin, whose plugin validator refused the `yuuk1` prefix of the plugin ID (not a Grafana Cloud organization). The release assets keep their names (`yuuk1-fleetgrid-panel-<version>.zip` and its `.zip.sha1`), and the release is published instead of left as a draft.
 
 ## 0.4.0 - 2026-11-05
 
