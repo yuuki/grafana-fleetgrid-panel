@@ -30,24 +30,12 @@ workflows:
         - 'grafana/plugin-actions@is-compatible/v1.1.0'
     '.github/workflows/release.yml':
         - 'actions/checkout@v7.0.1'
-        - 'grafana/plugin-actions@b05ed88ddca828d4700149aeacab32fcaf10caa0'
+        - 'actions/setup-node@v7.1.0'
     '.github/workflows/security.yml':
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-go@v7.0.0'
         - 'github/codeql-action@v4.39.3'
 dependencies:
-    'actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8':
-        ref: 'v4.2.2'
-        commit: 'sha1-4d101475d8b20a2381f78447822ac1eab6504dd8'
-        owner_id: 44036562
-        repo_id: 760702757
-        uses:
-            - 'actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d'
-    'actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d':
-        ref: 'v4.2.1'
-        commit: 'sha1-508db95dd578ae2727ebd6217d5ba78e4fbda05d'
-        owner_id: 44036562
-        repo_id: 760701061
     'actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830':
         ref: 'v4.3.0'
         commit: 'sha1-0057852bfaa89a56745cba8c7296529d2fc39830'
@@ -88,11 +76,6 @@ dependencies:
         commit: 'sha1-3a2844b7e9c422d3c10d287c895573f7108da1b3'
         owner_id: 44036562
         repo_id: 205262760
-    'actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e':
-        ref: 'v7.0.0'
-        commit: 'sha1-b7ad1dad31e06c5925ef5d2fc7ad053ef454303e'
-        owner_id: 44036562
-        repo_id: 192624594
     'actions/setup-go@v7.0.0':
         ref: 'v7.0.0'
         commit: 'sha1-b7ad1dad31e06c5925ef5d2fc7ad053ef454303e'
@@ -143,16 +126,6 @@ dependencies:
             - 'actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3'
             - 'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020'
             - 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'
-    'grafana/plugin-actions@b05ed88ddca828d4700149aeacab32fcaf10caa0':
-        ref: 'main'
-        commit: 'sha1-b05ed88ddca828d4700149aeacab32fcaf10caa0'
-        owner_id: 7195757
-        repo_id: 536571509
-        uses:
-            - 'actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8'
-            - 'grafana/plugin-actions@main'
-            - 'janheinrichmerker/action-github-changelog-generator@e60b5a2bd9fcd88dadf6345ff8327863fb8b490f'
-            - 'softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64'
     'grafana/plugin-actions@create-plugin-update/v2.1.1':
         ref: 'create-plugin-update/v2.1.1'
         commit: 'sha1-bdc3fc5420eca6f498629a8f5d1f43abf0b8ec26'
@@ -189,15 +162,6 @@ dependencies:
             - 'actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1'
             - 'jwalton/gh-find-current-pr@f3d61b485d2801773f7a07b2aaa3306bd8f8e653'
             - 'marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88'
-    'grafana/plugin-actions@main':
-        ref: 'main'
-        commit: 'sha1-30371c7770652c1dc8661d3e2e4472753b828497'
-        owner_id: 7195757
-        repo_id: 536571509
-        uses:
-            - 'actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e'
-            - 'actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1'
-            - 'magefile/mage-action@a662bd8c29d8106879588cfff83b2faf6e6f59db'
     'grafana/plugin-actions@package-manager-detect/v1.0.1':
         ref: 'package-manager-detect/v1.0.1'
         commit: 'sha1-b33da838ef709061a6b6f69308d54925520dd433'
@@ -215,11 +179,6 @@ dependencies:
         commit: 'sha1-4205a0824a13b71fdb9b9b49f28f5f72b754f81f'
         owner_id: 7195757
         repo_id: 536571509
-    'janheinrichmerker/action-github-changelog-generator@e60b5a2bd9fcd88dadf6345ff8327863fb8b490f':
-        ref: 'v2.4'
-        commit: 'sha1-e60b5a2bd9fcd88dadf6345ff8327863fb8b490f'
-        owner_id: 5065698
-        repo_id: 247300336
     'jwalton/gh-find-current-pr@f3d61b485d2801773f7a07b2aaa3306bd8f8e653':
         ref: 'v1.3.5'
         commit: 'sha1-f3d61b485d2801773f7a07b2aaa3306bd8f8e653'
@@ -238,11 +197,6 @@ dependencies:
         uses:
             - 'actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3'
             - 'k1low/gh-setup@5fb38d34ea857e5a942b6fe10f1723e55055f6c0'
-    'magefile/mage-action@a662bd8c29d8106879588cfff83b2faf6e6f59db':
-        ref: 'v4.0.0'
-        commit: 'sha1-a662bd8c29d8106879588cfff83b2faf6e6f59db'
-        owner_id: 32144377
-        repo_id: 210177082
     'magefile/mage-action@v4.0.0':
         ref: 'v4.0.0'
         commit: 'sha1-a662bd8c29d8106879588cfff83b2faf6e6f59db'
@@ -270,11 +224,6 @@ dependencies:
         commit: 'sha1-ea17c68df8912ef543352723c149a84f56e3d413'
         owner_id: 21320719
         repo_id: 262289747
-    'softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64':
-        ref: 'v3.0.3'
-        commit: 'sha1-efb35369e0ad2afab669f228072c1b0d510eae64'
-        owner_id: 2242
-        repo_id: 204253808
     'thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b':
         ref: 'v3.0.1'
         commit: 'sha1-24bffb9b452ba05a4f3f77933840a6a841d1b32b'

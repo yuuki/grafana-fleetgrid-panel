@@ -1,5 +1,9 @@
-# This GitHub Action automates the process of building Grafana plugins.
-# (For more information, see https://github.com/grafana/plugin-actions/blob/main/build-plugin/README.md)
+# Builds the plugin for a version tag and publishes it as a GitHub release with
+# the plugin archive yuuk1-fleetgrid-panel-<version>.zip and its .zip.sha1, as
+# grafana/plugin-actions' build-plugin did. That action is not used any more:
+# its plugin validator fails the release because the ID's `yuuk1` prefix is not
+# a Grafana Cloud organization, and the ID cannot change (dashboards store it).
+# The checks it ran are in CI (ci.yml, security.yml) and in the test job below.
 name: Release
 
 on:
@@ -9,22 +13,97 @@ on:
 
 permissions: {}
 
+# Release jobs restore no caches: a poisoned cache entry would end up in the
+# published plugin archive.
 jobs:
-  release:
-    permissions:
-      contents: write # create the GitHub release and upload the plugin archive
+  test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
-      - uses: grafana/plugin-actions/build-plugin@b05ed88ddca828d4700149aeacab32fcaf10caa0 # build-plugin/v1.2.1
-        # Uncomment to enable plugin signing
-        # (For more info on how to generate the access policy token see https://grafana.com/developers/plugin-tools/publish-a-plugin/sign-a-plugin#generate-an-access-policy-token)
-        #with:
-        # Make sure to save the token in your repository secrets
-        #policy_token: $
-        # Usage of GRAFANA_API_KEY is deprecated, prefer `policy_token` option above
-        #grafana_token: $
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26'
+          package-manager-cache: false
+
+      - name: Check the tag against package.json and CHANGELOG.md
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::tag $TAG does not match version $version in package.json"
+            exit 1
+          fi
+          if ! grep -q "^## $version - " CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## $version - DATE' section"
+            exit 1
+          fi
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm run test:ci
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # gh release create publishes the release and uploads the plugin archive
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false # the release is created with gh and GH_TOKEN, not git push
+
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26'
+          package-manager-cache: false
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Package plugin
+        run: |
+          plugin_id=$(node -p 'require("./dist/plugin.json").id')
+          version=$(node -p 'require("./package.json").version')
+          archive="${plugin_id}-${version}.zip"
+          mv dist "$plugin_id"
+          zip -qr "$archive" "$plugin_id"
+          sha1sum "$archive" | cut -d' ' -f1 > "$archive.sha1"
+          echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          awk -v heading="## ${VERSION} - " '
+            index($0, heading) == 1 { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
+          test -s "$RUNNER_TEMP/release-notes.md"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" --verify-tag --title "$TAG" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            "$ARCHIVE" "$ARCHIVE.sha1"
