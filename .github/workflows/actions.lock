@@ -5,7 +5,7 @@ version: 'v0.0.3'
 workflows:
     '.github/workflows/bundle-stats.yml':
         - 'actions/checkout@v7.0.1'
-        - 'grafana/plugin-actions@31f6f292a4ccc6530594b8939af571898b09cda8'
+        - 'grafana/plugin-actions@dfa9631cf7a2077d75d1d374935813156a770419'
     '.github/workflows/ci.yml':
         - 'actions/checkout@v7.0.1'
         - 'actions/download-artifact@v8.0.2'
@@ -14,7 +14,7 @@ workflows:
         - 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9'
         - 'golangci/golangci-lint-action@v9.3.0'
         - 'grafana/plugin-actions@deploy-report-pages/v1.1.0'
-        - 'grafana/plugin-actions@e2e-version/v3.2.0'
+        - 'grafana/plugin-actions@e2e-version/v3.2.4'
         - 'grafana/plugin-actions@upload-report-artifacts/v1.0.3'
         - 'grafana/plugin-actions@wait-for-grafana/v1.0.5'
         - 'magefile/mage-action@v4.0.0'
@@ -56,14 +56,14 @@ dependencies:
         commit: 'sha1-3d3c42e5aac5ba805825da76410c181273ba90b1'
         owner_id: 44036562
         repo_id: 197814629
-    'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c':
-        ref: 'v8.0.1'
-        commit: 'sha1-3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c'
-        owner_id: 44036562
-        repo_id: 192626254
     'actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0':
         ref: 'v5.0.0'
         commit: 'sha1-634f93cb2916e3fdff6788551b99b062d0335ce0'
+        owner_id: 44036562
+        repo_id: 192626254
+    'actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333':
+        ref: 'v8.0.2'
+        commit: 'sha1-9000827ccba6bdab643e8b6fd33ac0654aef8333'
         owner_id: 44036562
         repo_id: 192626254
     'actions/download-artifact@v8.0.2':
@@ -81,11 +81,6 @@ dependencies:
         commit: 'sha1-b7ad1dad31e06c5925ef5d2fc7ad053ef454303e'
         owner_id: 44036562
         repo_id: 192624594
-    'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020':
-        ref: 'v7.0.0'
-        commit: 'sha1-820762786026740c76f36085b0efc47a31fe5020'
-        owner_id: 44036562
-        repo_id: 189476904
     'actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1':
         ref: 'v7.1.0'
         commit: 'sha1-949feb2413d6458794dcd2491c4babbbce0c15c1'
@@ -96,11 +91,6 @@ dependencies:
         commit: 'sha1-949feb2413d6458794dcd2491c4babbbce0c15c1'
         owner_id: 44036562
         repo_id: 189476904
-    'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a':
-        ref: 'v7.0.1'
-        commit: 'sha1-043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'
-        owner_id: 44036562
-        repo_id: 192625955
     'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9':
         ref: 'v7.0.2'
         commit: 'sha1-cf430e030ddbb5b0abf93d22962f4752f3646cd9'
@@ -116,16 +106,6 @@ dependencies:
         commit: 'sha1-ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a'
         owner_id: 35628013
         repo_id: 232539879
-    'grafana/plugin-actions@31f6f292a4ccc6530594b8939af571898b09cda8':
-        ref: 'main'
-        commit: 'sha1-31f6f292a4ccc6530594b8939af571898b09cda8'
-        owner_id: 7195757
-        repo_id: 536571509
-        uses:
-            - 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c'
-            - 'actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3'
-            - 'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020'
-            - 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'
     'grafana/plugin-actions@create-plugin-update/v2.1.1':
         ref: 'create-plugin-update/v2.1.1'
         commit: 'sha1-bdc3fc5420eca6f498629a8f5d1f43abf0b8ec26'
@@ -146,13 +126,23 @@ dependencies:
             - 'actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0'
             - 'peaceiris/actions-gh-pages@4f9cc6602d3f66b9c108549d475ec49e8ef4d45e'
             - 'thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b'
-    'grafana/plugin-actions@e2e-version/v3.2.0':
-        ref: 'e2e-version/v3.2.0'
-        commit: 'sha1-b2d42498af86999c092e974be98860757fd3cb10'
+    'grafana/plugin-actions@dfa9631cf7a2077d75d1d374935813156a770419':
+        ref: 'main'
+        commit: 'sha1-dfa9631cf7a2077d75d1d374935813156a770419'
         owner_id: 7195757
         repo_id: 536571509
         uses:
-            - 'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020'
+            - 'actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333'
+            - 'actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3'
+            - 'actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1'
+            - 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9'
+    'grafana/plugin-actions@e2e-version/v3.2.4':
+        ref: 'e2e-version/v3.2.4'
+        commit: 'sha1-30371c7770652c1dc8661d3e2e4472753b828497'
+        owner_id: 7195757
+        repo_id: 536571509
+        uses:
+            - 'actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1'
     'grafana/plugin-actions@is-compatible/v1.1.0':
         ref: 'is-compatible/v1.1.0'
         commit: 'sha1-3ead4fe1bf6b7b8f6905513d0b8c986f4bc4754a'
