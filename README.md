@@ -1,6 +1,7 @@
 # FleetGrid
 
 [![CI](https://github.com/yuuki/grafana-fleetgrid-panel/actions/workflows/ci.yml/badge.svg)](https://github.com/yuuki/grafana-fleetgrid-panel/actions/workflows/ci.yml)
+[![Security](https://github.com/yuuki/grafana-fleetgrid-panel/actions/workflows/security.yml/badge.svg)](https://github.com/yuuki/grafana-fleetgrid-panel/actions/workflows/security.yml)
 [![Grafana compatibility](https://github.com/yuuki/grafana-fleetgrid-panel/actions/workflows/is-compatible.yml/badge.svg)](https://github.com/yuuki/grafana-fleetgrid-panel/actions/workflows/is-compatible.yml)
 [![Release](https://github.com/yuuki/grafana-fleetgrid-panel/actions/workflows/release.yml/badge.svg)](https://github.com/yuuki/grafana-fleetgrid-panel/actions/workflows/release.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
