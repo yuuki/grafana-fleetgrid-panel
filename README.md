@@ -1,10 +1,11 @@
 # FleetGrid
 
 [![CI](https://github.com/yuuki/grafana-fleetgrid-panel/actions/workflows/ci.yml/badge.svg)](https://github.com/yuuki/grafana-fleetgrid-panel/actions/workflows/ci.yml)
+[![Security](https://github.com/yuuki/grafana-fleetgrid-panel/actions/workflows/security.yml/badge.svg)](https://github.com/yuuki/grafana-fleetgrid-panel/actions/workflows/security.yml)
 [![Grafana compatibility](https://github.com/yuuki/grafana-fleetgrid-panel/actions/workflows/is-compatible.yml/badge.svg)](https://github.com/yuuki/grafana-fleetgrid-panel/actions/workflows/is-compatible.yml)
 [![Release](https://github.com/yuuki/grafana-fleetgrid-panel/actions/workflows/release.yml/badge.svg)](https://github.com/yuuki/grafana-fleetgrid-panel/actions/workflows/release.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
-[![AI-assisted](https://img.shields.io/badge/AI--assisted-8A2BE2)](https://openai.com/)
+[![AI Generated](https://img.shields.io/badge/AI%20Generated-Claude-orange?logo=anthropic)](https://claude.ai/claude-code)
 
 A Grafana panel plugin that renders nested physical topologies — such as zones, hosts, and GPUs — as a hierarchical grid, and colors each cell by a Prometheus / VictoriaMetrics metric. It is designed for a bird's-eye view of large AI / HPC clusters, where hundreds of nodes and thousands of cells need to be scanned at a glance.
 
