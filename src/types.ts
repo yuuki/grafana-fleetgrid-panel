@@ -7,6 +7,8 @@ export type SpatialAggregation = 'max' | 'mean' | 'min' | 'sum';
 export type DisplayMode = 'single' | 'split';
 export type RangeMatcherOperator = 'exact' | 'regex';
 export type CategoryDecorationStyle = 'strip' | 'border';
+export type ColorMode = 'value' | 'delta' | 'zscore';
+export type ZScoreMethod = 'mean' | 'median';
 
 /**
  * Normalize a persisted categoryStyle to the current union.
@@ -16,6 +18,17 @@ export type CategoryDecorationStyle = 'strip' | 'border';
  */
 export function normalizeCategoryStyle(style: string | undefined): CategoryDecorationStyle {
   return style === 'border' ? 'border' : 'strip';
+}
+
+export function normalizeColorMode(mode: string | undefined): ColorMode {
+  if (mode === 'delta' || mode === 'zscore') {
+    return mode;
+  }
+  return 'value';
+}
+
+export function normalizeZScoreMethod(method: string | undefined): ZScoreMethod {
+  return method === 'median' ? 'median' : 'mean';
 }
 
 export interface RangeMatcher {
@@ -61,6 +74,18 @@ export interface FleetGridOptions {
   reduceCalc: string;
   /** Ordered color scale overrides. The first rule matching a source label set wins. */
   rangeOverrides?: RangeOverride[];
+  /** Show the footer time scrubber and playback controls when time-series data has >= 2 timestamps. */
+  enablePlayback?: boolean;
+  /** Value coloring mode: raw value (default), temporal delta, or spatial Z-score. */
+  colorMode?: ColorMode;
+  /** Lookback window in seconds for temporal delta mode (0 or unset = previous sample step). */
+  deltaLookbackSec?: number;
+  /** Hierarchy level index (0-based) for spatial Z-score sibling groups; -1 = parent of leaf (default), -2 = entire fleet. */
+  zScoreGroupDepth?: number;
+  /** Center/scale estimator for spatial Z-score: 'mean' (mean/stddev) or 'median' (median/MAD). */
+  zScoreMethod?: ZScoreMethod;
+  /** Symmetric clamp limit (in sigma) for spatial Z-score color scale (default 3; 0 = auto). */
+  zScoreLimit?: number;
 }
 
 export const DEFAULT_LEVEL: LevelDef = {
