@@ -248,7 +248,7 @@ RESTART_GRAFANA=1 \
 scripts/deploy-plugin-ssh.sh
 ```
 
-The script supports `DEPLOY_PORT`, `REMOTE_PLUGIN_DIR`, `PLUGIN_OWNER`, and `GRAFANA_SERVICE`. It does not configure Grafana's unsigned-plugin allow-list, so configure `GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=yuuk1-fleetgrid-panel` on the remote Grafana host separately.
+The script supports `DEPLOY_PORT`, `REMOTE_PLUGIN_DIR`, `PLUGIN_OWNER`, and `GRAFANA_SERVICE`. With `REMOTE_SUDO=1`, if `sudo` on the remote host needs a password, the script prompts for it once per run (or reads `DEPLOY_SUDO_PASSWORD` when there is no terminal) and passes it to `sudo -S` over the SSH session's stdin. It does not configure Grafana's unsigned-plugin allow-list, so configure `GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=yuuk1-fleetgrid-panel` on the remote Grafana host separately.
 
 ### 3. Docker / docker-compose example
 

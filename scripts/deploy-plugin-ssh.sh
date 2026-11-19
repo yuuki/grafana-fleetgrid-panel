@@ -35,11 +35,6 @@ if [[ -n "${DEPLOY_PORT}" ]]; then
   SSH_PORT_ARGS=(-p "${DEPLOY_PORT}")
 fi
 
-REMOTE_PREFIX=""
-if [[ "${REMOTE_SUDO}" == "1" ]]; then
-  REMOTE_PREFIX="sudo"
-fi
-
 # Quote values before embedding them in the remote shell command.
 quote_remote() {
   local value="${1}"
@@ -52,24 +47,63 @@ REMOTE_PLUGIN_DIR_Q="$(quote_remote "${REMOTE_PLUGIN_DIR}")"
 PLUGIN_OWNER_Q="$(quote_remote "${PLUGIN_OWNER}")"
 GRAFANA_SERVICE_Q="$(quote_remote "${GRAFANA_SERVICE}")"
 
+# The remote command's stdin carries the plugin archive, so sudo cannot prompt
+# there. When sudo needs a password, ask for it here (or take it from
+# DEPLOY_SUDO_PASSWORD) and send it as the first line of stdin; the remote side
+# reads that line and feeds it to `sudo -S` for each privileged command.
+SUDO_PASSWORD_NEEDED=0
+if [[ "${REMOTE_SUDO}" == "1" ]]; then
+  if ! ssh "${SSH_PORT_ARGS[@]}" "${SSH_TARGET}" 'sudo -n true' </dev/null 2>/dev/null; then
+    SUDO_PASSWORD_NEEDED=1
+    if [[ -z "${DEPLOY_SUDO_PASSWORD:-}" ]]; then
+      if ! { true </dev/tty; } 2>/dev/null; then
+        echo "sudo on ${SSH_TARGET} needs a password: set DEPLOY_SUDO_PASSWORD or run from a terminal" >&2
+        exit 1
+      fi
+      IFS= read -rs -p "[sudo] password for ${SSH_TARGET}: " DEPLOY_SUDO_PASSWORD </dev/tty
+      echo >&2
+    fi
+  fi
+fi
+
 npm run build
 
-REMOTE_COMMAND="$(printf '%s\n' \
-  'set -euo pipefail' \
-  "${REMOTE_PREFIX} mkdir -p ${REMOTE_PLUGIN_DIR_Q}" \
-  "${REMOTE_PREFIX} tar -C ${REMOTE_PLUGIN_DIR_Q} -xf -" \
-  "${REMOTE_PREFIX} chown -R ${PLUGIN_OWNER_Q} ${REMOTE_PLUGIN_DIR_Q}" \
-  "${REMOTE_PREFIX} chmod -R a+rX ${REMOTE_PLUGIN_DIR_Q}")"
+REMOTE_LINES=('set -euo pipefail')
+if [[ "${REMOTE_SUDO}" != "1" ]]; then
+  REMOTE_LINES+=('run() { "$@"; }')
+elif [[ "${SUDO_PASSWORD_NEEDED}" == "1" ]]; then
+  REMOTE_LINES+=(
+    'IFS= read -r SUDO_PASSWORD'
+    'run() { printf "%s\n" "${SUDO_PASSWORD}" | sudo -S -p "" "$@"; }'
+    'run true || { echo "sudo authentication failed" >&2; exit 1; }'
+  )
+else
+  REMOTE_LINES+=('run() { sudo -n "$@"; }')
+fi
+# The archive is extracted into a staging directory as the SSH user and then
+# copied into place with sudo, so the password line and the archive can share
+# stdin without sudo consuming part of the archive.
+REMOTE_LINES+=(
+  'STAGING_DIR="$(mktemp -d)"'
+  'trap '\''rm -rf "${STAGING_DIR}"'\'' EXIT'
+  'tar -C "${STAGING_DIR}" -xf -'
+  "run mkdir -p ${REMOTE_PLUGIN_DIR_Q}"
+  "run cp -R \"\${STAGING_DIR}/.\" ${REMOTE_PLUGIN_DIR_Q}"
+  "run chown -R ${PLUGIN_OWNER_Q} ${REMOTE_PLUGIN_DIR_Q}"
+  "run chmod -R a+rX ${REMOTE_PLUGIN_DIR_Q}"
+)
+if [[ "${RESTART_GRAFANA}" == "1" ]]; then
+  REMOTE_LINES+=("run systemctl restart ${GRAFANA_SERVICE_Q}")
+fi
+REMOTE_COMMAND="$(printf '%s\n' "${REMOTE_LINES[@]}")"
 
 # --no-mac-metadata: don't embed macOS xattrs in the archive.
-COPYFILE_DISABLE=1 tar -C dist --no-mac-metadata -cf - . | ssh "${SSH_PORT_ARGS[@]}" "${SSH_TARGET}" "${REMOTE_COMMAND}"
-
-if [[ "${RESTART_GRAFANA}" == "1" ]]; then
-  RESTART_COMMAND="$(printf '%s\n' \
-    'set -euo pipefail' \
-    "${REMOTE_PREFIX} systemctl restart ${GRAFANA_SERVICE_Q}")"
-  ssh "${SSH_PORT_ARGS[@]}" "${SSH_TARGET}" "${RESTART_COMMAND}"
-fi
+{
+  if [[ "${SUDO_PASSWORD_NEEDED}" == "1" ]]; then
+    printf '%s\n' "${DEPLOY_SUDO_PASSWORD}"
+  fi
+  COPYFILE_DISABLE=1 tar -C dist --no-mac-metadata -cf - .
+} | ssh "${SSH_PORT_ARGS[@]}" "${SSH_TARGET}" "bash -c $(quote_remote "${REMOTE_COMMAND}")"
 
 cat <<EOF
 Deployed ${PLUGIN_ID} to ${SSH_TARGET}:${REMOTE_PLUGIN_DIR}
