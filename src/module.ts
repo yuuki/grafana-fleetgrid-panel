@@ -6,6 +6,7 @@ import { ReduceCalcEditor } from './options/ReduceCalcEditor';
 import { RangeOverridesEditor } from './options/RangeOverridesEditor';
 import { TooltipLabelsEditor } from './options/TooltipLabelsEditor';
 import { CategoryLabelEditor } from './options/CategoryLabelEditor';
+import { ZScoreGroupEditor } from './options/ZScoreGroupEditor';
 
 // Hosts older than the Auto Grid fit-content API lack this method. Duck-type so
 // the plugin still loads; Grafana only offers "Auto fit" when the method exists
@@ -109,6 +110,69 @@ export const plugin = new PanelPlugin<FleetGridOptions>(FleetGridPanel).useField
       category: ['Data'],
       editor: ReduceCalcEditor,
       defaultValue: 'lastNotNull',
+    })
+    .addRadio({
+      path: 'colorMode',
+      name: 'Coloring mode',
+      description: 'Color cells by raw value, temporal delta v(t) - v(t - Δt), or spatial sibling Z-score',
+      category: ['Color mode'],
+      defaultValue: 'value',
+      settings: {
+        options: [
+          { value: 'value', label: 'Value' },
+          { value: 'delta', label: 'Delta (Δt)' },
+          { value: 'zscore', label: 'Spatial Z-score' },
+        ],
+      },
+    })
+    .addNumberInput({
+      path: 'deltaLookbackSec',
+      name: 'Delta lookback (seconds)',
+      description: 'Lookback offset Δt in seconds (0 uses the previous sample step)',
+      category: ['Color mode'],
+      defaultValue: 0,
+      settings: { min: 0, step: 15 },
+      showIf: (opts) => opts.colorMode === 'delta',
+    })
+    .addCustomEditor({
+      id: 'zScoreGroupDepth',
+      path: 'zScoreGroupDepth',
+      name: 'Z-score sibling group',
+      description: 'Hierarchy group within which sibling deviation is calculated',
+      category: ['Color mode'],
+      editor: ZScoreGroupEditor,
+      defaultValue: -1,
+      showIf: (opts) => opts.colorMode === 'zscore',
+    })
+    .addRadio({
+      path: 'zScoreMethod',
+      name: 'Z-score method',
+      description: 'Mean / StdDev or robust Median / MAD estimator',
+      category: ['Color mode'],
+      defaultValue: 'mean',
+      settings: {
+        options: [
+          { value: 'mean', label: 'Mean / StdDev' },
+          { value: 'median', label: 'Median / MAD' },
+        ],
+      },
+      showIf: (opts) => opts.colorMode === 'zscore',
+    })
+    .addNumberInput({
+      path: 'zScoreLimit',
+      name: 'Z-score color limit (±σ)',
+      description: 'Symmetric diverging color clamp in standard deviations (0 = auto)',
+      category: ['Color mode'],
+      defaultValue: 3,
+      settings: { min: 0, step: 0.5 },
+      showIf: (opts) => opts.colorMode === 'zscore',
+    })
+    .addBooleanSwitch({
+      path: 'enablePlayback',
+      name: 'Time scrubber',
+      description: 'Show timeline scrubber and playback controls in the panel footer for range queries',
+      category: ['Time playback'],
+      defaultValue: false,
     })
     .addCustomEditor({
       id: 'rangeOverrides',

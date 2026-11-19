@@ -817,4 +817,171 @@ describe('FleetGridPanel', () => {
       expect(screen.getByText('Failed to load time series')).toBeInTheDocument();
     });
   });
+
+  describe('time scrubber playback and delta / z-score coloring modes', () => {
+    const rangeFrames = () => [
+      toDataFrame({
+        refId: 'A',
+        name: 'temp',
+        fields: [
+          { name: 'Time', type: FieldType.time, values: [1_700_000_000_000, 1_700_000_060_000, 1_700_000_120_000] },
+          {
+            name: 'Value',
+            type: FieldType.number,
+            values: [40, 45, 70],
+            labels: { zone: 'zone-a', host: 'node-1' },
+            config: { unit: 'celsius', decimals: 1 },
+          },
+          {
+            name: 'Value',
+            type: FieldType.number,
+            values: [40, 40, 40],
+            labels: { zone: 'zone-a', host: 'node-2' },
+            config: { unit: 'celsius', decimals: 1 },
+          },
+        ],
+      }),
+    ];
+
+    it('hides the scrubber by default and shows it in the footer when enablePlayback is true with range data', () => {
+      const pDefault = makeProps(rangeFrames());
+      pDefault.options.levels = [
+        { ...DEFAULT_LEVEL, label: 'zone' },
+        { ...DEFAULT_LEVEL, label: 'host' },
+      ];
+      const { rerender } = render(<FleetGridPanel {...pDefault} />);
+      expect(screen.queryByTestId('time-scrubber')).not.toBeInTheDocument();
+
+      const pEnabled = makeProps(rangeFrames());
+      pEnabled.options.levels = pDefault.options.levels;
+      pEnabled.options.enablePlayback = true;
+      rerender(<FleetGridPanel {...pEnabled} />);
+      expect(screen.getByTestId('time-scrubber')).toBeInTheDocument();
+      expect(screen.getByTestId('scrubber-frame-counter')).toHaveTextContent('3/3');
+      // Footer height (34px) is subtracted from the scroll container height (300 - 32 - 34 = 234px)
+      expect(document.querySelector('canvas')!.parentElement).toHaveStyle({ height: '234px' });
+    });
+
+    it('scrubs across timestamps without altering layout and resets to Live view', () => {
+      const p = makeProps(rangeFrames());
+      p.options.levels = [
+        { ...DEFAULT_LEVEL, label: 'zone' },
+        { ...DEFAULT_LEVEL, label: 'host' },
+      ];
+      p.options.enablePlayback = true;
+      render(<FleetGridPanel {...p} />);
+
+      const canvas = document.querySelector('canvas')!;
+      const ctx = canvas.getContext('2d') as unknown as { __getEvents(): Array<{ type: string }> };
+      const framesBefore = ctx.__getEvents().filter((e) => e.type === 'clearRect').length;
+
+      fireEvent.change(screen.getByTestId('scrubber-slider'), { target: { value: '0' } });
+      expect(screen.getByTestId('scrubber-frame-counter')).toHaveTextContent('1/3');
+      expect(screen.getByTestId('scrubber-reset-live')).toBeInTheDocument();
+      expect(ctx.__getEvents().filter((e) => e.type === 'clearRect').length).toBeGreaterThan(framesBefore);
+
+      fireEvent.click(screen.getByTestId('scrubber-reset-live'));
+      expect(screen.queryByTestId('scrubber-reset-live')).not.toBeInTheDocument();
+      expect(screen.getByTestId('scrubber-frame-counter')).toHaveTextContent('3/3');
+    });
+
+    it('plays through timestamps via requestAnimationFrame and pauses at the final frame', () => {
+      const rafQueue: FrameRequestCallback[] = [];
+      const origRaf = global.requestAnimationFrame;
+      const origCaf = global.cancelAnimationFrame;
+      let nowMs = 1000;
+      const nowSpy = jest.spyOn(performance, 'now').mockImplementation(() => nowMs);
+      global.requestAnimationFrame = jest.fn((cb: FrameRequestCallback) => {
+        rafQueue.push(cb);
+        return rafQueue.length;
+      });
+      global.cancelAnimationFrame = jest.fn();
+
+      try {
+        const p = makeProps(rangeFrames());
+        p.options.levels = [
+          { ...DEFAULT_LEVEL, label: 'zone' },
+          { ...DEFAULT_LEVEL, label: 'host' },
+        ];
+        p.options.enablePlayback = true;
+        render(<FleetGridPanel {...p} />);
+
+        // Clicking Play from the end restarts at frame 0 (1/3)
+        fireEvent.click(screen.getByTestId('scrubber-play-toggle'));
+        expect(screen.getByTestId('scrubber-frame-counter')).toHaveTextContent('1/3');
+        expect(screen.getByRole('button', { name: 'Pause playback' })).toBeInTheDocument();
+
+        // Advance 250ms at default 5/s (200ms per step) -> frame 2/3
+        act(() => {
+          nowMs += 250;
+          const cb = rafQueue.shift();
+          cb?.(nowMs);
+        });
+        expect(screen.getByTestId('scrubber-frame-counter')).toHaveTextContent('2/3');
+
+        // Advance another 250ms -> frame 3/3 and playback pauses automatically
+        act(() => {
+          nowMs += 250;
+          const cb = rafQueue.shift();
+          cb?.(nowMs);
+        });
+        expect(screen.getByTestId('scrubber-frame-counter')).toHaveTextContent('3/3');
+        expect(screen.getByRole('button', { name: 'Play timeline' })).toBeInTheDocument();
+      } finally {
+        nowSpy.mockRestore();
+        global.requestAnimationFrame = origRaf;
+        global.cancelAnimationFrame = origCaf;
+      }
+    });
+
+    it('renders temporal delta mode with diverging legend, mode badge, and tooltip baseline context', () => {
+      const p = makeProps(rangeFrames());
+      p.width = 600;
+      p.options.levels = [
+        { ...DEFAULT_LEVEL, label: 'zone' },
+        { ...DEFAULT_LEVEL, label: 'host' },
+      ];
+      p.options.colorMode = 'delta';
+      p.options.deltaLookbackSec = 60;
+      render(<FleetGridPanel {...p} />);
+
+      expect(screen.getByTestId('range-mode-badge')).toHaveTextContent('Δ 1m');
+      // Hover the first cell (zone-a / node-1: 70°C - 45°C = +25.0°C)
+      const scroll = document.querySelector('canvas')!.parentElement as HTMLElement;
+      fireEvent.mouseMove(scroll, { clientX: 10, clientY: 25 });
+      const tooltip = screen.getByRole('tooltip');
+      expect(tooltip).toHaveTextContent(/\+25\.0\s*°C/);
+      expect(tooltip).toHaveTextContent(/Value:\s*70\.0\s*°C\s*\(prev:\s*45\.0\s*°C\)/);
+    });
+
+    it('emits a warning when delta mode is enabled on single-point instant data', () => {
+      const p = makeProps([series('A', 'power', 'zone-a')]);
+      p.options.colorMode = 'delta';
+      render(<FleetGridPanel {...p} />);
+      expect(screen.getByRole('alert')).toHaveTextContent(/Delta color mode requires time-series data/);
+    });
+
+    it('renders spatial Z-score mode with diverging sigma legend and sibling group stats in tooltip', () => {
+      const p = makeProps(rangeFrames());
+      p.width = 600;
+      p.options.levels = [
+        { ...DEFAULT_LEVEL, label: 'zone' },
+        { ...DEFAULT_LEVEL, label: 'host' },
+      ];
+      p.options.colorMode = 'zscore';
+      p.options.zScoreMethod = 'mean';
+      p.options.zScoreLimit = 3;
+      render(<FleetGridPanel {...p} />);
+
+      expect(screen.getByTestId('range-mode-badge')).toHaveTextContent('Z-score (mean)');
+      expect(screen.getByTestId('range-legend')).toHaveTextContent('-3.0σ');
+      expect(screen.getByTestId('range-legend')).toHaveTextContent('+3.0σ');
+
+      const scroll = document.querySelector('canvas')!.parentElement as HTMLElement;
+      fireEvent.mouseMove(scroll, { clientX: 10, clientY: 25 });
+      const tooltip = screen.getByRole('tooltip');
+      expect(tooltip).toHaveTextContent('+1.0σ');
+      expect(tooltip).toHaveTextContent(/Group \(zone-a, n=2\): mean 55\.0\s*°C/);
+    });
+  });
 });

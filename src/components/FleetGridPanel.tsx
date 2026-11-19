@@ -17,8 +17,11 @@ import { DrilldownPopover } from './DrilldownPopover';
 import { RangeLegend } from './RangeLegend';
 import { SplitLegend } from './SplitLegend';
 import { CategoryLegend } from './CategoryLegend';
+import { FOOTER_H, TimeScrubber } from './TimeScrubber';
+import { buildCellIndexByLayout, usePlaybackAndColorMode } from './usePlaybackAndColorMode';
 import { placeOverlay, VisibleBounds } from './overlay';
-import { cellRangeFor } from '../data/cellRange';
+import { DisplayRangeInfo, cellRangeFor } from '../data/cellRange';
+import { pathKey } from '../data/hierarchy';
 
 // Header height fallback for when showHeader is on (the actual height is measured after layout and overwrites this)
 const HEADER_H = 32;
@@ -126,6 +129,8 @@ const WarningBanner: React.FC<{ warnings: string[]; theme: GrafanaTheme2 }> = ({
 interface PanelHeaderProps {
   headerRef: React.RefObject<HTMLDivElement>;
   model: PanelModel;
+  rangeInfosByRef: Map<string, DisplayRangeInfo[]>;
+  modeLabelsByRef?: Map<string, string>;
   isSplit: boolean;
   selectedRefId: string;
   selectedMetricInfo: MetricInfo | undefined;
@@ -140,6 +145,8 @@ interface PanelHeaderProps {
 const PanelHeader: React.FC<PanelHeaderProps> = ({
   headerRef,
   model,
+  rangeInfosByRef,
+  modeLabelsByRef,
   isSplit,
   selectedRefId,
   selectedMetricInfo,
@@ -153,7 +160,11 @@ const PanelHeader: React.FC<PanelHeaderProps> = ({
   <div ref={headerRef} style={{ minHeight: HEADER_H, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
     {isSplit ? (
       // In split mode, each position entry carries its own metric range.
-      <SplitLegend metricInfos={model.metricInfos} rangeInfosByRef={model.rangeInfosByRef} />
+      <SplitLegend
+        metricInfos={model.metricInfos}
+        rangeInfosByRef={rangeInfosByRef}
+        modeLabelsByRef={modeLabelsByRef}
+      />
     ) : (
       <>
         {model.refIds.length > 1 && (
@@ -172,7 +183,8 @@ const PanelHeader: React.FC<PanelHeaderProps> = ({
           metricInfo={selectedMetricInfo}
           metricName={selectedRefId}
           width={width}
-          rangeInfos={selectedMetricInfo ? model.rangeInfosByRef.get(selectedMetricInfo.refId) : undefined}
+          rangeInfos={selectedMetricInfo ? rangeInfosByRef.get(selectedMetricInfo.refId) : undefined}
+          modeLabel={selectedMetricInfo ? modeLabelsByRef?.get(selectedMetricInfo.refId) : undefined}
         />
       </>
     )}
@@ -192,11 +204,62 @@ const PanelHeader: React.FC<PanelHeaderProps> = ({
   </div>
 );
 
+function useMeasuredHeight(
+  ref: React.RefObject<HTMLDivElement>,
+  visible: boolean,
+  fallback: number,
+  deps: React.DependencyList
+): number {
+  const [measured, setMeasured] = useState(0);
+  useLayoutEffect(() => {
+    const el = visible ? ref.current : null;
+    const measure = () => {
+      setMeasured(el && el.offsetHeight ? el.offsetHeight : visible ? fallback : 0);
+    };
+    measure();
+    if (el && typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(measure);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+    return undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ref, visible, fallback, ...deps]);
+  return measured;
+}
+
+const PanelFooter: React.FC<{
+  footerRef: React.RefObject<HTMLDivElement>;
+  playback: ReturnType<typeof usePlaybackAndColorMode>;
+  timeZone: string;
+}> = ({ footerRef, playback, timeZone }) => {
+  if (!playback.showScrubber || !playback.timeline) {
+    return null;
+  }
+  return (
+    <TimeScrubber
+      footerRef={footerRef}
+      timestamps={playback.timeline.timestamps}
+      activeIndex={playback.activeTimeIndex}
+      isScrubbing={playback.isScrubbing}
+      isPlaying={playback.isPlaying}
+      stepsPerSec={playback.stepsPerSec}
+      timeZone={timeZone}
+      onTogglePlay={playback.onTogglePlay}
+      onScrub={playback.onScrub}
+      onStep={playback.onStep}
+      onSpeedChange={playback.onSpeedChange}
+      onResetLive={playback.onResetLive}
+    />
+  );
+};
+
 export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
   const { data, width, height, options, timeZone, fitContent } = props;
   const theme = useTheme2();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
+  const footerRef = useRef<HTMLDivElement>(null);
   const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null);
   const setScrollRef = useCallback((element: HTMLDivElement | null) => {
     setScrollElement((current) => (current === element ? current : element));
@@ -239,6 +302,11 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
     () => buildModel(data.series, options, theme, timeZone, targetRefIds),
     [data.series, options, theme, timeZone, targetRefIds]
   );
+  const playback = usePlaybackAndColorMode(data.series, model, options, theme, timeZone);
+  const allWarnings = useMemo(
+    () => (playback.extraWarnings.length > 0 ? [...model.warnings, ...playback.extraWarnings] : model.warnings),
+    [model.warnings, playback.extraWarnings]
+  );
   const effectiveSelection = useMemo(
     () => selectedCategories.filter((value) => model.category?.colorByValue.has(value) ?? false),
     [selectedCategories, model.category]
@@ -270,26 +338,13 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
   const isSplit = displayMode === 'split' && model.metricInfos.length > 0;
   // The range is part of the panel's visual encoding, so reserve header space even when only one metric is available.
   const showHeader = true;
-  // Measure the actual header height and subtract it from the canvas area. Prevents overlap even when the legend wraps past 32px with many metrics.
-  // In environments where measurement isn't possible (jsdom), fall back to HEADER_H. Track changes with ResizeObserver since wrapping changes with width.
-  const [headerH, setHeaderH] = useState(0);
-  useLayoutEffect(() => {
-    const el = showHeader ? headerRef.current : null;
-    const measure = () => {
-      // Sync the actual DOM measurement after layout is finalized into React state (measure-then-set).
-      setHeaderH(el && el.offsetHeight ? el.offsetHeight : showHeader ? HEADER_H : 0);
-    };
-    measure();
-    if (el && typeof ResizeObserver !== 'undefined') {
-      const ro = new ResizeObserver(measure);
-      ro.observe(el);
-      return () => ro.disconnect();
-    }
-    return undefined;
-  }, [showHeader, model, width]);
+  // Measure the actual header and footer heights and subtract them from the canvas area.
+  const headerH = useMeasuredHeight(headerRef, showHeader, HEADER_H, [model, width]);
+  const footerH = useMeasuredHeight(footerRef, playback.showScrubber, FOOTER_H, [width]);
+
   // If there's a warning (e.g. partial exclusion), also subtract the banner height
-  const warnH = model.warnings.length > 0 ? WARN_H : 0;
-  const bodyH = Math.max(0, height - headerH - warnH);
+  const warnH = allWarnings.length > 0 ? WARN_H : 0;
+  const bodyH = Math.max(0, height - headerH - warnH - footerH);
   // Fit-content: Grafana's innerHeight is 0 by design. Ignore it and lay out at
   // unbounded height so cell size follows width (typically S_MAX) and contentHeight
   // becomes the panel's natural height. The Auto Grid cell CSS enforces min/max.
@@ -298,6 +353,10 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
   const layout = useMemo(
     () => computeLayout(model.root, options.levels, width, layoutHeight),
     [model.root, options.levels, width, layoutHeight]
+  );
+  const cellIndexByLayout = useMemo(
+    () => buildCellIndexByLayout(layout, playback.cellIndexByPath),
+    [layout, playback.cellIndexByPath]
   );
   const viewportH = fitContent ? layout.contentHeight : bodyH;
 
@@ -331,6 +390,8 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
         categoryStyle: normalizeCategoryStyle(options.categoryStyle),
         selectedCategoryValues: effectiveSelection,
         hoverCategoryValue: effectiveHover,
+        frameSlicesByRef: playback.frameSlicesByRef,
+        cellIndexByLayout,
         theme,
         scrollTop,
         viewportH,
@@ -347,6 +408,8 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
     viewportH,
     effectiveSelection,
     effectiveHover,
+    playback.frameSlicesByRef,
+    cellIndexByLayout,
   ]);
 
   // When panel data updates, discard the cache/error/loading state and advance the generation (cache is invalidated per panel via requestId).
@@ -444,7 +507,7 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
   // When no cells qualify for rendering at all, don't silently show an empty canvas — state the reason explicitly.
   // If there's a warning, show it; otherwise show a data error to the effect of "unable to build numeric cells" (spec: never silently show an empty display).
   if (layout.cells.length === 0) {
-    return <NoCellsMessage warnings={model.warnings} />;
+    return <NoCellsMessage warnings={allWarnings} />;
   }
 
   return (
@@ -453,6 +516,8 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
         <PanelHeader
           headerRef={headerRef}
           model={model}
+          rangeInfosByRef={playback.effectiveRangeInfosByRef}
+          modeLabelsByRef={playback.modeLabelsByRef}
           isSplit={isSplit}
           selectedRefId={selectedRefId}
           selectedMetricInfo={selectedMetricInfo}
@@ -464,7 +529,7 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
           onHoverCategory={setHoverCategory}
         />
       )}
-      <WarningBanner warnings={model.warnings} theme={theme} />
+      <WarningBanner warnings={allWarnings} theme={theme} />
       <div
         ref={setScrollRef}
         style={scrollContainerStyle(width, viewportH, layout)}
@@ -540,6 +605,9 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
             metricInfos={model.metricInfos}
             missingColor={options.missingColor}
             tooltipLabels={options.tooltipLabels}
+            frameSlicesByRef={playback.frameSlicesByRef}
+            cellIndex={playback.cellIndexByPath.get(pathKey(hover.cell.path))}
+            zScoreMethod={playback.zScoreMethod}
             x={hover.x}
             y={hover.y}
             minX={visibleBounds.minX}
@@ -647,6 +715,7 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
             );
           })()}
       </div>
+      <PanelFooter footerRef={footerRef} playback={playback} timeZone={timeZone} />
     </div>
   );
 };

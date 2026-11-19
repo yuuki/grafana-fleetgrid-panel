@@ -38,7 +38,8 @@ export const RangeLegend: React.FC<{
   metricName?: string;
   width: number;
   rangeInfos?: DisplayRangeInfo[];
-}> = ({ metricInfo, metricName, width, rangeInfos }) => {
+  modeLabel?: string;
+}> = ({ metricInfo, metricName, width, rangeInfos, modeLabel }) => {
   const theme = useTheme2();
   const isCompact = width < COMPACT_WIDTH;
   const multipleRanges = (rangeInfos?.length ?? 0) > 1;
@@ -76,6 +77,7 @@ export const RangeLegend: React.FC<{
         }}
       >
         <span>{name}</span>
+        {modeLabel && <span style={{ color: theme.colors.text.secondary }}>{modeLabel}</span>}
         <span style={{ color: theme.colors.text.secondary }}>No data</span>
       </div>
     );
@@ -101,18 +103,20 @@ export const RangeLegend: React.FC<{
         }}
       >
         {!isCompact && <span>{metricInfo.name}</span>}
+        {modeLabel && <span style={{ color: theme.colors.text.secondary }}>{modeLabel}</span>}
         <span>Label-based ranges</span>
         <span style={{ color: theme.colors.text.secondary }}>{`${rangeInfos!.length} ranges`}</span>
       </div>
     );
   }
   const { state, min, max, gradient, isConfigured } = range!;
+  const ariaPrefix = modeLabel ? `${metricInfo.name} (${modeLabel})` : metricInfo.name;
 
   if (isCompact) {
     return (
       <span
         data-testid="range-legend"
-        aria-label={`${metricInfo.name} range, ${state}, ${min} to ${max}`}
+        aria-label={`${ariaPrefix} range, ${state}, ${min} to ${max}`}
         style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -127,6 +131,7 @@ export const RangeLegend: React.FC<{
           whiteSpace: 'nowrap',
         }}
       >
+        {modeLabel && <span style={{ color: theme.colors.text.secondary }}>{modeLabel}</span>}
         <span aria-hidden style={{ color: theme.colors.text.secondary }}>
           {isConfigured ? '🔒' : '↕'}
         </span>
@@ -154,6 +159,21 @@ export const RangeLegend: React.FC<{
       <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {metricInfo.name}
       </span>
+      {modeLabel && (
+        <span
+          data-testid="range-mode-badge"
+          style={{
+            padding: '0 4px',
+            borderRadius: 2,
+            background: theme.colors.background.primary,
+            border: `1px solid ${theme.colors.border.weak}`,
+            color: theme.colors.text.secondary,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {modeLabel}
+        </span>
+      )}
       {isConfigured && <span aria-hidden>🔒</span>}
       <span style={{ color: theme.colors.text.secondary, whiteSpace: 'nowrap' }}>{state}</span>
       <span style={{ whiteSpace: 'nowrap' }}>{min}</span>
