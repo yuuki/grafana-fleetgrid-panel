@@ -136,6 +136,26 @@ Selecting `b` in the category legend keeps matching cells bright and dims non-ma
 | Spatial aggregation | `Max`             | Combines multiple series that fall on the same cell (e.g. when the hierarchy stops above the series granularity). `Max` / `Mean` / `Min` / `Sum` |
 | Reduce calculation  | `Last (not null)` | Folds a range query into one current value per series. Limited to reducers that return a number                                                  |
 
+### Color mode
+
+| Option                | Default                  | Description                                                                                                                                                                   |
+| --------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Coloring mode         | `Value`                  | `Value` (standard metric value), `Delta (Δt)` (change `v(t) - v(t - Δt)` on a diverging palette), or `Spatial Z-score` (deviation from sibling group mean or median)          |
+| Delta lookback (s)    | `0` (previous step)      | Lookback offset `Δt` in seconds for `Delta (Δt)` mode. `0` compares against the immediately preceding sample                                                                  |
+| Z-score sibling group | `Parent group (default)` | Hierarchy level defining the sibling group (e.g. compare GPUs within the same `host`, or within the same `zone`, or across the entire fleet)                                  |
+| Z-score method        | `Mean / StdDev`          | `Mean / StdDev` or robust `Median / MAD` estimator                                                                                                                            |
+| Z-score color limit   | `3` (`±3σ`)              | Symmetric diverging scale clamp in standard deviations (`0` auto-scales to `±max(\|z\|)`)                                                                                     |
+
+In `Delta (Δt)` and `Spatial Z-score` modes, cells use a theme-aware blue ↔ neutral ↔ red diverging palette with `0` pinned to neutral. Hovering a cell shows both the transformed value and the underlying current value (plus baseline `prev` value in delta mode, or sibling group center/spread in Z-score mode).
+
+### Time playback
+
+| Option        | Default | Description                                                                                                                                                         |
+| ------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Time scrubber | off     | Show a footer timeline scrubber with play/pause, single-step, speed (`1/s`–`60/s`), and `Live` reset controls whenever range queries return two or more timestamps |
+
+Range frames are pre-indexed into typed arrays (`Float64Array`) so scrubbing and playback repaint the single `<canvas>` without re-running layout or creating DOM nodes. Scrubbing combines with `Value`, `Delta (Δt)`, and `Spatial Z-score` modes.
+
 ### Color scale overrides
 
 Each rule has an optional **refId** (blank means every metric), one or more label conditions, and at least one of **Min** or **Max**. Conditions within a rule are ANDed. `exact` compares the whole label value; `regex` uses JavaScript `RegExp` search semantics, so add `^` and `$` when a full-string match is required. The editor lists refIds, detected label names, and sample values, and supports adding, deleting, and reordering rules.

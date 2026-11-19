@@ -165,9 +165,25 @@ Instant queries have no history at hand, so the panel re-issues the dashboard's 
 **Decision: generation-token guards for the async lifecycle.**
 *Rationale:* comparing `requestId`s captured in a closure compares the old value with itself and never detects staleness (a review-caught race). A ref-held generation token is checked in success, failure, and finally paths, so a stale response can neither resurrect an old cache nor leak an old error into the new request's state. A failed requery shows a short failure message in the popover and is not retried until the panel data changes (no retry loops).
 
+### Time scrubbing and playback
+
+When `enablePlayback` is enabled and range queries return time-series frames with two or more distinct timestamps, FleetGrid pre-indexes the frames into a dense `Float64Array` (`src/data/timeline.ts`, layout `timeIndex × cellCount + cellIndex` per refId, `NaN` for missing) using the same spatial aggregation as `values.ts`. A memory cap (`4,000,000` slots per refId) uniformly downsamples timestamps (always keeping first and last) and surfaces a warning rather than risking browser OOM on huge fleets.
+
+**Decision: pre-indexed typed-array slices + canvas backing-store guard, zero re-layout during scrubbing.**
+*Rationale:* scrubbing across hundreds of timestamps reuses the already-computed `LayoutResult` and `PanelModel`, updates only the `<canvas>` paint via zero-copy `Float64Array.subarray` views (without reassigning `canvas.width`/`height` when dimensions are unchanged), and uses a global timeline auto-range per refId so colors stay temporally consistent instead of flickering frame-to-frame. The footer `TimeScrubber` (`src/components/TimeScrubber.tsx`) provides play/pause (driven by `requestAnimationFrame` with wall-clock step pacing, automatically pausing at the end), step buttons, range slider, time-zone-formatted timestamp, speed selector, and a `Live` reset back to the reduced view.
+
+### Temporal Delta (Δt) and Spatial Z-score coloring modes
+
+`colorMode` (`src/data/colorModes.ts`) supports three modes:
+- `value` (default): unchanged Grafana field-config display processor and `rangeOverrides` path.
+- `delta`: colors each cell by `v(t) - v(t - Δt)` using a theme-aware diverging palette (cool blue ↔ neutral ↔ warm red), where `0` is always pinned to neutral even for asymmetric endpoints. Lookback (`deltaLookbackSec`) binary-searches for the latest timestamp `≤ t - Δt` (`0` = immediate previous step). Formatting inherits the metric's configured unit and decimals with an explicit `+` sign for positive changes; when no time-series frames exist, cells render missing with an explicit warning.
+- `zscore`: colors each cell by its deviation within its sibling group (configurable hierarchy depth, defaulting to the leaf's parent group, or entire fleet) using either `mean` (population stddev) or robust `median` (`1.4826 × MAD`, falling back to `1.253314 × meanAD` when `MAD === 0` so single outliers in constant-majority groups remain detectable). Groups with fewer than 2 valid cells produce missing (`NaN`), never `0`; constant groups of 2+ cells produce `0`. Values format as signed `σ` on a symmetric diverging scale (default `±3σ`, or `0` for auto).
+
+Both modes apply in single and split views, surface their mode badge and diverging scale in `RangeLegend` / `SplitLegend`, and expose underlying raw, baseline (`prev`), and sibling group statistics in `CellTooltip`.
+
 ## 10. Options surface
 
-Custom options are intentionally few; display formatting/color/link behavior lives in standard field config, with one targeted range-matching option:
+Custom options are intentionally few; display formatting/color/link behavior lives in standard field config, with targeted options for label-based range matching, time playback, and delta/Z-score coloring:
 
 | Option | Values (default) |
 |---|---|
@@ -177,6 +193,12 @@ Custom options are intentionally few; display formatting/color/link behavior liv
 | `missingColor` | color (theme fallback) |
 | `spatialAggregation` | `max` (default) / `mean` / `min` / `sum` |
 | `reduceCalc` | numeric reducers only: `lastNotNull` (default), `last`, `mean`, `min`, `max`, `sum`, `count` |
+| `colorMode` | `value` (default) / `delta` / `zscore` |
+| `deltaLookbackSec` | lookback offset in seconds (`0` = previous sample step; shown in `delta` mode) |
+| `zScoreGroupDepth` | sibling group depth (`-1` = parent group default, `-2` = entire fleet, or level index; shown in `zscore` mode) |
+| `zScoreMethod` | `mean` (default) / `median` (shown in `zscore` mode) |
+| `zScoreLimit` | symmetric diverging clamp in `σ` (`3` default, `0` = auto; shown in `zscore` mode) |
+| `enablePlayback` | boolean (off) — footer timeline scrubber and playback controls for range queries |
 | `rangeOverrides` | ordered `RangeOverride[]` (`[]`) — optional refId, one-or-more exact/regex label matchers, optional Min/Max |
 
 The **Color scale overrides** editor supports add/remove/reorder and multiple matchers per rule. It derives refId, label-name, and sample-value suggestions from both table and time-series query results while allowing custom values. Inline validation covers missing matchers or labels, invalid regex, non-finite endpoints, neither endpoint set, and `min >= max`; min-only and max-only rules are valid.
