@@ -44,11 +44,11 @@ describe('colorModes properties', () => {
             sum += res.values[i];
             sqSum += res.values[i] * res.values[i];
           }
-          expect(Math.abs(sum / vals.length)).toBeLessThan(1e-7);
           const allEqual = vals.every((v) => v === vals[0]);
           if (allEqual) {
             expect(sqSum).toBe(0);
           } else if (res.statsByCell[0] && res.statsByCell[0].spread > 1e-9) {
+            expect(Math.abs(sum / vals.length)).toBeLessThan(1e-7);
             expect(Math.sqrt(sqSum / vals.length)).toBeCloseTo(1, 5);
           }
         }

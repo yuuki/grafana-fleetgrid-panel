@@ -24,14 +24,15 @@ The example shows two zones and 200 nodes (100 per zone), with four GPU cells pe
 - **Natural sort** — Numeric segments inside labels are compared as numbers (`node-a2 < node-a10`), ascending by default (descending and "data order" are also selectable).
 - **Multiple metrics** — Show one metric at a time with an in-panel selector (default), or opt in to split each cell into sub-regions to compare its metrics side by side. The tooltip and popover list every metric that returned data.
 - **Drilldown** — Click a cell to open a popover with the current value per metric, plus a sparkline whenever time-series data is available for that metric. If the field has Data Links, navigation takes priority over the popover.
+- **Time-scrubbing playback & Delta / Spatial Z-score modes** — Optionally scrub and play back range queries across timestamps in the panel footer, or switch coloring to Temporal Delta (`v(t) - v(t - Δt)`) or Spatial Z-score (sibling deviation) on a diverging palette.
 
 ## Compatibility
 
-| Requirement | Value                          |
-| ----------- | ------------------------------ |
-| Grafana     | `>= 11.6.0`                    |
-| Data source | Prometheus / VictoriaMetrics   |
-| Query type  | Instant (recommended) or Range |
+| Requirement | Value                                                                          |
+| ----------- | ------------------------------------------------------------------------------ |
+| Grafana     | `>= 11.6.0`                                                                    |
+| Data source | Prometheus / VictoriaMetrics                                                   |
+| Query type  | Instant (recommended for static views) or Range (required for playback & Delta) |
 
 Coloring, units, and drilldown rely on Grafana's standard field config, so any data source that produces labeled numeric series can work, but the plugin is designed for Prometheus / VictoriaMetrics. The automated end-to-end tests run against Grafana's built-in TestData data source; verification against a live Prometheus / VictoriaMetrics instance — including the instant-query drilldown re-query — is still outstanding and recommended before production use.
 

@@ -33,7 +33,32 @@ const buildGradient = (metricInfo: DisplayRangeInfo): string => {
   return `linear-gradient(to right, ${colors.join(', ')})`;
 };
 
-export const RangeLegend: React.FC<{
+const ModeBadge: React.FC<{ label?: string; pill?: boolean }> = ({ label, pill }) => {
+  const theme = useTheme2();
+  if (!label) {
+    return null;
+  }
+  if (!pill) {
+    return <span style={{ color: theme.colors.text.secondary }}>{label}</span>;
+  }
+  return (
+    <span
+      data-testid="range-mode-badge"
+      style={{
+        padding: '0 4px',
+        borderRadius: 2,
+        background: theme.colors.background.primary,
+        border: `1px solid ${theme.colors.border.weak}`,
+        color: theme.colors.text.secondary,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {label}
+    </span>
+  );
+};
+
+const RangeLegendComponent: React.FC<{
   metricInfo?: MetricInfo;
   metricName?: string;
   width: number;
@@ -77,7 +102,6 @@ export const RangeLegend: React.FC<{
         }}
       >
         <span>{name}</span>
-        {modeLabel && <span style={{ color: theme.colors.text.secondary }}>{modeLabel}</span>}
         <span style={{ color: theme.colors.text.secondary }}>No data</span>
       </div>
     );
@@ -103,7 +127,7 @@ export const RangeLegend: React.FC<{
         }}
       >
         {!isCompact && <span>{metricInfo.name}</span>}
-        {modeLabel && <span style={{ color: theme.colors.text.secondary }}>{modeLabel}</span>}
+        <ModeBadge label={modeLabel} />
         <span>Label-based ranges</span>
         <span style={{ color: theme.colors.text.secondary }}>{`${rangeInfos!.length} ranges`}</span>
       </div>
@@ -131,7 +155,7 @@ export const RangeLegend: React.FC<{
           whiteSpace: 'nowrap',
         }}
       >
-        {modeLabel && <span style={{ color: theme.colors.text.secondary }}>{modeLabel}</span>}
+        <ModeBadge label={modeLabel} />
         <span aria-hidden style={{ color: theme.colors.text.secondary }}>
           {isConfigured ? '🔒' : '↕'}
         </span>
@@ -159,21 +183,7 @@ export const RangeLegend: React.FC<{
       <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {metricInfo.name}
       </span>
-      {modeLabel && (
-        <span
-          data-testid="range-mode-badge"
-          style={{
-            padding: '0 4px',
-            borderRadius: 2,
-            background: theme.colors.background.primary,
-            border: `1px solid ${theme.colors.border.weak}`,
-            color: theme.colors.text.secondary,
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {modeLabel}
-        </span>
-      )}
+      <ModeBadge label={modeLabel} pill />
       {isConfigured && <span aria-hidden>🔒</span>}
       <span style={{ color: theme.colors.text.secondary, whiteSpace: 'nowrap' }}>{state}</span>
       <span style={{ whiteSpace: 'nowrap' }}>{min}</span>
@@ -194,3 +204,5 @@ export const RangeLegend: React.FC<{
     </div>
   );
 };
+
+export const RangeLegend = React.memo(RangeLegendComponent);

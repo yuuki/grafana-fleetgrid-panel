@@ -22,6 +22,8 @@ const NEUTRAL_LIGHT: RGB = [232, 236, 239]; // #E8ECEF
 const POS_MID: RGB = [239, 138, 98]; // #EF8A62
 const POS_STRONG: RGB = [178, 24, 43]; // #B2182B
 
+const ZERO_TEXT_RE = /^-?0(\.0+)?$/;
+
 function lerpRgb(a: RGB, b: RGB, t: number): string {
   const r = Math.round(a[0] + (b[0] - a[0]) * t);
   const g = Math.round(a[1] + (b[1] - a[1]) * t);
@@ -79,9 +81,46 @@ export function formatLookbackLabel(lookbackSec: number): string {
 }
 
 /**
- * Wraps a metric's Grafana display processor so Temporal Delta values keep the metric's
- * configured unit and decimals, show an explicit '+' sign for positive deltas, and use
- * the diverging palette.
+ * Builds a formatting-only Grafana DisplayProcessor that preserves unit and decimals
+ * while stripping value mappings and thresholds (so raw-value mappings like "0 -> Idle"
+ * never corrupt delta values or Z-score spread formatting).
+ */
+export function buildUnitOnlyProcessor(info: MetricInfo, theme: GrafanaTheme2, timeZone: string): DisplayProcessor {
+  if (!info.field || !info.field.config) {
+    return info.processor;
+  }
+  const field = {
+    ...info.field,
+    config: {
+      ...info.field.config,
+      mappings: [],
+      thresholds: undefined,
+    },
+  };
+  return getDisplayProcessor({ field, theme, timeZone });
+}
+
+function normalizeSignedDisplay(base: DisplayValue, num: number): { text: string; prefix?: string } {
+  // Normalize near-zero rounded outputs ("-0.0" -> "0.0") and avoid "+0.0".
+  if (ZERO_TEXT_RE.test(base.text)) {
+    return {
+      text: base.text.startsWith('-') ? base.text.slice(1) : base.text,
+      prefix: base.prefix,
+    };
+  }
+  if (num > 0 && !base.text.startsWith('+') && !base.text.startsWith('-')) {
+    if (base.prefix && !base.prefix.startsWith('+') && !base.prefix.startsWith('-')) {
+      return { text: base.text, prefix: `+${base.prefix}` };
+    }
+    return { text: `+${base.text}`, prefix: base.prefix };
+  }
+  return { text: base.text, prefix: base.prefix };
+}
+
+/**
+ * Wraps a unit-only Grafana display processor so Temporal Delta values keep the metric's
+ * configured unit and decimals, show an explicit '+' sign (before any prefix like '$'),
+ * avoid '+0.0'/'-0.0', and use the diverging palette.
  */
 export function buildDeltaProcessor(
   baseProcessor: DisplayProcessor,
@@ -96,10 +135,11 @@ export function buildDeltaProcessor(
     if (!Number.isFinite(num)) {
       return base;
     }
-    const text = num > 0 && !base.text.startsWith('+') && !base.text.startsWith('-') ? `+${base.text}` : base.text;
+    const { text, prefix } = normalizeSignedDisplay(base, num);
     return {
       ...base,
       text,
+      prefix,
       color: divergingColor(valueToDivergingRatio(num, min, max), isDark),
     };
   };
@@ -115,14 +155,22 @@ export function buildZScoreProcessor(
   theme: GrafanaTheme2
 ): DisplayProcessor {
   const isDark = theme.isDark;
-  const digits = decimals != null && Number.isFinite(decimals) && decimals >= 0 ? Math.min(6, Math.floor(decimals)) : 1;
+  const digits =
+    decimals != null && Number.isFinite(decimals) && decimals >= 0 ? Math.min(6, Math.floor(decimals)) : 1;
   return (value: unknown): DisplayValue => {
     const num = Number(value);
     if (!Number.isFinite(num)) {
       return { numeric: Number.NaN, text: '', color: undefined };
     }
     const fixed = num.toFixed(digits);
-    const text = num > 0 && !fixed.startsWith('+') ? `+${fixed}` : fixed;
+    let text: string;
+    if (ZERO_TEXT_RE.test(fixed)) {
+      text = fixed.startsWith('-') ? fixed.slice(1) : fixed;
+    } else if (num > 0 && !fixed.startsWith('+')) {
+      text = `+${fixed}`;
+    } else {
+      text = fixed;
+    }
     return {
       numeric: num,
       text,
@@ -208,35 +256,63 @@ export function buildSiblingGroups(
 function sortedMedian(sorted: number[]): number {
   const n = sorted.length;
   const mid = n >> 1;
-  return n % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  if (n % 2 === 1) {
+    return sorted[mid];
+  }
+  const a = sorted[mid - 1];
+  const b = sorted[mid];
+  // Overflow-safe midpoint even for values near Number.MAX_VALUE.
+  const diff = b - a;
+  return Number.isFinite(diff) ? a + diff / 2 : a / 2 + b / 2;
+}
+
+function safeMean(vals: number[]): number {
+  let mean = 0;
+  for (let i = 0; i < vals.length; i++) {
+    // Incremental Welford mean avoids Float64 sum overflow for values near Number.MAX_VALUE.
+    const step = vals[i] - mean;
+    mean = Number.isFinite(step) ? mean + step / (i + 1) : mean * (i / (i + 1)) + vals[i] / (i + 1);
+  }
+  return mean;
+}
+
+function safeStdDev(vals: number[], mean: number): number {
+  let maxDiff = 0;
+  for (let i = 0; i < vals.length; i++) {
+    const d = Math.abs(vals[i] - mean);
+    if (Number.isFinite(d) && d > maxDiff) {
+      maxDiff = d;
+    }
+  }
+  if (maxDiff === 0) {
+    return 0;
+  }
+  // Scale by maxDiff before squaring so values ~1e160..1e308 never overflow diff*diff to Infinity.
+  let sqSum = 0;
+  for (let i = 0; i < vals.length; i++) {
+    const scaled = (vals[i] - mean) / maxDiff;
+    sqSum += scaled * scaled;
+  }
+  return maxDiff * Math.sqrt(sqSum / vals.length);
 }
 
 function groupCenterAndSpread(vals: number[], method: ZScoreMethod): { center: number; spread: number } {
-  const n = vals.length;
   if (method === 'median') {
     const sorted = [...vals].sort((a, b) => a - b);
     const med = sortedMedian(sorted);
     const absDevs = sorted.map((v) => Math.abs(v - med)).sort((a, b) => a - b);
     const mad = sortedMedian(absDevs);
-    if (mad > 0) {
+    if (mad > 0 && Number.isFinite(MAD_TO_STD * mad)) {
       return { center: med, spread: MAD_TO_STD * mad };
     }
     // When >50% of siblings share the exact median, MAD is 0 even if an outlier exists;
     // fall back to scaled mean absolute deviation so outliers remain detectable.
-    const meanAd = absDevs.reduce((acc, d) => acc + d, 0) / n;
-    return { center: med, spread: meanAd > 0 ? MEAN_AD_TO_STD * meanAd : 0 };
+    const meanAd = safeMean(absDevs);
+    const scaled = MEAN_AD_TO_STD * meanAd;
+    return { center: med, spread: meanAd > 0 && Number.isFinite(scaled) ? scaled : 0 };
   }
-  let sum = 0;
-  for (let i = 0; i < n; i++) {
-    sum += vals[i];
-  }
-  const mean = sum / n;
-  let sqSum = 0;
-  for (let i = 0; i < n; i++) {
-    const diff = vals[i] - mean;
-    sqSum += diff * diff;
-  }
-  return { center: mean, spread: Math.sqrt(sqSum / n) };
+  const mean = safeMean(vals);
+  return { center: mean, spread: safeStdDev(vals, mean) };
 }
 
 export interface SpatialZScoreResult {
@@ -281,6 +357,9 @@ function scoreSiblingGroup(
       continue;
     }
     const z = spread > 0 ? (v - center) / spread : 0;
+    if (!Number.isFinite(z)) {
+      continue;
+    }
     outValues[idx] = z;
     statsByCell[idx] = stat;
     const absZ = Math.abs(z);
@@ -365,6 +444,9 @@ export function computeTemporalDeltaSlice(
     baselineValues[c] = prev;
     if (Number.isFinite(curr) && Number.isFinite(prev)) {
       const d = curr - prev;
+      if (!Number.isFinite(d)) {
+        continue;
+      }
       values[c] = d;
       const absD = Math.abs(d);
       if (absD > maxAbs) {
@@ -375,8 +457,32 @@ export function computeTemporalDeltaSlice(
   return { values, rawValues, baselineValues, prevIndex, maxAbs };
 }
 
+function scanSliceMaxAbsDelta(
+  arr: Float64Array,
+  currOffset: number,
+  prevOffset: number,
+  cellCount: number
+): number {
+  let maxAbs = 0;
+  for (let c = 0; c < cellCount; c++) {
+    const curr = arr[currOffset + c];
+    const prev = arr[prevOffset + c];
+    if (!Number.isFinite(curr) || !Number.isFinite(prev)) {
+      continue;
+    }
+    const d = curr - prev;
+    if (Number.isFinite(d)) {
+      const absD = Math.abs(d);
+      if (absD > maxAbs) {
+        maxAbs = absD;
+      }
+    }
+  }
+  return maxAbs;
+}
+
 /**
- * Computes the maximum |v(t) - v(t - Δt)| across the entire timeline for one refId,
+ * Computes the maximum finite |v(t) - v(t - Δt)| across the entire timeline for one refId,
  * giving playback a temporally stable symmetric diverging scale.
  */
 export function computeTemporalDeltaGlobalMaxAbs(
@@ -396,17 +502,9 @@ export function computeTemporalDeltaGlobalMaxAbs(
     if (prevIdx < 0) {
       continue;
     }
-    const currOffset = t * C;
-    const prevOffset = prevIdx * C;
-    for (let c = 0; c < C; c++) {
-      const curr = arr[currOffset + c];
-      const prev = arr[prevOffset + c];
-      if (Number.isFinite(curr) && Number.isFinite(prev)) {
-        const absD = Math.abs(curr - prev);
-        if (absD > maxAbs) {
-          maxAbs = absD;
-        }
-      }
+    const stepMax = scanSliceMaxAbsDelta(arr, t * C, prevIdx * C, C);
+    if (stepMax > maxAbs) {
+      maxAbs = stepMax;
     }
   }
   return maxAbs;
@@ -465,6 +563,22 @@ export function extractReducedValueArrays(
   return arrays;
 }
 
+function expandConstantAutoRange(min: number, max: number): { min: number; max: number } {
+  if (min !== max) {
+    return { min, max };
+  }
+  const step = Math.max(1, Math.abs(min) * Number.EPSILON);
+  const up = min + step;
+  if (Number.isFinite(up) && up > min) {
+    return { min, max: up };
+  }
+  const down = min - step;
+  if (Number.isFinite(down) && down < min) {
+    return { min: down, max };
+  }
+  return { min: 0, max: 1 };
+}
+
 function buildTimelineValueRangeInfo(
   info: MetricInfo,
   timelineRange: { min: number; max: number } | undefined,
@@ -474,9 +588,10 @@ function buildTimelineValueRangeInfo(
   if (!timelineRange || (info.minConfigured && info.maxConfigured)) {
     return info;
   }
+  const auto = expandConstantAutoRange(timelineRange.min, timelineRange.max);
   const normalized = normalizeEffectiveRange(
-    info.minConfigured ? (info.configuredMin as number) : timelineRange.min,
-    info.maxConfigured ? (info.configuredMax as number) : timelineRange.max,
+    info.minConfigured ? (info.configuredMin as number) : auto.min,
+    info.maxConfigured ? (info.configuredMax as number) : auto.max,
     info.minConfigured,
     info.maxConfigured
   );
@@ -508,28 +623,90 @@ export function buildTimelineRangeInfos(
   return out;
 }
 
+/**
+ * Builds symmetric diverging DisplayRangeInfos for Temporal Delta mode.
+ * Raw Field Config min/max describe absolute metric ranges (often >= 0) and are NOT inherited,
+ * so zero change is always pinned to neutral and negative changes always map to cool blue.
+ */
 export function buildDeltaRangeInfos(
   metricInfos: MetricInfo[],
   timeline: TimelineIndex | undefined,
   lookbackSec: number,
-  theme: GrafanaTheme2
+  theme: GrafanaTheme2,
+  timeZone = 'browser'
 ): Map<string, DisplayRangeInfo> {
   const out = new Map<string, DisplayRangeInfo>();
   for (const info of metricInfos) {
     const globalMaxAbs = timeline ? computeTemporalDeltaGlobalMaxAbs(timeline, info.refId, lookbackSec) : 0;
     const safeHalf = globalMaxAbs > 0 && Number.isFinite(globalMaxAbs) ? globalMaxAbs : 1;
-    const normalized = normalizeEffectiveRange(
-      info.minConfigured ? (info.configuredMin as number) : -safeHalf,
-      info.maxConfigured ? (info.configuredMax as number) : safeHalf,
-      info.minConfigured,
-      info.maxConfigured
-    );
+    const unitProc = buildUnitOnlyProcessor(info, theme, timeZone);
     out.set(info.refId, {
-      effectiveMin: normalized.min,
-      effectiveMax: normalized.max,
-      minConfigured: info.minConfigured,
-      maxConfigured: info.maxConfigured,
-      processor: buildDeltaProcessor(info.processor, normalized.min, normalized.max, theme),
+      effectiveMin: -safeHalf,
+      effectiveMax: safeHalf,
+      minConfigured: false,
+      maxConfigured: false,
+      processor: buildDeltaProcessor(unitProc, -safeHalf, safeHalf, theme),
+    });
+  }
+  return out;
+}
+
+function computeGlobalZScoreMaxAbs(
+  refId: string,
+  timeline: TimelineIndex | undefined,
+  reducedArraysByRef: Map<string, Float64Array> | undefined,
+  siblingGroups: SiblingGroup[],
+  method: ZScoreMethod
+): number {
+  let maxAbs = 0;
+  const full = timeline?.valuesByRef.get(refId);
+  if (timeline && full) {
+    const C = timeline.cellCount;
+    for (let t = 0; t < timeline.timestamps.length; t++) {
+      const res = computeSpatialZScores(full.subarray(t * C, (t + 1) * C), siblingGroups, method);
+      if (Number.isFinite(res.maxAbs) && res.maxAbs > maxAbs) {
+        maxAbs = res.maxAbs;
+      }
+    }
+  }
+  const reduced = reducedArraysByRef?.get(refId);
+  if (reduced) {
+    const res = computeSpatialZScores(reduced, siblingGroups, method);
+    if (Number.isFinite(res.maxAbs) && res.maxAbs > maxAbs) {
+      maxAbs = res.maxAbs;
+    }
+  }
+  return maxAbs;
+}
+
+/**
+ * Precomputes stable symmetric diverging DisplayRangeInfos for Spatial Z-score mode.
+ * Avoids rebuilding processors/gradients at 60 fps and keeps Auto (zScoreLimit=0) flicker-free during playback.
+ */
+export function buildZScoreRangeInfos(
+  metricInfos: MetricInfo[],
+  timeline: TimelineIndex | undefined,
+  reducedArraysByRef: Map<string, Float64Array> | undefined,
+  siblingGroups: SiblingGroup[],
+  method: ZScoreMethod,
+  zScoreLimit: number | undefined,
+  theme: GrafanaTheme2
+): Map<string, DisplayRangeInfo> {
+  const out = new Map<string, DisplayRangeInfo>();
+  const configuredLimit =
+    zScoreLimit === undefined ? DEFAULT_ZSCORE_LIMIT : Number.isFinite(zScoreLimit) && zScoreLimit > 0 ? zScoreLimit : 0;
+  const fixed = configuredLimit > 0;
+  for (const info of metricInfos) {
+    const half = fixed
+      ? configuredLimit
+      : Math.max(1, computeGlobalZScoreMaxAbs(info.refId, timeline, reducedArraysByRef, siblingGroups, method));
+    const safeHalf = Number.isFinite(half) && half > 0 ? half : 1;
+    out.set(info.refId, {
+      effectiveMin: -safeHalf,
+      effectiveMax: safeHalf,
+      minConfigured: fixed,
+      maxConfigured: fixed,
+      processor: buildZScoreProcessor(-safeHalf, safeHalf, info.field?.config?.decimals, theme),
     });
   }
   return out;
@@ -546,6 +723,8 @@ export interface BuildFrameSlicesArgs {
   timelineRangeInfosByRef?: Map<string, DisplayRangeInfo>;
   /** Precomputed global delta ranges (avoids rescanning the full timeline on every scrub frame). */
   deltaRangeInfosByRef?: Map<string, DisplayRangeInfo>;
+  /** Precomputed global Z-score ranges (avoids rebuilding processors and gradients on every scrub frame). */
+  zScoreRangeInfosByRef?: Map<string, DisplayRangeInfo>;
   zScoreMethod: ZScoreMethod;
   zScoreLimit: number | undefined;
   siblingGroups?: SiblingGroup[];
@@ -554,68 +733,54 @@ export interface BuildFrameSlicesArgs {
   timeZone: string;
 }
 
-function buildValueSlice(
+function buildValueSlices(args: BuildFrameSlicesArgs): Map<string, MetricFrameSlice> | undefined {
+  const { timeline, scrubIndex, metricInfos, theme, timeZone } = args;
+  if (!timeline || scrubIndex === null) {
+    return undefined;
+  }
+  const C = timeline.cellCount;
+  const out = new Map<string, MetricFrameSlice>();
+  for (const info of metricInfos) {
+    const full = timeline.valuesByRef.get(info.refId);
+    const values = full ? full.subarray(scrubIndex * C, (scrubIndex + 1) * C) : new Float64Array(C).fill(Number.NaN);
+    const rangeInfo =
+      args.timelineRangeInfosByRef?.get(info.refId) ??
+      buildTimelineValueRangeInfo(info, timeline.rangeByRef.get(info.refId), theme, timeZone);
+    out.set(info.refId, { values, rangeInfo, overridesCellRanges: false });
+  }
+  return out;
+}
+
+function buildDeltaSliceForMetric(
   info: MetricInfo,
-  timeline: TimelineIndex,
-  timeIndex: number,
+  timeline: TimelineIndex | undefined,
+  activeTime: number,
+  lookbackSec: number,
   cachedRangeInfo: DisplayRangeInfo | undefined,
   theme: GrafanaTheme2,
   timeZone: string
 ): MetricFrameSlice {
-  const C = timeline.cellCount;
-  const full = timeline.valuesByRef.get(info.refId);
-  const values = full ? full.subarray(timeIndex * C, (timeIndex + 1) * C) : new Float64Array(C).fill(Number.NaN);
-  return {
-    values,
-    rangeInfo: cachedRangeInfo ?? buildTimelineValueRangeInfo(info, timeline.rangeByRef.get(info.refId), theme, timeZone),
-    overridesCellRanges: false,
-  };
-}
-
-function buildDeltaSlice(
-  info: MetricInfo,
-  timeline: TimelineIndex | undefined,
-  timeIndex: number,
-  lookbackSec: number,
-  cachedRangeInfo: DisplayRangeInfo | undefined,
-  theme: GrafanaTheme2
-): MetricFrameSlice {
   const modeLabel = `Δ ${formatLookbackLabel(lookbackSec)}`;
   if (!timeline) {
-    const rangeInfo =
-      cachedRangeInfo ??
-      ({
-        effectiveMin: -1,
-        effectiveMax: 1,
-        minConfigured: false,
-        maxConfigured: false,
-        processor: buildDeltaProcessor(info.processor, -1, 1, theme),
-      } satisfies DisplayRangeInfo);
-    return {
-      values: new Float64Array(0),
-      rangeInfo,
-      overridesCellRanges: true,
-      modeLabel,
+    const unitProc = buildUnitOnlyProcessor(info, theme, timeZone);
+    const rangeInfo = cachedRangeInfo ?? {
+      effectiveMin: -1,
+      effectiveMax: 1,
+      minConfigured: false,
+      maxConfigured: false,
+      processor: buildDeltaProcessor(unitProc, -1, 1, theme),
     };
+    return { values: new Float64Array(0), rangeInfo, overridesCellRanges: true, modeLabel };
   }
-  const slice = computeTemporalDeltaSlice(timeline, info.refId, timeIndex, lookbackSec);
-  let rangeInfo = cachedRangeInfo;
-  if (!rangeInfo) {
-    const safeHalf = slice.maxAbs > 0 && Number.isFinite(slice.maxAbs) ? slice.maxAbs : 1;
-    const normalized = normalizeEffectiveRange(
-      info.minConfigured ? (info.configuredMin as number) : -safeHalf,
-      info.maxConfigured ? (info.configuredMax as number) : safeHalf,
-      info.minConfigured,
-      info.maxConfigured
-    );
-    rangeInfo = {
-      effectiveMin: normalized.min,
-      effectiveMax: normalized.max,
-      minConfigured: info.minConfigured,
-      maxConfigured: info.maxConfigured,
-      processor: buildDeltaProcessor(info.processor, normalized.min, normalized.max, theme),
-    };
-  }
+  const slice = computeTemporalDeltaSlice(timeline, info.refId, activeTime, lookbackSec);
+  const safeHalf = slice.maxAbs > 0 && Number.isFinite(slice.maxAbs) ? slice.maxAbs : 1;
+  const rangeInfo = cachedRangeInfo ?? {
+    effectiveMin: -safeHalf,
+    effectiveMax: safeHalf,
+    minConfigured: false,
+    maxConfigured: false,
+    processor: buildDeltaProcessor(buildUnitOnlyProcessor(info, theme, timeZone), -safeHalf, safeHalf, theme),
+  };
   return {
     values: slice.values,
     rawValues: slice.rawValues,
@@ -626,34 +791,73 @@ function buildDeltaSlice(
   };
 }
 
-function buildZScoreSlice(
-  info: MetricInfo,
-  rawValues: Float64Array,
-  siblingGroups: SiblingGroup[],
-  method: ZScoreMethod,
-  zScoreLimit: number | undefined,
-  theme: GrafanaTheme2
-): MetricFrameSlice {
-  const result = computeSpatialZScores(rawValues, siblingGroups, method);
+function buildDeltaSlices(args: BuildFrameSlicesArgs): Map<string, MetricFrameSlice> {
+  const { timeline, scrubIndex, metricInfos, deltaLookbackSec, deltaRangeInfosByRef, theme, timeZone } = args;
+  const activeTime = timeline ? (scrubIndex ?? timeline.timestamps.length - 1) : -1;
+  const out = new Map<string, MetricFrameSlice>();
+  for (const info of metricInfos) {
+    out.set(
+      info.refId,
+      buildDeltaSliceForMetric(
+        info,
+        timeline,
+        activeTime,
+        deltaLookbackSec,
+        deltaRangeInfosByRef?.get(info.refId),
+        theme,
+        timeZone
+      )
+    );
+  }
+  return out;
+}
+
+function rawSliceForZScore(
+  refId: string,
+  timeline: TimelineIndex | undefined,
+  scrubIndex: number | null,
+  reducedArraysByRef: Map<string, Float64Array> | undefined
+): Float64Array {
+  if (timeline && scrubIndex !== null) {
+    const C = timeline.cellCount;
+    const full = timeline.valuesByRef.get(refId);
+    return full ? full.subarray(scrubIndex * C, (scrubIndex + 1) * C) : new Float64Array(C).fill(Number.NaN);
+  }
+  return reducedArraysByRef?.get(refId) ?? new Float64Array(0);
+}
+
+function buildZScoreSlices(args: BuildFrameSlicesArgs): Map<string, MetricFrameSlice> {
+  const { metricInfos, timeline, scrubIndex, reducedArraysByRef, zScoreMethod, zScoreLimit, theme } = args;
+  const groups = args.siblingGroups ?? [];
+  const modeLabel = zScoreMethod === 'median' ? 'Z-score (median)' : 'Z-score (mean)';
   const configuredLimit =
     zScoreLimit === undefined ? DEFAULT_ZSCORE_LIMIT : Number.isFinite(zScoreLimit) && zScoreLimit > 0 ? zScoreLimit : 0;
   const fixed = configuredLimit > 0;
-  const half = fixed ? configuredLimit : Math.max(1, result.maxAbs);
-  const processor = buildZScoreProcessor(-half, half, info.field.config.decimals, theme);
-  return {
-    values: result.values,
-    rawValues,
-    zScoreStats: result.statsByCell,
-    rangeInfo: {
-      effectiveMin: -half,
-      effectiveMax: half,
-      minConfigured: fixed,
-      maxConfigured: fixed,
-      processor,
-    },
-    overridesCellRanges: true,
-    modeLabel: method === 'median' ? 'Z-score (median)' : 'Z-score (mean)',
-  };
+  const out = new Map<string, MetricFrameSlice>();
+  for (const info of metricInfos) {
+    const raw = rawSliceForZScore(info.refId, timeline, scrubIndex, reducedArraysByRef);
+    const result = computeSpatialZScores(raw, groups, zScoreMethod);
+    let rangeInfo = args.zScoreRangeInfosByRef?.get(info.refId);
+    if (!rangeInfo) {
+      const half = fixed ? configuredLimit : Math.max(1, Number.isFinite(result.maxAbs) ? result.maxAbs : 1);
+      rangeInfo = {
+        effectiveMin: -half,
+        effectiveMax: half,
+        minConfigured: fixed,
+        maxConfigured: fixed,
+        processor: buildZScoreProcessor(-half, half, info.field?.config?.decimals, theme),
+      };
+    }
+    out.set(info.refId, {
+      values: result.values,
+      rawValues: raw,
+      zScoreStats: result.statsByCell,
+      rangeInfo,
+      overridesCellRanges: true,
+      modeLabel,
+    });
+  }
+  return out;
 }
 
 /**
@@ -661,54 +865,11 @@ function buildZScoreSlice(
  * Returns undefined in default 'value' mode when not scrubbing (keeping the legacy render path untouched).
  */
 export function buildFrameSlices(args: BuildFrameSlicesArgs): Map<string, MetricFrameSlice> | undefined {
-  const { colorMode, metricInfos, timeline, scrubIndex, theme, timeZone } = args;
-  if (colorMode === 'value' && scrubIndex === null) {
-    return undefined;
+  if (args.colorMode === 'value') {
+    return buildValueSlices(args);
   }
-  const out = new Map<string, MetricFrameSlice>();
-  if (colorMode === 'value') {
-    if (!timeline || scrubIndex === null) {
-      return undefined;
-    }
-    for (const info of metricInfos) {
-      out.set(
-        info.refId,
-        buildValueSlice(info, timeline, scrubIndex, args.timelineRangeInfosByRef?.get(info.refId), theme, timeZone)
-      );
-    }
-    return out;
+  if (args.colorMode === 'delta') {
+    return buildDeltaSlices(args);
   }
-
-  if (colorMode === 'delta') {
-    const activeTime = timeline ? (scrubIndex ?? timeline.timestamps.length - 1) : -1;
-    for (const info of metricInfos) {
-      out.set(
-        info.refId,
-        buildDeltaSlice(
-          info,
-          timeline,
-          activeTime,
-          args.deltaLookbackSec,
-          args.deltaRangeInfosByRef?.get(info.refId),
-          theme
-        )
-      );
-    }
-    return out;
-  }
-
-  // colorMode === 'zscore'
-  const groups = args.siblingGroups ?? [];
-  for (const info of metricInfos) {
-    let raw: Float64Array;
-    if (timeline && scrubIndex !== null) {
-      const C = timeline.cellCount;
-      const full = timeline.valuesByRef.get(info.refId);
-      raw = full ? full.subarray(scrubIndex * C, (scrubIndex + 1) * C) : new Float64Array(C).fill(Number.NaN);
-    } else {
-      raw = args.reducedArraysByRef?.get(info.refId) ?? new Float64Array(0);
-    }
-    out.set(info.refId, buildZScoreSlice(info, raw, groups, args.zScoreMethod, args.zScoreLimit, theme));
-  }
-  return out;
+  return buildZScoreSlices(args);
 }

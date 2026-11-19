@@ -152,6 +152,111 @@ describe('buildTimelineIndex', () => {
     expect(timelineValueAt(tl, 'A', 0, 0)).toBe(0);
     expect(timelineValueAt(tl, 'A', 3, 0)).toBe(90);
   });
+
+  it('ignores null timestamps instead of injecting epoch 0', () => {
+    const frames = [
+      toDataFrame({
+        refId: 'A',
+        fields: [
+          { name: 'Time', type: FieldType.time, values: [null, 1000, 2000] },
+          { name: 'Value', type: FieldType.number, values: [999, 10, 20], labels: { zone: 'zone-a', host: 'node-1' } },
+        ],
+      }),
+    ];
+    const { root, refIds } = buildTree(frames);
+    const tl = buildTimelineIndex(frames, root, levels, 'max', refIds)!;
+
+    expect(Array.from(tl.timestamps)).toEqual([1000, 2000]);
+    expect(timelineValueAt(tl, 'A', 0, 0)).toBe(10);
+    expect(timelineValueAt(tl, 'A', 1, 0)).toBe(20);
+  });
+
+  it('retains 1-point time-series frames alongside multi-point frames', () => {
+    const frames = [
+      toDataFrame({
+        refId: 'A',
+        fields: [
+          { name: 'Time', type: FieldType.time, values: [1000, 2000, 3000] },
+          { name: 'Value', type: FieldType.number, values: [10, 20, 30], labels: { zone: 'zone-a', host: 'node-1' } },
+        ],
+      }),
+      toDataFrame({
+        refId: 'A',
+        fields: [
+          { name: 'Time', type: FieldType.time, values: [3000] },
+          { name: 'Value', type: FieldType.number, values: [77], labels: { zone: 'zone-a', host: 'node-2' } },
+        ],
+      }),
+    ];
+    const { root, refIds } = buildTree(frames);
+    const tl = buildTimelineIndex(frames, root, levels, 'max', refIds)!;
+    const c2 = tl.cellIndexByPath.get(JSON.stringify(['zone-a', 'node-2']))!;
+
+    expect(timelineValueAt(tl, 'A', 0, c2)).toBeNull();
+    expect(timelineValueAt(tl, 'A', 2, c2)).toBe(77);
+  });
+
+  it('deduplicates repeated timestamps within a single series before spatial sum/mean', () => {
+    const frames = [
+      toDataFrame({
+        refId: 'A',
+        fields: [
+          { name: 'Time', type: FieldType.time, values: [1000, 1000, 2000] },
+          {
+            name: 'Value',
+            type: FieldType.number,
+            values: [10, 20, 50],
+            labels: { zone: 'zone-a', host: 'node-1', gpu: '0' },
+          },
+        ],
+      }),
+      toDataFrame({
+        refId: 'A',
+        fields: [
+          { name: 'Time', type: FieldType.time, values: [1000, 2000] },
+          {
+            name: 'Value',
+            type: FieldType.number,
+            values: [40, 60],
+            labels: { zone: 'zone-a', host: 'node-1', gpu: '1' },
+          },
+        ],
+      }),
+    ];
+    const { root, refIds } = buildTree(frames, 'mean');
+    const tl = buildTimelineIndex(frames, root, levels, 'mean', refIds)!;
+    // gpu0 keeps its last value (20) at t=1000, averaged with gpu1 (40) -> 30 (not (10+20+40)/3 = 23.33)
+    expect(timelineValueAt(tl, 'A', 0, 0)).toBe(30);
+    expect(timelineValueAt(tl, 'A', 1, 0)).toBe(55);
+  });
+
+  it('coerces Float64 overflow in sum aggregation to NaN instead of leaving Infinity in values or range', () => {
+    const frames = [
+      toDataFrame({
+        refId: 'A',
+        fields: [
+          { name: 'Time', type: FieldType.time, values: [1000, 2000] },
+          {
+            name: 'Value',
+            type: FieldType.number,
+            values: [1e308, 10],
+            labels: { zone: 'zone-a', host: 'node-1', gpu: '0' },
+          },
+          {
+            name: 'Value',
+            type: FieldType.number,
+            values: [1e308, 20],
+            labels: { zone: 'zone-a', host: 'node-1', gpu: '1' },
+          },
+        ],
+      }),
+    ];
+    const { root, refIds } = buildTree(frames, 'sum');
+    const tl = buildTimelineIndex(frames, root, levels, 'sum', refIds)!;
+    expect(timelineValueAt(tl, 'A', 0, 0)).toBeNull();
+    expect(timelineValueAt(tl, 'A', 1, 0)).toBe(30);
+    expect(tl.rangeByRef.get('A')).toEqual({ min: 30, max: 30 });
+  });
 });
 
 describe('findLookbackIndex', () => {

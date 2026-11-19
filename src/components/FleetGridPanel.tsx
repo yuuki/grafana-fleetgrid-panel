@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { DataFrame, Field, GrafanaTheme2, LinkModel, PanelProps } from '@grafana/data';
+import { DataFrame, DisplayValue, Field, GrafanaTheme2, LinkModel, PanelProps } from '@grafana/data';
 import { PanelDataErrorView } from '@grafana/runtime';
 import { RadioButtonGroup, useTheme2 } from '@grafana/ui';
 import { CellModel, FleetGridOptions, normalizeCategoryStyle } from '../types';
+import { MetricFrameSlice } from '../data/colorModes';
 import { buildModel, PanelModel } from '../data/model';
 import { MetricInfo } from '../data/display';
 import { CategoryModel } from '../data/categories';
@@ -66,6 +67,35 @@ function resolveSelectedRefId(selected: string | undefined, refIds: string[]): s
     return selected;
   }
   return refIds[0] ?? 'A';
+}
+
+function resolveClickDisplayValue(
+  cell: CellModel,
+  info: MetricInfo | undefined,
+  slice: MetricFrameSlice | undefined,
+  cellIndex: number | undefined
+): DisplayValue | undefined {
+  if (!info) {
+    return undefined;
+  }
+  if (slice) {
+    if (cellIndex === undefined || cellIndex < 0 || cellIndex >= slice.values.length) {
+      return undefined;
+    }
+    const raw = slice.values[cellIndex];
+    if (!Number.isFinite(raw)) {
+      return undefined;
+    }
+    const cellRange = cell.ranges?.get(info.refId);
+    const processor = slice.overridesCellRanges
+      ? slice.rangeInfo.processor
+      : cellRange?.source === 'override'
+        ? cellRange.processor
+        : slice.rangeInfo.processor;
+    return processor(raw);
+  }
+  const v = cell.values.get(info.refId);
+  return v != null ? cellRangeFor(cell, info).processor(v) : undefined;
 }
 
 function scrollContainerStyle(width: number, viewportH: number, layout: LayoutResult): React.CSSProperties {
@@ -142,7 +172,7 @@ interface PanelHeaderProps {
   onHoverCategory: (value: string | undefined) => void;
 }
 
-const PanelHeader: React.FC<PanelHeaderProps> = ({
+const PanelHeaderComponent: React.FC<PanelHeaderProps> = ({
   headerRef,
   model,
   rangeInfosByRef,
@@ -203,6 +233,8 @@ const PanelHeader: React.FC<PanelHeaderProps> = ({
     )}
   </div>
 );
+
+const PanelHeader = React.memo(PanelHeaderComponent);
 
 function useMeasuredHeight(
   ref: React.RefObject<HTMLDivElement>,
@@ -339,7 +371,7 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
   // The range is part of the panel's visual encoding, so reserve header space even when only one metric is available.
   const showHeader = true;
   // Measure the actual header and footer heights and subtract them from the canvas area.
-  const headerH = useMeasuredHeight(headerRef, showHeader, HEADER_H, [model, width]);
+  const headerH = useMeasuredHeight(headerRef, showHeader, HEADER_H, [model, width, playback.modeLabelsByRef]);
   const footerH = useMeasuredHeight(footerRef, playback.showScrubber, FOOTER_H, [width]);
 
   // If there's a warning (e.g. partial exclusion), also subtract the banner height
@@ -572,15 +604,15 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
             }
           }
           const info = model.metricInfos.find((m) => m.refId === clickRefId);
-          const v = hit.cell.values.get(clickRefId);
+          const clickDisplay = resolveClickDisplayValue(
+            hit.cell,
+            info,
+            playback.frameSlicesByRef?.get(clickRefId),
+            playback.cellIndexByPath.get(pathKey(hit.cell.path))
+          );
           // Data Links take priority: only fields with getLinks return links (the contract is the presence of getLinks, not config.links length).
           // Search across all original label sets, including those from extraction-key collisions.
-          const links = getCellLinks(
-            data.series,
-            clickRefId,
-            hit.cell.labelSets ?? hit.cell.labels,
-            v != null && info ? cellRangeFor(hit.cell, info).processor(v) : undefined
-          );
+          const links = getCellLinks(data.series, clickRefId, hit.cell.labelSets ?? hit.cell.labels, clickDisplay);
           if (links.length === 1) {
             followLink(links[0], e);
             return;
@@ -608,6 +640,7 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
             frameSlicesByRef={playback.frameSlicesByRef}
             cellIndex={playback.cellIndexByPath.get(pathKey(hover.cell.path))}
             zScoreMethod={playback.zScoreMethod}
+            unitOnlyProcessorsByRef={playback.unitOnlyProcessorsByRef}
             x={hover.x}
             y={hover.y}
             minX={visibleBounds.minX}
@@ -620,6 +653,8 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
           <DrilldownPopover
             cell={popover.cell}
             metricInfos={model.metricInfos}
+            frameSlicesByRef={playback.frameSlicesByRef}
+            cellIndex={playback.cellIndexByPath.get(pathKey(popover.cell.path))}
             // First compose using the range data on hand; if unavailable, compose using the requeried frame (for instant queries)
             seriesFor={(refId) => {
               const cellLabels = popover.cell.labelSets ?? popover.cell.labels;

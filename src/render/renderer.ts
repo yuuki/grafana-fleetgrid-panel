@@ -361,9 +361,12 @@ function resolveCellDisplay(
     if (!Number.isFinite(raw)) {
       return undefined;
     }
+    const cellRange = cell.ranges?.get(info.refId);
     const processor = slice.overridesCellRanges
       ? slice.rangeInfo.processor
-      : (cell.ranges?.get(info.refId)?.processor ?? slice.rangeInfo.processor);
+      : cellRange?.source === 'override'
+        ? cellRange.processor
+        : slice.rangeInfo.processor;
     return processor(raw);
   }
   const v = cell.values.get(info.refId) ?? null;

@@ -67,6 +67,7 @@ export const TimeScrubber: React.FC<TimeScrubberProps> = ({
         minHeight: FOOTER_H,
         display: 'flex',
         alignItems: 'center',
+        flexWrap: 'wrap',
         gap: 6,
         padding: '4px 6px',
         boxSizing: 'border-box',

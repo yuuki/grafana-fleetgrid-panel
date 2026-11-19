@@ -4,9 +4,9 @@ import { extractKey, pathKey } from './hierarchy';
 import { isTableFrame } from './normalize';
 
 /**
- * Memory cap per refId: 4M Float64 slots (~32 MB). When T * C exceeds this cap,
- * timestamps are uniformly downsampled (always keeping first and last) so large
- * fleets over long ranges cannot exhaust browser memory.
+ * Total typed-array slot cap across all refIds (~32 MB of Float64 values across metrics).
+ * When refCount * T * C exceeds this cap, timestamps are uniformly downsampled (always
+ * keeping first and last) so large fleets over long ranges cannot exhaust browser memory.
  */
 export const MAX_TIMELINE_SLOTS = 4_000_000;
 
@@ -36,6 +36,19 @@ interface TimeSeriesFrame {
   numberFields: Field[];
 }
 
+interface MappedFrameTimes {
+  indices: Int32Array;
+  hasDuplicates: boolean;
+}
+
+function toFiniteTimestamp(raw: unknown): number | null {
+  if (raw == null || raw === '') {
+    return null;
+  }
+  const ts = Number(raw);
+  return Number.isFinite(ts) ? ts : null;
+}
+
 export function collectLeafCellIndices(root: HierarchyNode, levelsLength: number): Map<string, number> {
   const indexByPath = new Map<string, number>();
   const visit = (node: HierarchyNode) => {
@@ -54,7 +67,9 @@ export function collectLeafCellIndices(root: HierarchyNode, levelsLength: number
 function extractTimeSeriesFrames(frames: DataFrame[]): TimeSeriesFrame[] {
   const out: TimeSeriesFrame[] = [];
   for (const frame of frames) {
-    if (frame.length < 2 || isTableFrame(frame)) {
+    // Allow 1-point time-series frames (e.g. a newly booted node) alongside multi-point frames;
+    // the global >= 2 distinct timestamps requirement is enforced after merging all frames.
+    if (frame.length < 1 || isTableFrame(frame)) {
       continue;
     }
     const timeField = frame.fields.find((f) => f.type === FieldType.time);
@@ -70,11 +85,7 @@ function extractTimeSeriesFrames(frames: DataFrame[]): TimeSeriesFrame[] {
   return out;
 }
 
-function fieldCellIndex(
-  field: Field,
-  levels: LevelDef[],
-  cellIndexByPath: Map<string, number>
-): number {
+function fieldCellIndex(field: Field, levels: LevelDef[], cellIndexByPath: Map<string, number>): number {
   const labels = field.labels;
   if (!labels) {
     return -1;
@@ -99,8 +110,8 @@ function collectDistinctTimestamps(tsFrames: TimeSeriesFrame[]): number[] {
   for (const tf of tsFrames) {
     const vals = tf.timeField.values;
     for (let i = 0; i < vals.length; i++) {
-      const ts = Number(vals[i]);
-      if (Number.isFinite(ts)) {
+      const ts = toFiniteTimestamp(vals[i]);
+      if (ts !== null) {
         seen.add(ts);
       }
     }
@@ -124,29 +135,48 @@ function downsampleTimestamps(sorted: number[], maxSteps: number): { timestamps:
   return { timestamps: sampled, downsampled: true };
 }
 
-function mapFrameTimeIndices(timeField: Field, timestamps: Float64Array, tsToIndex: Map<number, number>): Int32Array {
-  const vals = timeField.values;
+function isExactAligned(vals: unknown[], timestamps: Float64Array): boolean {
   const n = vals.length;
-  const mapped = new Int32Array(n);
-  // Fast path: exact alignment with the unified timestamps array (common Prometheus/VictoriaMetrics case).
-  if (n === timestamps.length && Number(vals[0]) === timestamps[0] && Number(vals[n - 1]) === timestamps[n - 1]) {
-    let aligned = true;
-    for (let i = 0; i < n; i++) {
-      if (Number(vals[i]) !== timestamps[i]) {
-        aligned = false;
-        break;
-      }
-      mapped[i] = i;
-    }
-    if (aligned) {
-      return mapped;
-    }
+  if (n !== timestamps.length) {
+    return false;
   }
   for (let i = 0; i < n; i++) {
-    const ts = Number(vals[i]);
-    mapped[i] = Number.isFinite(ts) ? (tsToIndex.get(ts) ?? -1) : -1;
+    if (toFiniteTimestamp(vals[i]) !== timestamps[i]) {
+      return false;
+    }
   }
-  return mapped;
+  return true;
+}
+
+function mapFrameTimeIndices(
+  timeField: Field,
+  timestamps: Float64Array,
+  tsToIndex: Map<number, number>
+): MappedFrameTimes {
+  const vals = timeField.values;
+  const n = vals.length;
+  const indices = new Int32Array(n);
+  if (isExactAligned(vals, timestamps)) {
+    for (let i = 0; i < n; i++) {
+      indices[i] = i;
+    }
+    return { indices, hasDuplicates: false };
+  }
+  const seen = new Set<number>();
+  let hasDuplicates = false;
+  for (let i = 0; i < n; i++) {
+    const ts = toFiniteTimestamp(vals[i]);
+    const idx = ts !== null ? (tsToIndex.get(ts) ?? -1) : -1;
+    indices[i] = idx;
+    if (idx >= 0) {
+      if (seen.has(idx)) {
+        hasDuplicates = true;
+      } else {
+        seen.add(idx);
+      }
+    }
+  }
+  return { indices, hasDuplicates };
 }
 
 function accumulateSample(
@@ -176,30 +206,52 @@ function accumulateSample(
   }
 }
 
+function toFiniteSample(raw: unknown): number | null {
+  if (raw == null || raw === '') {
+    return null;
+  }
+  const num = Number(raw);
+  return Number.isFinite(num) ? num : null;
+}
+
 function accumulateSeriesField(
   field: Field,
   cellIdx: number,
-  timeIndices: Int32Array,
+  mapped: MappedFrameTimes,
   cellCount: number,
   arr: Float64Array,
   counts: Uint32Array,
   agg: SpatialAggregation
 ): void {
   const values = field.values;
-  const len = Math.min(values.length, timeIndices.length);
+  const len = Math.min(values.length, mapped.indices.length);
+  if (!mapped.hasDuplicates) {
+    for (let i = 0; i < len; i++) {
+      const tIdx = mapped.indices[i];
+      if (tIdx < 0) {
+        continue;
+      }
+      const num = toFiniteSample(values[i]);
+      if (num !== null) {
+        accumulateSample(arr, counts, tIdx * cellCount + cellIdx, num, agg);
+      }
+    }
+    return;
+  }
+  // When a single series repeats a timestamp, keep its last finite sample at that timestamp
+  // so sum/mean spatial aggregation does not double-count one series against its siblings.
+  const deduped = new Map<number, number>();
   for (let i = 0; i < len; i++) {
-    const tIdx = timeIndices[i];
+    const tIdx = mapped.indices[i];
     if (tIdx < 0) {
       continue;
     }
-    const raw = values[i];
-    if (raw == null) {
-      continue;
+    const num = toFiniteSample(values[i]);
+    if (num !== null) {
+      deduped.set(tIdx, num);
     }
-    const num = Number(raw);
-    if (!Number.isFinite(num)) {
-      continue;
-    }
+  }
+  for (const [tIdx, num] of deduped) {
     accumulateSample(arr, counts, tIdx * cellCount + cellIdx, num, agg);
   }
 }
@@ -220,6 +272,11 @@ function finalizeArrayAndRange(
       arr[i] /= c;
     }
     const v = arr[i];
+    if (!Number.isFinite(v)) {
+      // Coerce overflowed sum/mean (+/-Infinity) back to NaN to uphold the missing-value contract.
+      arr[i] = Number.NaN;
+      continue;
+    }
     if (v < min) {
       min = v;
     }
@@ -227,7 +284,48 @@ function finalizeArrayAndRange(
       max = v;
     }
   }
-  return Number.isFinite(min) ? { min, max } : undefined;
+  return Number.isFinite(min) && Number.isFinite(max) ? { min, max } : undefined;
+}
+
+function groupFramesByRef(tsFrames: TimeSeriesFrame[], refIds: string[]): Map<string, TimeSeriesFrame[]> {
+  const byRef = new Map<string, TimeSeriesFrame[]>();
+  for (const refId of refIds) {
+    byRef.set(refId, []);
+  }
+  for (const tf of tsFrames) {
+    const list = byRef.get(tf.refId);
+    if (list) {
+      list.push(tf);
+    } else {
+      byRef.set(tf.refId, [tf]);
+    }
+  }
+  return byRef;
+}
+
+function populateRefValues(
+  refFrames: TimeSeriesFrame[],
+  timestamps: Float64Array,
+  tsToIndex: Map<number, number>,
+  levels: LevelDef[],
+  cellIndexByPath: Map<string, number>,
+  agg: SpatialAggregation,
+  counts: Uint32Array
+): { arr: Float64Array; range: { min: number; max: number } | undefined } {
+  const cellCount = cellIndexByPath.size;
+  const arr = new Float64Array(timestamps.length * cellCount);
+  arr.fill(Number.NaN);
+  counts.fill(0);
+  for (const tf of refFrames) {
+    const mapped = mapFrameTimeIndices(tf.timeField, timestamps, tsToIndex);
+    for (const field of tf.numberFields) {
+      const cellIdx = fieldCellIndex(field, levels, cellIndexByPath);
+      if (cellIdx >= 0) {
+        accumulateSeriesField(field, cellIdx, mapped, cellCount, arr, counts, agg);
+      }
+    }
+  }
+  return { arr, range: finalizeArrayAndRange(arr, counts, agg) };
 }
 
 /**
@@ -258,49 +356,23 @@ export function buildTimelineIndex(
   if (sorted.length < 2) {
     return undefined;
   }
-  const maxSteps = Math.max(2, Math.floor(maxSlots / cellCount));
+  const framesByRef = groupFramesByRef(tsFrames, refIds);
+  const refCount = Math.max(1, framesByRef.size);
+  const maxSteps = Math.max(2, Math.floor(maxSlots / (cellCount * refCount)));
   const { timestamps, downsampled } = downsampleTimestamps(sorted, maxSteps);
   const tsToIndex = new Map<number, number>();
   for (let i = 0; i < timestamps.length; i++) {
     tsToIndex.set(timestamps[i], i);
   }
 
-  const totalSlots = timestamps.length * cellCount;
+  // Process one refId at a time and reuse a single Uint32Array to minimize peak transient memory.
+  const counts = new Uint32Array(timestamps.length * cellCount);
   const valuesByRef = new Map<string, Float64Array>();
-  const countsByRef = new Map<string, Uint32Array>();
-  const ensureRef = (refId: string) => {
-    let arr = valuesByRef.get(refId);
-    let counts = countsByRef.get(refId);
-    if (!arr || !counts) {
-      arr = new Float64Array(totalSlots);
-      arr.fill(Number.NaN);
-      counts = new Uint32Array(totalSlots);
-      valuesByRef.set(refId, arr);
-      countsByRef.set(refId, counts);
-    }
-    return { arr, counts };
-  };
-
-  for (const refId of refIds) {
-    ensureRef(refId);
-  }
-
-  for (const tf of tsFrames) {
-    const timeIndices = mapFrameTimeIndices(tf.timeField, timestamps, tsToIndex);
-    const { arr, counts } = ensureRef(tf.refId);
-    for (const field of tf.numberFields) {
-      const cellIdx = fieldCellIndex(field, levels, cellIndexByPath);
-      if (cellIdx < 0) {
-        continue;
-      }
-      accumulateSeriesField(field, cellIdx, timeIndices, cellCount, arr, counts, agg);
-    }
-  }
-
   const rangeByRef = new Map<string, { min: number; max: number }>();
-  for (const [refId, arr] of valuesByRef) {
-    const counts = countsByRef.get(refId)!;
-    const range = finalizeArrayAndRange(arr, counts, agg);
+
+  for (const [refId, refFrames] of framesByRef) {
+    const { arr, range } = populateRefValues(refFrames, timestamps, tsToIndex, levels, cellIndexByPath, agg, counts);
+    valuesByRef.set(refId, arr);
     if (range) {
       rangeByRef.set(refId, range);
     }

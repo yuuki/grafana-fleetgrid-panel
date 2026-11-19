@@ -271,4 +271,122 @@ describe('temporal delta and buildFrameSlices', () => {
     expect(zSlice.values[0]).toBeCloseTo(1, 6); // 65 vs 40 -> +1σ, -1σ
     expect(zSlice.values[1]).toBeCloseTo(-1, 6);
   });
+
+  it('ignores raw Field Config min/max (e.g. 0..100) in delta mode so 0 stays neutral and negatives are blue', () => {
+    const constrainedFrames = [
+      toDataFrame({
+        refId: 'A',
+        name: 'util',
+        fields: [
+          { name: 'Time', type: FieldType.time, values: [0, 60_000] },
+          {
+            name: 'Value',
+            type: FieldType.number,
+            values: [50, 50],
+            labels: { zone: 'zone-a' },
+            config: { min: 0, max: 100, unit: 'percent' },
+          },
+          {
+            name: 'Value',
+            type: FieldType.number,
+            values: [60, 40],
+            labels: { zone: 'zone-b' },
+            config: { min: 0, max: 100, unit: 'percent' },
+          },
+        ],
+      }),
+    ];
+    const rows = normalizeFrames(constrainedFrames, 'lastNotNull');
+    const { root } = buildHierarchy(rows, levels);
+    const refIds = collectRefIds(rows);
+    attachCells(root, rows, levels, 'max', refIds);
+    const infos = buildMetricInfos(constrainedFrames, darkTheme, 'utc');
+    const tl = buildTimelineIndex(constrainedFrames, root, levels, 'max', refIds)!;
+
+    const deltaRanges = buildDeltaRangeInfos(infos, tl, 60, darkTheme, 'utc');
+    const info = deltaRanges.get('A')!;
+    expect(info.effectiveMin).toBe(-20);
+    expect(info.effectiveMax).toBe(20);
+    expect(info.processor(0).color).toBe(divergingColor(0, true));
+    expect(info.processor(-20).color).toBe(divergingColor(-1, true));
+    expect(info.processor(20).color).toBe(divergingColor(1, true));
+  });
+
+  it('expands a constant timeline (min === max === 50) to [50, 51] instead of collapsing to [0, 1]', () => {
+    const constFrames = [
+      toDataFrame({
+        refId: 'A',
+        name: 'temp',
+        fields: [
+          { name: 'Time', type: FieldType.time, values: [0, 60_000] },
+          { name: 'Value', type: FieldType.number, values: [50, 50], labels: { zone: 'zone-a' } },
+        ],
+      }),
+    ];
+    const rows = normalizeFrames(constFrames, 'lastNotNull');
+    const { root } = buildHierarchy(rows, levels);
+    const refIds = collectRefIds(rows);
+    attachCells(root, rows, levels, 'max', refIds);
+    const infos = buildMetricInfos(constFrames, darkTheme, 'utc');
+    const tl = buildTimelineIndex(constFrames, root, levels, 'max', refIds)!;
+
+    const rangeInfo = buildTimelineRangeInfos(infos, tl, darkTheme, 'utc').get('A')!;
+    expect(rangeInfo.effectiveMin).toBe(50);
+    expect(rangeInfo.effectiveMax).toBe(51);
+  });
+
+  it('strips raw value mappings, formats prefix units (+$25.0), and suppresses +0.0/-0.0 in delta/zscore processors', () => {
+    const mappedFrames = [
+      toDataFrame({
+        refId: 'A',
+        name: 'cost',
+        fields: [
+          { name: 'Time', type: FieldType.time, values: [0, 60_000] },
+          {
+            name: 'Value',
+            type: FieldType.number,
+            values: [10, 35],
+            labels: { zone: 'zone-a' },
+            config: {
+              unit: 'currencyUSD',
+              decimals: 1,
+              mappings: [{ type: 'value' as never, options: { '0': { text: 'Idle' } } }],
+            },
+          },
+        ],
+      }),
+    ];
+    const rows = normalizeFrames(mappedFrames, 'lastNotNull');
+    const { root } = buildHierarchy(rows, levels);
+    const refIds = collectRefIds(rows);
+    attachCells(root, rows, levels, 'max', refIds);
+    const infos = buildMetricInfos(mappedFrames, darkTheme, 'utc');
+    const tl = buildTimelineIndex(mappedFrames, root, levels, 'max', refIds)!;
+
+    const proc = buildDeltaRangeInfos(infos, tl, 60, darkTheme, 'utc').get('A')!.processor;
+    expect(proc(0).text).toBe('0.0'); // NOT "Idle"
+    expect(proc(-0.0001).text).toBe('0.0'); // NOT "-0.0"
+    expect(proc(0.0001).text).toBe('0.0'); // NOT "+0.0"
+    const pos = proc(25);
+    expect(`${pos.prefix ?? ''}${pos.text}`).toBe('+$25.0');
+
+    const zProc = buildZScoreProcessor(-3, 3, 1, darkTheme);
+    expect(zProc(-0.0001).text).toBe('0.0');
+    expect(zProc(0.0001).text).toBe('0.0');
+  });
+
+  it('avoids Float64 overflow in spatial Z-score variance and median for extreme values (~1e160, ~1e308)', () => {
+    const large = Float64Array.from([1e160, 2e160, 3e160]);
+    const groups = [{ path: ['z1'], cellIndices: [0, 1, 2] }];
+    const meanRes = computeSpatialZScores(large, groups, 'mean');
+    expect(meanRes.values[0]).toBeCloseTo(-Math.sqrt(1.5), 5);
+    expect(meanRes.values[1]).toBeCloseTo(0, 5);
+    expect(meanRes.values[2]).toBeCloseTo(Math.sqrt(1.5), 5);
+
+    const huge = Float64Array.from([1e308, 1e308, 1.5e308, 1.5e308]);
+    const medRes = computeSpatialZScores(huge, [{ path: ['z1'], cellIndices: [0, 1, 2, 3] }], 'median');
+    expect(Number.isFinite(medRes.values[0])).toBe(true);
+    expect(medRes.values[0]).toBeLessThan(0);
+    expect(medRes.values[3]).toBeGreaterThan(0);
+  });
 });

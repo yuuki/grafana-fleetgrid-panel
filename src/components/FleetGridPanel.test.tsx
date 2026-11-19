@@ -983,5 +983,139 @@ describe('FleetGridPanel', () => {
       expect(tooltip).toHaveTextContent('+1.0σ');
       expect(tooltip).toHaveTextContent(/Group \(zone-a, n=2\): mean 55\.0\s*°C/);
     });
+
+    it('works cleanly under React.StrictMode, stops on scrubber disable, and caps background-tab RAF jumps', () => {
+      const rafQueue: FrameRequestCallback[] = [];
+      const origRaf = global.requestAnimationFrame;
+      const origCaf = global.cancelAnimationFrame;
+      let nowMs = 1000;
+      const nowSpy = jest.spyOn(performance, 'now').mockImplementation(() => nowMs);
+      global.requestAnimationFrame = jest.fn((cb: FrameRequestCallback) => {
+        rafQueue.push(cb);
+        return rafQueue.length;
+      });
+      global.cancelAnimationFrame = jest.fn();
+
+      try {
+        const makeStrictProps = (enablePlayback: boolean) => {
+          const p = makeProps(rangeFrames());
+          p.options.levels = [
+            { ...DEFAULT_LEVEL, label: 'zone' },
+            { ...DEFAULT_LEVEL, label: 'host' },
+          ];
+          p.options.enablePlayback = enablePlayback;
+          return p;
+        };
+        const { rerender } = render(
+          <React.StrictMode>
+            <FleetGridPanel {...makeStrictProps(true)} />
+          </React.StrictMode>
+        );
+
+        fireEvent.click(screen.getByTestId('scrubber-play-toggle'));
+        expect(screen.getByTestId('scrubber-frame-counter')).toHaveTextContent('1/3');
+        expect(screen.getByRole('button', { name: 'Pause playback' })).toBeInTheDocument();
+
+        // Simulate a 10-second backgrounded tab gap: advances by 1 step (to 2/3) rather than teleporting to 3/3
+        act(() => {
+          nowMs += 10_000;
+          const cb = rafQueue.pop();
+          cb?.(nowMs);
+        });
+        expect(screen.getByTestId('scrubber-frame-counter')).toHaveTextContent('2/3');
+
+        // Disabling and re-enabling enablePlayback must NOT spontaneously resume playback
+        rerender(
+          <React.StrictMode>
+            <FleetGridPanel {...makeStrictProps(false)} />
+          </React.StrictMode>
+        );
+        expect(screen.queryByTestId('time-scrubber')).not.toBeInTheDocument();
+        rerender(
+          <React.StrictMode>
+            <FleetGridPanel {...makeStrictProps(true)} />
+          </React.StrictMode>
+        );
+        expect(screen.getByRole('button', { name: 'Play timeline' })).toBeInTheDocument();
+      } finally {
+        nowSpy.mockRestore();
+        global.requestAnimationFrame = origRaf;
+        global.cancelAnimationFrame = origCaf;
+      }
+    });
+
+    it('preserves single-rule rangeOverrides in the header legend while scrubbing in value mode', () => {
+      const p = makeProps(rangeFrames());
+      p.width = 600;
+      p.options.levels = [
+        { ...DEFAULT_LEVEL, label: 'zone' },
+        { ...DEFAULT_LEVEL, label: 'host' },
+      ];
+      p.options.enablePlayback = true;
+      p.options.rangeOverrides = [
+        { refId: 'A', matchers: [{ label: 'zone', operator: 'exact', value: 'zone-a' }], min: 0, max: 100 },
+      ];
+      render(<FleetGridPanel {...p} />);
+
+      expect(screen.getByTestId('range-legend')).toHaveTextContent('Fixed');
+      expect(screen.getByTestId('range-legend')).toHaveTextContent(/100\.0\s*°C/);
+
+      fireEvent.change(screen.getByTestId('scrubber-slider'), { target: { value: '0' } });
+      // Legend must stay Fixed 0..100°C matching the canvas override instead of switching to Auto 40..70°C
+      expect(screen.getByTestId('range-legend')).toHaveTextContent('Fixed');
+      expect(screen.getByTestId('range-legend')).toHaveTextContent(/100\.0\s*°C/);
+    });
+
+    it('shows the active scrubbed value in DrilldownPopover when clicking a cell during playback', () => {
+      const p = makeProps(rangeFrames());
+      p.options.levels = [
+        { ...DEFAULT_LEVEL, label: 'zone' },
+        { ...DEFAULT_LEVEL, label: 'host' },
+      ];
+      p.options.enablePlayback = true;
+      render(<FleetGridPanel {...p} />);
+
+      // Scrub to t=0 where zone-a/node-1 is 40.0°C (reduced value was 70.0°C)
+      fireEvent.change(screen.getByTestId('scrubber-slider'), { target: { value: '0' } });
+      const scroll = document.querySelector('canvas')!.parentElement as HTMLElement;
+      fireEvent.click(scroll, { clientX: 10, clientY: 25 });
+      const closeBtn = screen.getByRole('button', { name: 'Close' });
+      expect(closeBtn).toBeInTheDocument();
+      const popoverEl = closeBtn.parentElement!.parentElement!;
+      expect(popoverEl).toHaveTextContent(/40\.0\s*°C/);
+      expect(popoverEl).not.toHaveTextContent(/70\.0\s*°C/);
+    });
+
+    it('supports split display mode together with spatial Z-score and time scrubbing', () => {
+      const splitRangeFrames = [
+        ...rangeFrames(),
+        toDataFrame({
+          refId: 'B',
+          name: 'power',
+          fields: [
+            { name: 'Time', type: FieldType.time, values: [1_700_000_000_000, 1_700_000_060_000, 1_700_000_120_000] },
+            { name: 'Value', type: FieldType.number, values: [100, 150, 200], labels: { zone: 'zone-a', host: 'node-1' } },
+            { name: 'Value', type: FieldType.number, values: [100, 100, 100], labels: { zone: 'zone-a', host: 'node-2' } },
+          ],
+        }),
+      ];
+      const p = makeProps(splitRangeFrames);
+      p.width = 600;
+      p.options.levels = [
+        { ...DEFAULT_LEVEL, label: 'zone' },
+        { ...DEFAULT_LEVEL, label: 'host' },
+      ];
+      p.options.displayMode = 'split';
+      p.options.colorMode = 'zscore';
+      p.options.enablePlayback = true;
+      render(<FleetGridPanel {...p} />);
+
+      expect(screen.getByTestId('split-range-badge-A')).toHaveTextContent('Z-score (mean)');
+      expect(screen.getByTestId('split-range-badge-B')).toHaveTextContent('Z-score (mean)');
+      expect(screen.getByTestId('time-scrubber')).toBeInTheDocument();
+
+      fireEvent.change(screen.getByTestId('scrubber-slider'), { target: { value: '1' } });
+      expect(screen.getByTestId('scrubber-frame-counter')).toHaveTextContent('2/3');
+    });
   });
 });

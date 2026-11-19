@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DataFrame, GrafanaTheme2 } from '@grafana/data';
-import { FleetGridOptions, ZScoreMethod, normalizeColorMode, normalizeZScoreMethod } from '../types';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { DataFrame, DisplayProcessor, GrafanaTheme2 } from '@grafana/data';
+import { CellRangeInfo, ColorMode, FleetGridOptions, ZScoreMethod, normalizeColorMode, normalizeZScoreMethod } from '../types';
 import { DisplayRangeInfo } from '../data/cellRange';
 import {
   MetricFrameSlice,
@@ -8,13 +8,21 @@ import {
   buildFrameSlices,
   buildSiblingGroups,
   buildTimelineRangeInfos,
+  buildUnitOnlyProcessor,
+  buildZScoreRangeInfos,
   extractReducedValueArrays,
+  formatLookbackLabel,
 } from '../data/colorModes';
 import { pathKey } from '../data/hierarchy';
 import { PanelModel } from '../data/model';
 import { TimelineIndex, buildTimelineIndex, collectLeafCellIndices } from '../data/timeline';
 import { LayoutResult } from '../layout/layout';
 import { DEFAULT_PLAYBACK_SPEED } from './TimeScrubber';
+
+/** Elapsed gap (ms) treated as a background-tab pause rather than catch-up burst. */
+const BACKGROUND_RESUME_MS = 1000;
+/** Tolerance (ms) so 60/s playback aligns cleanly with 60 Hz RAF cadence (~16.6ms). */
+const RAF_JITTER_TOLERANCE_MS = 1;
 
 export interface PlaybackAndColorState {
   timeline: TimelineIndex | undefined;
@@ -30,12 +38,22 @@ export interface PlaybackAndColorState {
   frameSlicesByRef: Map<string, MetricFrameSlice> | undefined;
   effectiveRangeInfosByRef: Map<string, DisplayRangeInfo[]>;
   modeLabelsByRef: Map<string, string> | undefined;
+  unitOnlyProcessorsByRef: Map<string, DisplayProcessor> | undefined;
   extraWarnings: string[];
   onTogglePlay: () => void;
   onScrub: (index: number) => void;
   onStep: (delta: number) => void;
   onSpeedChange: (speed: number) => void;
   onResetLive: () => void;
+}
+
+interface PlaybackCursorState {
+  /** Timeline instance this cursor belongs to; a new timeline resets scrub/play cleanly without effects. */
+  timeline: TimelineIndex | undefined;
+  /** Whether scrubber was enabled when playback started; disabling scrubber stops playback cleanly. */
+  scrubberEnabled: boolean;
+  scrubIndex: number | null;
+  isPlaying: boolean;
 }
 
 export function buildCellIndexByLayout(layout: LayoutResult, cellIndexByPath: Map<string, number>): Int32Array {
@@ -46,25 +64,47 @@ export function buildCellIndexByLayout(layout: LayoutResult, cellIndexByPath: Ma
   return arr;
 }
 
-function buildEffectiveRangeInfos(
+function hasOverrideRange(ranges: DisplayRangeInfo[] | undefined): boolean {
+  if (!ranges) {
+    return false;
+  }
+  return ranges.some((r) => (r as Partial<CellRangeInfo>).source === 'override');
+}
+
+function buildStableEffectiveRangeInfos(
   model: PanelModel,
-  frameSlicesByRef: Map<string, MetricFrameSlice> | undefined
+  colorMode: ColorMode,
+  isScrubbing: boolean,
+  timelineRangeInfosByRef: Map<string, DisplayRangeInfo> | undefined,
+  deltaRangeInfosByRef: Map<string, DisplayRangeInfo> | undefined,
+  zScoreRangeInfosByRef: Map<string, DisplayRangeInfo> | undefined
 ): Map<string, DisplayRangeInfo[]> {
-  if (!frameSlicesByRef) {
+  if (colorMode === 'value' && !isScrubbing) {
     return model.rangeInfosByRef;
   }
+  const activeRanges =
+    colorMode === 'delta'
+      ? deltaRangeInfosByRef
+      : colorMode === 'zscore'
+        ? zScoreRangeInfosByRef
+        : timelineRangeInfosByRef;
+  if (!activeRanges) {
+    return model.rangeInfosByRef;
+  }
+  const overridesCellRanges = colorMode !== 'value';
   const out = new Map<string, DisplayRangeInfo[]>();
   for (const info of model.metricInfos) {
-    const slice = frameSlicesByRef.get(info.refId);
     const base = model.rangeInfosByRef.get(info.refId);
-    if (!slice) {
+    const rangeInfo = activeRanges.get(info.refId);
+    if (!rangeInfo) {
       if (base) {
         out.set(info.refId, base);
       }
       continue;
     }
-    if (slice.overridesCellRanges || (base?.length ?? 0) <= 1) {
-      out.set(info.refId, [slice.rangeInfo]);
+    // In value mode, keep label-override legends intact (even single-rule overrides) so the header matches the canvas.
+    if (overridesCellRanges || !hasOverrideRange(base)) {
+      out.set(info.refId, [rangeInfo]);
     } else if (base) {
       out.set(info.refId, base);
     }
@@ -72,20 +112,29 @@ function buildEffectiveRangeInfos(
   return out;
 }
 
-function buildModeLabels(frameSlicesByRef: Map<string, MetricFrameSlice> | undefined): Map<string, string> | undefined {
-  if (!frameSlicesByRef) {
+function buildStableModeLabels(
+  model: PanelModel,
+  colorMode: ColorMode,
+  deltaLookbackSec: number,
+  zScoreMethod: ZScoreMethod
+): Map<string, string> | undefined {
+  if (colorMode === 'value') {
     return undefined;
   }
-  const labels = new Map<string, string>();
-  for (const [refId, slice] of frameSlicesByRef) {
-    if (slice.modeLabel) {
-      labels.set(refId, slice.modeLabel);
-    }
+  const label =
+    colorMode === 'delta'
+      ? `Δ ${formatLookbackLabel(deltaLookbackSec)}`
+      : zScoreMethod === 'median'
+        ? 'Z-score (median)'
+        : 'Z-score (mean)';
+  const out = new Map<string, string>();
+  for (const info of model.metricInfos) {
+    out.set(info.refId, label);
   }
-  return labels.size > 0 ? labels : undefined;
+  return out.size > 0 ? out : undefined;
 }
 
-function collectModeWarnings(colorMode: string, timeline: TimelineIndex | undefined): string[] {
+function collectModeWarnings(colorMode: ColorMode, timeline: TimelineIndex | undefined): string[] {
   const warnings: string[] = [];
   if (colorMode === 'delta' && !timeline) {
     warnings.push('Delta color mode requires time-series data with at least two timestamps.');
@@ -96,6 +145,40 @@ function collectModeWarnings(colorMode: string, timeline: TimelineIndex | undefi
     );
   }
   return warnings;
+}
+
+function resolveCursor(
+  cursor: PlaybackCursorState,
+  timeline: TimelineIndex | undefined,
+  showScrubber: boolean
+): { scrubIndex: number | null; isPlaying: boolean } {
+  if (!timeline || cursor.timeline !== timeline) {
+    return { scrubIndex: null, isPlaying: false };
+  }
+  const maxIndex = timeline.timestamps.length - 1;
+  const scrubIndex = cursor.scrubIndex !== null ? Math.max(0, Math.min(maxIndex, cursor.scrubIndex)) : null;
+  const isPlaying = showScrubber && cursor.scrubberEnabled && cursor.isPlaying;
+  return { scrubIndex, isPlaying };
+}
+
+function advanceCursor(
+  prev: PlaybackCursorState,
+  timeline: TimelineIndex,
+  showScrubber: boolean,
+  steps: number
+): PlaybackCursorState {
+  if (!showScrubber || prev.timeline !== timeline || !prev.isPlaying) {
+    return prev;
+  }
+  const lastIdx = timeline.timestamps.length - 1;
+  const current = prev.scrubIndex !== null ? Math.max(0, Math.min(lastIdx, prev.scrubIndex)) : 0;
+  const next = Math.min(lastIdx, current + steps);
+  return {
+    timeline,
+    scrubberEnabled: true,
+    scrubIndex: next,
+    isPlaying: next < lastIdx,
+  };
 }
 
 export function usePlaybackAndColorMode(
@@ -150,104 +233,126 @@ export function usePlaybackAndColorMode(
   const deltaRangeInfosByRef = useMemo(
     () =>
       colorMode === 'delta'
-        ? buildDeltaRangeInfos(model.metricInfos, timeline, deltaLookbackSec, theme)
+        ? buildDeltaRangeInfos(model.metricInfos, timeline, deltaLookbackSec, theme, timeZone)
         : undefined,
-    [colorMode, model.metricInfos, timeline, deltaLookbackSec, theme]
+    [colorMode, model.metricInfos, timeline, deltaLookbackSec, theme, timeZone]
   );
 
-  const [scrubIndex, setScrubIndex] = useState<number | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const zScoreRangeInfosByRef = useMemo(
+    () =>
+      colorMode === 'zscore'
+        ? buildZScoreRangeInfos(
+            model.metricInfos,
+            timeline,
+            reducedArraysByRef,
+            siblingGroups ?? [],
+            zScoreMethod,
+            options.zScoreLimit,
+            theme
+          )
+        : undefined,
+    [colorMode, model.metricInfos, timeline, reducedArraysByRef, siblingGroups, zScoreMethod, options.zScoreLimit, theme]
+  );
+
+  const unitOnlyProcessorsByRef = useMemo(() => {
+    if (colorMode === 'value') {
+      return undefined;
+    }
+    return new Map(model.metricInfos.map((info) => [info.refId, buildUnitOnlyProcessor(info, theme, timeZone)]));
+  }, [colorMode, model.metricInfos, theme, timeZone]);
+
+  const [cursor, setCursor] = useState<PlaybackCursorState>({
+    timeline: undefined,
+    scrubberEnabled: false,
+    scrubIndex: null,
+    isPlaying: false,
+  });
   const [stepsPerSec, setStepsPerSec] = useState<number>(DEFAULT_PLAYBACK_SPEED);
 
   const showScrubber = Boolean(options.enablePlayback) && Boolean(timeline);
   const maxIndex = timeline ? timeline.timestamps.length - 1 : 0;
-  const effectiveScrubIndex =
-    timeline && scrubIndex !== null ? Math.max(0, Math.min(maxIndex, scrubIndex)) : null;
-  const effectivePlaying = isPlaying && showScrubber;
+  const { scrubIndex: effectiveScrubIndex, isPlaying: effectivePlaying } = resolveCursor(cursor, timeline, showScrubber);
   const activeTimeIndex = effectiveScrubIndex ?? maxIndex;
+  const isScrubbing = effectiveScrubIndex !== null;
 
-  // Keep latest active index in a ref so the RAF loop doesn't restart on every frame tick.
-  const indexRef = useRef(activeTimeIndex);
   useEffect(() => {
-    indexRef.current = activeTimeIndex;
-  }, [activeTimeIndex]);
+    if (!showScrubber) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setCursor((prev) => (prev.isPlaying ? { ...prev, isPlaying: false } : prev));
+    }
+  }, [showScrubber]);
 
   useEffect(() => {
     if (!effectivePlaying || !timeline) {
       return undefined;
     }
-    const lastIdx = timeline.timestamps.length - 1;
     const stepMs = 1000 / Math.max(1, stepsPerSec);
     let rafId = 0;
     let lastTick = performance.now();
 
     const tick = (now: number) => {
       const elapsed = now - lastTick;
-      if (elapsed >= stepMs) {
-        const steps = Math.max(1, Math.floor(elapsed / stepMs));
-        lastTick += steps * stepMs;
-        const next = Math.min(lastIdx, indexRef.current + steps);
-        indexRef.current = next;
-        setScrubIndex(next);
-        if (next >= lastIdx) {
-          setIsPlaying(false);
-          return;
-        }
+      if (elapsed > BACKGROUND_RESUME_MS) {
+        // After a long pause (e.g. backgrounded browser tab), advance cleanly by 1 step instead of teleporting.
+        lastTick = now;
+        setCursor((prev) => advanceCursor(prev, timeline, showScrubber, 1));
+      } else if (elapsed + RAF_JITTER_TOLERANCE_MS >= stepMs) {
+        const steps = Math.max(1, Math.floor((elapsed + RAF_JITTER_TOLERANCE_MS) / stepMs));
+        lastTick = Math.min(now, lastTick + steps * stepMs);
+        setCursor((prev) => advanceCursor(prev, timeline, showScrubber, steps));
       }
       rafId = requestAnimationFrame(tick);
     };
 
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [effectivePlaying, timeline, stepsPerSec]);
+  }, [effectivePlaying, timeline, showScrubber, stepsPerSec]);
 
   const onTogglePlay = useCallback(() => {
-    if (!timeline) {
+    if (!timeline || !showScrubber) {
       return;
     }
-    setIsPlaying((playing) => {
-      if (playing) {
-        return false;
+    const lastIdx = timeline.timestamps.length - 1;
+    setCursor((prev) => {
+      const current = resolveCursor(prev, timeline, showScrubber);
+      if (current.isPlaying) {
+        return { timeline, scrubberEnabled: true, scrubIndex: current.scrubIndex, isPlaying: false };
       }
-      const lastIdx = timeline.timestamps.length - 1;
-      if (indexRef.current >= lastIdx || scrubIndex === null) {
-        indexRef.current = 0;
-        setScrubIndex(0);
-      }
-      return true;
+      const startIndex = current.scrubIndex === null || current.scrubIndex >= lastIdx ? 0 : current.scrubIndex;
+      return { timeline, scrubberEnabled: true, scrubIndex: startIndex, isPlaying: true };
     });
-  }, [timeline, scrubIndex]);
+  }, [timeline, showScrubber]);
 
   const onScrub = useCallback(
     (index: number) => {
-      if (!timeline) {
+      if (!timeline || !Number.isFinite(index)) {
         return;
       }
       const clamped = Math.max(0, Math.min(timeline.timestamps.length - 1, Math.round(index)));
-      setIsPlaying(false);
-      setScrubIndex(clamped);
+      setCursor({ timeline, scrubberEnabled: showScrubber, scrubIndex: clamped, isPlaying: false });
     },
-    [timeline]
+    [timeline, showScrubber]
   );
 
   const onStep = useCallback(
     (delta: number) => {
-      if (!timeline) {
+      if (!timeline || !Number.isFinite(delta)) {
         return;
       }
-      setIsPlaying(false);
-      setScrubIndex((prev) => {
-        const base = prev ?? timeline.timestamps.length - 1;
-        return Math.max(0, Math.min(timeline.timestamps.length - 1, base + delta));
+      const lastIdx = timeline.timestamps.length - 1;
+      setCursor((prev) => {
+        const current = resolveCursor(prev, timeline, showScrubber);
+        const base = current.scrubIndex ?? lastIdx;
+        const next = Math.max(0, Math.min(lastIdx, base + Math.trunc(delta)));
+        return { timeline, scrubberEnabled: showScrubber, scrubIndex: next, isPlaying: false };
       });
     },
-    [timeline]
+    [timeline, showScrubber]
   );
 
   const onResetLive = useCallback(() => {
-    setIsPlaying(false);
-    setScrubIndex(null);
-  }, []);
+    setCursor({ timeline, scrubberEnabled: showScrubber, scrubIndex: null, isPlaying: false });
+  }, [timeline, showScrubber]);
 
   const frameSlicesByRef = useMemo(
     () =>
@@ -259,6 +364,7 @@ export function usePlaybackAndColorMode(
         deltaLookbackSec,
         timelineRangeInfosByRef,
         deltaRangeInfosByRef,
+        zScoreRangeInfosByRef,
         zScoreMethod,
         zScoreLimit: options.zScoreLimit,
         siblingGroups,
@@ -274,6 +380,7 @@ export function usePlaybackAndColorMode(
       deltaLookbackSec,
       timelineRangeInfosByRef,
       deltaRangeInfosByRef,
+      zScoreRangeInfosByRef,
       zScoreMethod,
       options.zScoreLimit,
       siblingGroups,
@@ -283,18 +390,33 @@ export function usePlaybackAndColorMode(
     ]
   );
 
+  // Derived from stable precomputed range maps (NOT frameSlicesByRef), so scrubbing at 60 fps
+  // preserves referential equality for PanelHeader / RangeLegend / SplitLegend.
   const effectiveRangeInfosByRef = useMemo(
-    () => buildEffectiveRangeInfos(model, frameSlicesByRef),
-    [model, frameSlicesByRef]
+    () =>
+      buildStableEffectiveRangeInfos(
+        model,
+        colorMode,
+        isScrubbing,
+        timelineRangeInfosByRef,
+        deltaRangeInfosByRef,
+        zScoreRangeInfosByRef
+      ),
+    [model, colorMode, isScrubbing, timelineRangeInfosByRef, deltaRangeInfosByRef, zScoreRangeInfosByRef]
   );
-  const modeLabelsByRef = useMemo(() => buildModeLabels(frameSlicesByRef), [frameSlicesByRef]);
+
+  const modeLabelsByRef = useMemo(
+    () => buildStableModeLabels(model, colorMode, deltaLookbackSec, zScoreMethod),
+    [model, colorMode, deltaLookbackSec, zScoreMethod]
+  );
+
   const extraWarnings = useMemo(() => collectModeWarnings(colorMode, timeline), [colorMode, timeline]);
 
   return {
     timeline,
     showScrubber,
     activeTimeIndex,
-    isScrubbing: effectiveScrubIndex !== null,
+    isScrubbing,
     isPlaying: effectivePlaying,
     stepsPerSec,
     zScoreMethod,
@@ -302,6 +424,7 @@ export function usePlaybackAndColorMode(
     frameSlicesByRef,
     effectiveRangeInfosByRef,
     modeLabelsByRef,
+    unitOnlyProcessorsByRef,
     extraWarnings,
     onTogglePlay,
     onScrub,

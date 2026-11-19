@@ -1,8 +1,8 @@
 import React from 'react';
-import { GrafanaTheme2, formattedValueToString } from '@grafana/data';
+import { DisplayProcessor, GrafanaTheme2, formattedValueToString } from '@grafana/data';
 import { useTheme2 } from '@grafana/ui';
 import { CellModel, ZScoreMethod } from '../types';
-import { MetricFrameSlice } from '../data/colorModes';
+import { MetricFrameSlice, ZScoreCellStat } from '../data/colorModes';
 import { MetricInfo } from '../data/display';
 import { DisplayRangeInfo, cellRangeFor } from '../data/cellRange';
 import { formatRangeEndpoint, rangeStateLabel } from './RangeLegend';
@@ -22,6 +22,7 @@ export interface CellTooltipProps {
   frameSlicesByRef?: Map<string, MetricFrameSlice>;
   cellIndex?: number;
   zScoreMethod?: ZScoreMethod;
+  unitOnlyProcessorsByRef?: Map<string, DisplayProcessor>;
 }
 
 const MAX_W = 320;
@@ -32,17 +33,6 @@ function readSliceNumber(arr: Float64Array | undefined, cellIndex: number | unde
   }
   const v = arr[cellIndex];
   return Number.isFinite(v) ? v : null;
-}
-
-interface TooltipMetricRowProps {
-  refId: string;
-  cell: CellModel;
-  info: MetricInfo | undefined;
-  slice: MetricFrameSlice | undefined;
-  cellIndex: number | undefined;
-  zScoreMethod: ZScoreMethod;
-  missingColor: string;
-  theme: GrafanaTheme2;
 }
 
 interface TooltipRangeDetailsProps {
@@ -78,6 +68,51 @@ const TooltipRangeDetails: React.FC<TooltipRangeDetailsProps> = ({
   </div>
 );
 
+interface TooltipSliceContextProps {
+  info: MetricInfo | undefined;
+  rawValue: number | null;
+  baselineValue: number | null;
+  zStat: ZScoreCellStat | undefined;
+  zScoreMethod: ZScoreMethod;
+  spreadProcessor: DisplayProcessor | undefined;
+  theme: GrafanaTheme2;
+}
+
+const TooltipSliceContext: React.FC<TooltipSliceContextProps> = ({
+  info,
+  rawValue,
+  baselineValue,
+  zStat,
+  zScoreMethod,
+  spreadProcessor,
+  theme,
+}) => {
+  if (!info) {
+    return null;
+  }
+  const formatSpread = spreadProcessor ?? info.processor;
+  const groupName = zStat && zStat.groupPath.length > 0 ? zStat.groupPath.join(' / ') : 'fleet';
+  return (
+    <>
+      {rawValue !== null && (
+        <div style={{ marginLeft: 14, color: theme.colors.text.secondary }}>
+          {`Value: ${formattedValueToString(info.processor(rawValue))}`}
+          {baselineValue !== null && ` (prev: ${formattedValueToString(info.processor(baselineValue))})`}
+        </div>
+      )}
+      {zStat && (
+        <div style={{ marginLeft: 14, color: theme.colors.text.secondary, overflowWrap: 'anywhere' }}>
+          {`Group (${groupName}, n=${zStat.groupSize}): ${
+            zScoreMethod === 'median' ? 'median' : 'mean'
+          } ${formattedValueToString(info.processor(zStat.center))}, σ ${formattedValueToString(
+            formatSpread(zStat.spread)
+          )}`}
+        </div>
+      )}
+    </>
+  );
+};
+
 function resolveTooltipRange(
   cell: CellModel,
   refId: string,
@@ -86,9 +121,27 @@ function resolveTooltipRange(
 ): { range: DisplayRangeInfo | undefined; cellRange: ReturnType<NonNullable<CellModel['ranges']>['get']> } {
   const cellRange = slice?.overridesCellRanges ? undefined : cell.ranges?.get(refId);
   if (slice) {
-    return { range: slice.overridesCellRanges ? slice.rangeInfo : (cellRange ?? slice.rangeInfo), cellRange };
+    // Only genuine override cells keep their per-cell range during scrubbing; conflict cells fall back to slice.rangeInfo.
+    const range = slice.overridesCellRanges
+      ? slice.rangeInfo
+      : cellRange?.source === 'override'
+        ? cellRange
+        : slice.rangeInfo;
+    return { range, cellRange };
   }
   return { range: info ? cellRangeFor(cell, info) : undefined, cellRange };
+}
+
+interface TooltipMetricRowProps {
+  refId: string;
+  cell: CellModel;
+  info: MetricInfo | undefined;
+  slice: MetricFrameSlice | undefined;
+  cellIndex: number | undefined;
+  zScoreMethod: ZScoreMethod;
+  spreadProcessor: DisplayProcessor | undefined;
+  missingColor: string;
+  theme: GrafanaTheme2;
 }
 
 const TooltipMetricRow: React.FC<TooltipMetricRowProps> = ({
@@ -98,6 +151,7 @@ const TooltipMetricRow: React.FC<TooltipMetricRowProps> = ({
   slice,
   cellIndex,
   zScoreMethod,
+  spreadProcessor,
   missingColor,
   theme,
 }) => {
@@ -124,21 +178,15 @@ const TooltipMetricRow: React.FC<TooltipMetricRowProps> = ({
         {slice?.modeLabel && <span style={{ color: theme.colors.text.secondary }}>{slice.modeLabel}</span>}
         <span style={{ marginLeft: 'auto' }}>{disp ? formattedValueToString(disp) : 'No data'}</span>
       </div>
-      {info && rawValue !== null && (
-        <div style={{ marginLeft: 14, color: theme.colors.text.secondary }}>
-          {`Value: ${formattedValueToString(info.processor(rawValue))}`}
-          {baselineValue !== null && ` (prev: ${formattedValueToString(info.processor(baselineValue))})`}
-        </div>
-      )}
-      {info && zStat && (
-        <div style={{ marginLeft: 14, color: theme.colors.text.secondary, overflowWrap: 'anywhere' }}>
-          {`Group (${zStat.groupPath.length > 0 ? zStat.groupPath.join(' / ') : 'fleet'}, n=${zStat.groupSize}): ${
-            zScoreMethod === 'median' ? 'median' : 'mean'
-          } ${formattedValueToString(info.processor(zStat.center))}, σ ${formattedValueToString(
-            info.processor(zStat.spread)
-          )}`}
-        </div>
-      )}
+      <TooltipSliceContext
+        info={info}
+        rawValue={rawValue}
+        baselineValue={baselineValue}
+        zStat={zStat}
+        zScoreMethod={zScoreMethod}
+        spreadProcessor={spreadProcessor}
+        theme={theme}
+      />
       {range && value !== null && (
         <TooltipRangeDetails
           range={range}
@@ -151,6 +199,29 @@ const TooltipMetricRow: React.FC<TooltipMetricRowProps> = ({
   );
 };
 
+function estimateTooltipHeight(
+  labelLines: number,
+  refIds: string[],
+  cell: CellModel,
+  infoByRef: Map<string, MetricInfo>,
+  frameSlicesByRef: Map<string, MetricFrameSlice> | undefined,
+  cellIndex: number | undefined
+): number {
+  let height = labelLines * 18;
+  for (const refId of refIds) {
+    const slice = frameSlicesByRef?.get(refId);
+    const range = slice?.overridesCellRanges ? undefined : cell.ranges?.get(refId);
+    const hasValue =
+      (slice ? readSliceNumber(slice.values, cellIndex) !== null : cell.values.get(refId) != null) &&
+      infoByRef.has(refId);
+    const hasRawLine = slice?.rawValues ? readSliceNumber(slice.rawValues, cellIndex) !== null : false;
+    const hasZStatLine = cellIndex !== undefined && Boolean(slice?.zScoreStats?.[cellIndex]);
+    const extraLines = (hasRawLine ? 18 : 0) + (hasZStatLine ? 18 : 0);
+    height += 22 + extraLines + (hasValue ? 20 + (range?.matchers?.length ?? 0) * 18 : 0);
+  }
+  return height;
+}
+
 export const CellTooltip: React.FC<CellTooltipProps> = ({
   cell,
   metricInfos,
@@ -161,6 +232,7 @@ export const CellTooltip: React.FC<CellTooltipProps> = ({
   frameSlicesByRef,
   cellIndex,
   zScoreMethod = 'mean',
+  unitOnlyProcessorsByRef,
   ...bounds
 }) => {
   const theme = useTheme2();
@@ -185,17 +257,14 @@ export const CellTooltip: React.FC<CellTooltipProps> = ({
   const availableW = hasBounds ? bounds.maxX! - bounds.minX! : 0;
   const availableH = hasBounds ? bounds.maxY! - bounds.minY! : 0;
   const outerW = hasBounds ? Math.min(MAX_W, availableW) : undefined;
-  const estimatedH =
-    (labels.length + extraLabels.length) * 18 +
-    refIds.reduce((height, refId) => {
-      const slice = frameSlicesByRef?.get(refId);
-      const range = slice?.overridesCellRanges ? undefined : cell.ranges?.get(refId);
-      const hasValue =
-        (slice ? readSliceNumber(slice.values, cellIndex) !== null : cell.values.get(refId) != null) &&
-        infoByRef.has(refId);
-      const extraLines = (slice?.rawValues ? 18 : 0) + (slice?.zScoreStats ? 18 : 0);
-      return height + 22 + extraLines + (hasValue ? 20 + (range?.matchers?.length ?? 0) * 18 : 0);
-    }, 0);
+  const estimatedH = estimateTooltipHeight(
+    labels.length + extraLabels.length,
+    refIds,
+    cell,
+    infoByRef,
+    frameSlicesByRef,
+    cellIndex
+  );
   const placementH = hasBounds ? Math.min(estimatedH, availableH) : undefined;
   const placement = hasBounds
     ? placeOverlay(x, y, outerW!, placementH!, bounds as Required<typeof bounds>)
@@ -254,6 +323,7 @@ export const CellTooltip: React.FC<CellTooltipProps> = ({
           slice={frameSlicesByRef?.get(refId)}
           cellIndex={cellIndex}
           zScoreMethod={zScoreMethod}
+          spreadProcessor={unitOnlyProcessorsByRef?.get(refId)}
           missingColor={missingColor}
           theme={theme}
         />
