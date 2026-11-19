@@ -1,5 +1,6 @@
 import { DisplayValue, GrafanaTheme2 } from '@grafana/data';
 import { CategoryModel, primaryCategoryValue } from '../data/categories';
+import { MetricFrameSlice } from '../data/colorModes';
 import { MetricInfo, chooseCellText } from '../data/display';
 import { LayoutCell, LayoutLabel, LayoutResult } from '../layout/layout';
 import { CategoryDecorationStyle, CellModel, DisplayMode } from '../types';
@@ -22,6 +23,10 @@ export interface RenderContext {
   selectedCategoryValues?: string[];
   /** A single category value transiently highlighted while its legend chip is hovered. Overrides the click selection. */
   hoverCategoryValue?: string;
+  /** Optional active frame slices for time scrubbing, temporal delta, or spatial Z-score. */
+  frameSlicesByRef?: Map<string, MetricFrameSlice>;
+  /** Maps layout.cells[i] to its cell index in MetricFrameSlice.values. */
+  cellIndexByLayout?: Int32Array;
 }
 
 // Cell geometry resolved to the device-pixel grid. The canvas is scaled by devicePixelRatio, so a coordinate
@@ -244,10 +249,24 @@ function prepareCanvas(
 ): CanvasRenderingContext2D | null {
   const cssW = layout.contentWidth;
   const cssH = Math.max(layout.contentHeight, viewportH);
-  canvas.width = Math.round(cssW * dpr);
-  canvas.height = Math.round(cssH * dpr);
-  canvas.style.width = `${cssW}px`;
-  canvas.style.height = `${cssH}px`;
+  const backingW = Math.round(cssW * dpr);
+  const backingH = Math.round(cssH * dpr);
+  // Only resize the backing store when dimensions actually change; assigning the same width/height
+  // reallocates the canvas buffer and hurts 60 fps time-scrubber playback.
+  if (canvas.width !== backingW) {
+    canvas.width = backingW;
+  }
+  if (canvas.height !== backingH) {
+    canvas.height = backingH;
+  }
+  const styleW = `${cssW}px`;
+  const styleH = `${cssH}px`;
+  if (canvas.style.width !== styleW) {
+    canvas.style.width = styleW;
+  }
+  if (canvas.style.height !== styleH) {
+    canvas.style.height = styleH;
+  }
   const ctx = canvas.getContext('2d');
   if (!ctx) {
     return null;
@@ -329,14 +348,44 @@ function categoryColorFor(category: CategoryModel | undefined, value: string | u
   return value ? category?.colorByValue.get(value) : undefined;
 }
 
-function fillSplitTiles(ctx: CanvasRenderingContext2D, cell: CellModel, g: CellGeom, p: CellPass): void {
+function resolveCellDisplay(
+  cell: CellModel,
+  layoutIndex: number,
+  info: MetricInfo,
+  p: CellPass
+): DisplayValue | undefined {
+  const slice = p.rc.frameSlicesByRef?.get(info.refId);
+  if (slice) {
+    const cellIdx = p.rc.cellIndexByLayout ? p.rc.cellIndexByLayout[layoutIndex] : layoutIndex;
+    const raw = cellIdx >= 0 && cellIdx < slice.values.length ? slice.values[cellIdx] : Number.NaN;
+    if (!Number.isFinite(raw)) {
+      return undefined;
+    }
+    const processor = slice.overridesCellRanges
+      ? slice.rangeInfo.processor
+      : (cell.ranges?.get(info.refId)?.processor ?? slice.rangeInfo.processor);
+    return processor(raw);
+  }
+  const v = cell.values.get(info.refId) ?? null;
+  if (v === null) {
+    return undefined;
+  }
+  return cellRangeFor(cell, info).processor(v);
+}
+
+function fillSplitTiles(
+  ctx: CanvasRenderingContext2D,
+  cell: CellModel,
+  layoutIndex: number,
+  g: CellGeom,
+  p: CellPass
+): void {
   const { metricInfos, missingColor } = p.rc;
   const n = Math.min(metricInfos.length, p.tileCount);
   for (let i = 0; i < n; i++) {
     const info = metricInfos[i];
-    const v = cell.values.get(info.refId) ?? null;
-    const processor = cellRangeFor(cell, info).processor;
-    ctx.fillStyle = v === null ? missingColor : (processor(v).color ?? missingColor);
+    const disp = resolveCellDisplay(cell, layoutIndex, info, p);
+    ctx.fillStyle = disp?.color ?? missingColor;
     // Tiles use the integer device-px column/row edges (matching splitRects' i%cols / floor(i/cols)),
     // with an integer device-px grout on the right/bottom, so every tile boundary is device-aligned.
     const col = i % g.cols;
@@ -353,15 +402,11 @@ function fillSplitTiles(ctx: CanvasRenderingContext2D, cell: CellModel, g: CellG
 
 // Display value of the selected metric for a single-mode cell, or undefined when the cell renders as
 // missing: no selected metric (e.g. a 0-series refId is selected) or no value for it in this cell.
-function selectedDisplay(cell: CellModel, selected: MetricInfo | undefined): DisplayValue | undefined {
-  if (!selected) {
+function selectedDisplay(cell: CellModel, layoutIndex: number, p: CellPass): DisplayValue | undefined {
+  if (!p.selected) {
     return undefined;
   }
-  const v = cell.values.get(selected.refId) ?? null;
-  if (v === null) {
-    return undefined;
-  }
-  return cellRangeFor(cell, selected).processor(v);
+  return resolveCellDisplay(cell, layoutIndex, p.selected, p);
 }
 
 // Draw the value text centered in the cell, shrunk by the decoration/ring safe insets.
@@ -393,7 +438,7 @@ function drawValueText(
   ctx.fillText(fit.text, g.x + insets.x + boxW / 2, g.y + insets.top + boxH / 2);
 }
 
-function drawCell(ctx: CanvasRenderingContext2D, c: LayoutCell, p: CellPass): void {
+function drawCell(ctx: CanvasRenderingContext2D, c: LayoutCell, layoutIndex: number, p: CellPass): void {
   const { rc, bgColor } = p;
   const matchedValue = matchedHighlightValue(c.cell, rc.category, p.activeHighlight);
   const matched = matchedValue !== undefined;
@@ -403,9 +448,9 @@ function drawCell(ctx: CanvasRenderingContext2D, c: LayoutCell, p: CellPass): vo
   const g = cellGeom(c, p.dpr, p.cols, p.rows, p.split);
   let display: DisplayValue | undefined;
   if (p.split) {
-    fillSplitTiles(ctx, c.cell, g, p);
+    fillSplitTiles(ctx, c.cell, layoutIndex, g, p);
   } else {
-    display = selectedDisplay(c.cell, p.selected);
+    display = selectedDisplay(c.cell, layoutIndex, p);
     ctx.fillStyle = display?.color ?? rc.missingColor;
     ctx.fillRect(g.x, g.y, g.w, g.h);
   }
@@ -475,8 +520,8 @@ export function renderCanvas(canvas: HTMLCanvasElement, rc: RenderContext): void
 
   // Cells
   const pass = cellPass(rc, dpr);
-  for (const c of layout.cells) {
-    drawCell(ctx, c, pass);
+  for (let i = 0; i < layout.cells.length; i++) {
+    drawCell(ctx, layout.cells[i], i, pass);
   }
 
   // Group label
