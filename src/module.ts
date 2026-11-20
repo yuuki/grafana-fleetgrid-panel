@@ -1,13 +1,13 @@
 import { PanelPlugin } from '@grafana/data';
 import { FleetGridOptions, normalizeCategoryStyle } from './types';
 import { FleetGridPanel } from './components/FleetGridPanel';
+import { flowRefId } from './data/edges';
+import { FlowEndpointsEditor } from './options/FlowEndpointsEditor';
 import { LevelsEditor } from './options/LevelsEditor';
 import { ReduceCalcEditor } from './options/ReduceCalcEditor';
 import { RangeOverridesEditor } from './options/RangeOverridesEditor';
 import { TooltipLabelsEditor } from './options/TooltipLabelsEditor';
 import { CategoryLabelEditor } from './options/CategoryLabelEditor';
-import { FlowEndpointsEditor } from './options/FlowEndpointsEditor';
-import { flowRefId } from './data/edges';
 
 // Hosts older than the Auto Grid fit-content API lack this method. Duck-type so
 // the plugin still loads; Grafana only offers "Auto fit" when the method exists

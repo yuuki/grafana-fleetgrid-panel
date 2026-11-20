@@ -7,8 +7,6 @@ export type SpatialAggregation = 'max' | 'mean' | 'min' | 'sum';
 export type DisplayMode = 'single' | 'split';
 export type RangeMatcherOperator = 'exact' | 'regex';
 export type CategoryDecorationStyle = 'strip' | 'border';
-export type FlowShowMode = 'always' | 'hover';
-export type FlowWorstDirection = 'high' | 'low';
 
 /**
  * Normalize a persisted categoryStyle to the current union.
@@ -33,6 +31,9 @@ export interface RangeOverride {
   max?: number;
 }
 
+export type FlowShowMode = 'always' | 'hover';
+export type FlowWorstDirection = 'high' | 'low';
+
 /** Binds one hierarchy label to the labels of the edge query that carry an edge's two endpoints. */
 export interface FlowEndpointMapping {
   /** Label of a hierarchy level (`LevelDef.label`). */
@@ -41,6 +42,24 @@ export interface FlowEndpointMapping {
   source: string;
   /** Edge-query label with the destination's value of that hierarchy label. */
   destination: string;
+}
+
+/** The panel options of the flow overlay. All are additions: without `flowRefId` the overlay is off. */
+export interface FlowOverlayOptions {
+  /** refId of the query whose rows are edges between cells or groups. Empty or unset disables the flow overlay. */
+  flowRefId?: string;
+  /** Which edge-query labels name the source and the destination, per hierarchy label. */
+  flowEndpoints?: FlowEndpointMapping[];
+  /** Draw the arcs all the time, or only those of the hovered cell. */
+  flowShow?: FlowShowMode;
+  /** Which end of the edge value is the worse one. Sets the filter direction and which edges win the draw bound. */
+  flowWorst?: FlowWorstDirection;
+  /** Draw only the edges strictly worse than this value. Unset draws every edge. */
+  flowThreshold?: number;
+  /** Edge-query label with the hop number of an edge in an ordered path. Empty or unset draws no hop numbers. */
+  flowOrderLabel?: string;
+  /** Edge-query label that names the path an edge belongs to. Empty or unset puts all hops on one path. */
+  flowPathLabel?: string;
 }
 
 export interface LevelDef {
@@ -54,7 +73,7 @@ export interface LevelDef {
   showLabel: boolean;
 }
 
-export interface FleetGridOptions {
+export interface FleetGridOptions extends FlowOverlayOptions {
   levels: LevelDef[];
   displayMode: DisplayMode;
   defaultMetric?: string;
@@ -73,20 +92,6 @@ export interface FleetGridOptions {
   reduceCalc: string;
   /** Ordered color scale overrides. The first rule matching a source label set wins. */
   rangeOverrides?: RangeOverride[];
-  /** refId of the query whose rows are edges between cells or groups. Empty or unset disables the flow overlay. */
-  flowRefId?: string;
-  /** Which edge-query labels name the source and the destination, per hierarchy label. */
-  flowEndpoints?: FlowEndpointMapping[];
-  /** Draw the arcs all the time, or only those of the hovered cell. */
-  flowShow?: FlowShowMode;
-  /** Which end of the edge value is the worse one. Sets the filter direction and which edges win the draw bound. */
-  flowWorst?: FlowWorstDirection;
-  /** Draw only the edges strictly worse than this value. Unset draws every edge. */
-  flowThreshold?: number;
-  /** Edge-query label with the hop number of an edge in an ordered path. Empty or unset draws no hop numbers. */
-  flowOrderLabel?: string;
-  /** Edge-query label that names the path an edge belongs to. Empty or unset puts all hops on one path. */
-  flowPathLabel?: string;
 }
 
 export const DEFAULT_LEVEL: LevelDef = {

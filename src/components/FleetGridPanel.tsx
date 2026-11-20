@@ -12,6 +12,10 @@ import { hitTest } from '../render/hitTest';
 import { splitRects } from '../render/split';
 import { drilldownSeries, getCellLinks } from '../drilldown/series';
 import { fetchDrilldownFrames } from '../drilldown/requery';
+import { FlowLayers } from './FlowLayers';
+import { FlowLegend } from './FlowLegend';
+import { FlowTooltipSection, flowTooltipRows } from './FlowTooltipSection';
+import { useCellQueries, useFlowModel, useFlowOverlay, withFlowWarnings } from './useFlowOverlay';
 import { CellTooltip } from './CellTooltip';
 import { DrilldownPopover } from './DrilldownPopover';
 import { RangeLegend } from './RangeLegend';
@@ -19,10 +23,6 @@ import { SplitLegend } from './SplitLegend';
 import { CategoryLegend } from './CategoryLegend';
 import { placeOverlay, VisibleBounds } from './overlay';
 import { cellRangeFor } from '../data/cellRange';
-import { FlowLayers } from './FlowLayers';
-import { FlowLegend } from './FlowLegend';
-import { FlowTooltipSection, flowTooltipRows } from './FlowTooltipSection';
-import { useCellQueries, useFlowModel, useFlowOverlay, withFlowWarnings } from './useFlowOverlay';
 
 // Header height fallback for when showHeader is on (the actual height is measured after layout and overwrites this)
 const HEADER_H = 32;
@@ -239,15 +239,16 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
   // Requery generation token. Advanced every time requestId changes, used to decide whether to discard responses from stale in-flight requests
   const drillGen = useRef(0);
 
-  // The flow overlay's edge query is not a cell metric. Without one, these are the panel's own frames,
-  // target refIds and request.
+  // The flow overlay's edge query is not a cell metric: the cells are built without it. While no edge
+  // query is named, these are the panel's own frames, target refIds and request, and `model` is the cell
+  // model itself.
   const { series: cellSeries, targetRefIds, request: cellRequest } = useCellQueries(data, options);
-  const model = useMemo(
+  const cellModel = useMemo(
     () => buildModel(cellSeries, options, theme, timeZone, targetRefIds),
     [cellSeries, options, theme, timeZone, targetRefIds]
   );
-  const flowModel = useFlowModel(data.series, options, model.root, theme, timeZone);
-  const allWarnings = useMemo(() => withFlowWarnings(model.warnings, flowModel), [model.warnings, flowModel]);
+  const flowModel = useFlowModel(data.series, options, cellModel.root, theme, timeZone);
+  const model = useMemo(() => withFlowWarnings(cellModel, flowModel), [cellModel, flowModel]);
   const effectiveSelection = useMemo(
     () => selectedCategories.filter((value) => model.category?.colorByValue.has(value) ?? false),
     [selectedCategories, model.category]
@@ -297,7 +298,7 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
     return undefined;
   }, [showHeader, model, width]);
   // If there's a warning (e.g. partial exclusion), also subtract the banner height
-  const warnH = allWarnings.length > 0 ? WARN_H : 0;
+  const warnH = model.warnings.length > 0 ? WARN_H : 0;
   const bodyH = Math.max(0, height - headerH - warnH);
   // Fit-content: Grafana's innerHeight is 0 by design. Ignore it and lay out at
   // unbounded height so cell size follows width (typically S_MAX) and contentHeight
@@ -327,8 +328,8 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
   const selectedRefId = resolveSelectedRefId(selected, model.refIds);
   const selectedMetricInfo = model.metricInfos.find((info) => info.refId === selectedRefId);
 
-  // The flow overlay paints its own canvases. An open popover keeps its cell's edges emphasised while
-  // the pointer is elsewhere.
+  // The flow overlay paints its own canvases. The hovered cell's edges are emphasised; an open popover
+  // keeps its cell's edges emphasised while the pointer is elsewhere.
   const flowRestRef = useRef<HTMLCanvasElement>(null);
   const flowFocusRef = useRef<HTMLCanvasElement>(null);
   const flow = useFlowOverlay({
@@ -477,7 +478,7 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
   // When no cells qualify for rendering at all, don't silently show an empty canvas — state the reason explicitly.
   // If there's a warning, show it; otherwise show a data error to the effect of "unable to build numeric cells" (spec: never silently show an empty display).
   if (layout.cells.length === 0) {
-    return <NoCellsMessage warnings={allWarnings} />;
+    return <NoCellsMessage warnings={model.warnings} />;
   }
 
   return (
@@ -499,7 +500,7 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
           {flowLegend}
         </PanelHeader>
       )}
-      <WarningBanner warnings={allWarnings} theme={theme} />
+      <WarningBanner warnings={model.warnings} theme={theme} />
       <div
         ref={setScrollRef}
         style={scrollContainerStyle(width, viewportH, layout)}

@@ -31,18 +31,6 @@ describe('categoryStyle migration', () => {
   });
 });
 
-describe('declareFitContentSupport', () => {
-  it('is a no-op on hosts that lack setFitContentSupport', () => {
-    expect(() => declareFitContentSupport({})).not.toThrow();
-  });
-
-  it('calls setFitContentSupport when the host provides it', () => {
-    const setFitContentSupport = jest.fn();
-    declareFitContentSupport({ setFitContentSupport });
-    expect(setFitContentSupport).toHaveBeenCalledTimes(1);
-  });
-});
-
 describe('flow overlay options', () => {
   // Grafana registers its standard option editors at start-up; the option builder only looks them up by id.
   beforeAll(() => {
@@ -95,5 +83,17 @@ describe('flow overlay options', () => {
   it('carries the flow options through the categoryStyle migration', () => {
     const stored = { flowRefId: 'E', flowEndpoints: [{ level: 'host', source: 'src_host', destination: 'dst_host' }] };
     expect(migrate({ categoryStyle: 'topBar', ...stored })).toMatchObject(stored);
+  });
+});
+
+describe('declareFitContentSupport', () => {
+  it('is a no-op on hosts that lack setFitContentSupport', () => {
+    expect(() => declareFitContentSupport({})).not.toThrow();
+  });
+
+  it('calls setFitContentSupport when the host provides it', () => {
+    const setFitContentSupport = jest.fn();
+    declareFitContentSupport({ setFitContentSupport });
+    expect(setFitContentSupport).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,6 +1,7 @@
 import { renderHook } from '@testing-library/react';
 import { FieldType, LoadingState, PanelData, getDefaultTimeRange, toDataFrame } from '@grafana/data';
 import { FlowModel } from '../data/edges';
+import { PanelModel } from '../data/model';
 import { DEFAULT_LEVEL, FleetGridOptions } from '../types';
 import { useCellQueries, withFlowWarnings } from './useFlowOverlay';
 
@@ -73,15 +74,21 @@ describe('useCellQueries', () => {
 });
 
 describe('withFlowWarnings', () => {
-  const cellWarnings = ['1/2 rows did not match the hierarchy and were excluded'];
+  const cellModel = {
+    warnings: ['1/2 rows did not match the hierarchy and were excluded'],
+    refIds: ['A'],
+  } as PanelModel;
 
-  it('returns the cell warnings themselves when the overlay adds none', () => {
-    expect(withFlowWarnings(cellWarnings, null)).toBe(cellWarnings);
-    expect(withFlowWarnings(cellWarnings, { warnings: [] } as unknown as FlowModel)).toBe(cellWarnings);
+  it('returns the cell model itself when the overlay adds no warning', () => {
+    expect(withFlowWarnings(cellModel, null)).toBe(cellModel);
+    expect(withFlowWarnings(cellModel, { warnings: [] } as unknown as FlowModel)).toBe(cellModel);
   });
 
-  it('appends the flow warnings', () => {
+  it('appends the flow warnings and keeps the rest of the model', () => {
     const flow = { warnings: ['Flow overlay: query "E" returned no rows'] } as unknown as FlowModel;
-    expect(withFlowWarnings(cellWarnings, flow)).toEqual([...cellWarnings, ...flow.warnings]);
+    const merged = withFlowWarnings(cellModel, flow);
+    expect(merged.warnings).toEqual([...cellModel.warnings, ...flow.warnings]);
+    expect(merged.refIds).toBe(cellModel.refIds);
+    expect(cellModel.warnings).toHaveLength(1);
   });
 });

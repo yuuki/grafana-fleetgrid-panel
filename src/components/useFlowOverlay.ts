@@ -13,6 +13,7 @@ import {
   resolveFlowConfig,
   summarizeFlowNode,
 } from '../data/edges';
+import { PanelModel } from '../data/model';
 import { LayoutResult } from '../layout/layout';
 import { flowAnchors } from '../render/flowGeometry';
 import { renderFlowLayer } from '../render/flowRenderer';
@@ -112,9 +113,12 @@ export function useCellQueries(data: PanelData, options: FleetGridOptions): Cell
   return { series, targetRefIds, request };
 }
 
-/** The cell warnings followed by the flow overlay's; the cell warnings themselves while there are none to add. */
-export function withFlowWarnings(warnings: string[], model: FlowModel | null): string[] {
-  return model && model.warnings.length > 0 ? [...warnings, ...model.warnings] : warnings;
+/**
+ * The panel model with the flow overlay's warnings after the cells', so that the warning banner shows
+ * both. It is the cell model itself while the overlay has nothing to add.
+ */
+export function withFlowWarnings(model: PanelModel, flow: FlowModel | null): PanelModel {
+  return flow && flow.warnings.length > 0 ? { ...model, warnings: [...model.warnings, ...flow.warnings] } : model;
 }
 
 /**
