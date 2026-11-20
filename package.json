@@ -80,7 +80,7 @@
     "react-dom": "^18.3.0"
   },
   "overrides": {
-    "serialize-javascript": "^7.0.7"
+    "serialize-javascript": "^7.1.4"
   },
   "packageManager": "npm@11.20.0"
 }
