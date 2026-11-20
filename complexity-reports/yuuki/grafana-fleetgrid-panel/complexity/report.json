@@ -1,9 +1,9 @@
 {
   "repository": "yuuki/grafana-fleetgrid-panel/complexity",
   "ref": "refs/heads/main",
-  "commit": "8414eff8cf5ef69953fa9b15f86460f1b0d65317",
+  "commit": "b3967b0d29613f96d9b1e821972054a1d52ea9f9",
   "base_ref": "refs/heads/main",
-  "timestamp": "2026-11-19T14:17:58.287302672Z",
+  "timestamp": "2026-11-20T04:12:04.078687675Z",
   "custom_metrics": [
     {
       "key": "code_complexity",
