@@ -22,7 +22,7 @@ import { aggregate } from './values';
 /** Hard bound on the edge-query rows that are read. Pairwise data grows with the square of the fleet. */
 export const MAX_FLOW_ROWS = 20000;
 /** Hard bound on the arcs drawn at once. It applies to the resting set and to a focus set alike. */
-export const MAX_FLOW_ARCS = 1000;
+export const MAX_FLOW_ARCS = 500;
 
 const EXAMPLE_LIMIT = 3;
 // A hop number is a non-negative integer of at most 9 digits, so it is always a safe integer.

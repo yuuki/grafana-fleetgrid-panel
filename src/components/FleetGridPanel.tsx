@@ -23,6 +23,7 @@ import { flowRefId, frameHasRefId } from '../data/edges';
 import { FlowLegend } from './FlowLegend';
 import { FLOW_TOOLTIP_ROWS, FlowTooltipSection } from './FlowTooltipSection';
 import { useFlowModel, useFlowOverlay } from './useFlowOverlay';
+import { FLOW_DIM_OPACITY } from '../render/flowRenderer';
 
 // Header height fallback for when showHeader is on (the actual height is measured after layout and overwrites this)
 const HEADER_H = 32;
@@ -33,6 +34,7 @@ const LINK_MENU_ROW_H = 28;
 // Fixed dimensions for deterministically computing the menu height (assumes box-sizing: border-box)
 const LINK_MENU_PAD = 4;
 const LINK_MENU_BORDER = 1;
+const FLOW_LAYER_STYLE: React.CSSProperties = { position: 'absolute', left: 0, top: 0, pointerEvents: 'none' };
 
 const measureVisibleBounds = (el: HTMLElement): VisibleBounds => {
   const minX = el.scrollLeft;
@@ -338,12 +340,14 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
   const selectedRefId = resolveSelectedRefId(selected, model.refIds);
   const selectedMetricInfo = model.metricInfos.find((info) => info.refId === selectedRefId);
 
-  // The flow overlay paints its own canvas. An open popover keeps its cell's edges emphasised while
+  // The flow overlay paints its own canvases. An open popover keeps its cell's edges emphasised while
   // the pointer is elsewhere.
-  const flowCanvasRef = useRef<HTMLCanvasElement>(null);
-  const flowSummary = useFlowOverlay({
+  const flowRestRef = useRef<HTMLCanvasElement>(null);
+  const flowFocusRef = useRef<HTMLCanvasElement>(null);
+  const { summary: flowSummary, focused: flowFocused } = useFlowOverlay({
     model: flowModel,
-    canvasRef: flowCanvasRef,
+    restRef: flowRestRef,
+    focusRef: flowFocusRef,
     layout,
     viewportH,
     theme,
@@ -578,14 +582,18 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
       >
         <canvas ref={canvasRef} />
         {flowModel && (
-          // The flow overlay's own canvas, stacked on the cell canvas in the same content coordinates.
-          // Pointer events pass through it, so hover and click still reach the cells.
-          <canvas
-            ref={flowCanvasRef}
-            data-testid="flow-overlay"
-            aria-hidden
-            style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }}
-          />
+          // The flow overlay's own canvases, stacked on the cell canvas in the same content coordinates:
+          // the arcs at rest, dimmed while a cell's arcs are in focus, and the arcs in focus. Pointer
+          // events pass through both, so hover and click still reach the cells.
+          <>
+            <canvas
+              ref={flowRestRef}
+              data-testid="flow-overlay"
+              aria-hidden
+              style={{ ...FLOW_LAYER_STYLE, opacity: flowFocused ? FLOW_DIM_OPACITY : 1 }}
+            />
+            <canvas ref={flowFocusRef} data-testid="flow-focus" aria-hidden style={FLOW_LAYER_STYLE} />
+          </>
         )}
         {hover && (
           <CellTooltip

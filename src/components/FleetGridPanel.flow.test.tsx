@@ -80,25 +80,31 @@ const makeProps = (frames: unknown[], options: Partial<FleetGridOptions> = flowO
 });
 
 const cellCanvas = () => document.querySelector('canvas:not([data-testid])') as HTMLCanvasElement;
-const overlay = () => screen.queryByTestId('flow-overlay') as HTMLCanvasElement | null;
+// The layer of the arcs at rest and the layer of the arcs in focus.
+const restLayer = () => screen.queryByTestId('flow-overlay') as HTMLCanvasElement | null;
+const focusLayer = () => screen.queryByTestId('flow-focus') as HTMLCanvasElement | null;
 const container = () => cellCanvas().parentElement as HTMLElement;
 type CanvasEvent = { type: string; props: { value?: number } };
 const eventsOf = (canvas: HTMLCanvasElement) =>
   (canvas.getContext('2d') as unknown as { __getEvents(): CanvasEvent[] }).__getEvents();
-// The canvas mock accumulates events across paints, and every paint of either canvas starts with one clearRect.
+// The canvas mock accumulates events across paints, and every paint of a canvas starts with one clearRect.
 const paints = (canvas: HTMLCanvasElement) => eventsOf(canvas).filter((e) => e.type === 'clearRect').length;
-const lastPaint = (canvas: HTMLCanvasElement) => {
+// Arcs in a layer's current picture. A layer without arcs holds no backing store (0 x 0).
+const arcsIn = (canvas: HTMLCanvasElement) => {
+  if (canvas.width === 0) {
+    return 0;
+  }
   const all = eventsOf(canvas);
-  return all.slice(all.map((e) => e.type).lastIndexOf('clearRect'));
+  const last = all.slice(all.map((e) => e.type).lastIndexOf('clearRect'));
+  return last.filter((e) => e.type === 'quadraticCurveTo').length;
 };
-// Arcs traced in the overlay's current picture. Each drawn arc is traced twice: its halo and its color.
-const tracedArcs = () => lastPaint(overlay()!).filter((e) => e.type === 'quadraticCurveTo').length;
 const hoverHost = (index: number, y = 5) => fireEvent.mouseMove(container(), { clientX: index * 41 + 10, clientY: y });
 
 describe('FleetGridPanel flow overlay', () => {
   it('stays off without an edge query, even when a query carries source and destination labels', () => {
     render(<FleetGridPanel {...makeProps([cells(), edges(RING)], {})} />);
-    expect(overlay()).not.toBeInTheDocument();
+    expect(restLayer()).not.toBeInTheDocument();
+    expect(focusLayer()).not.toBeInTheDocument();
     expect(screen.queryByTestId('flow-legend')).not.toBeInTheDocument();
     expect(document.querySelectorAll('canvas')).toHaveLength(1);
     // As before the feature, query E is an ordinary metric: it is offered in the selector.
@@ -109,14 +115,16 @@ describe('FleetGridPanel flow overlay', () => {
 
   it('draws the edge query on its own canvas and keeps it out of the cell metrics', () => {
     render(<FleetGridPanel {...makeProps([cells(), edges(RING)])} />);
-    expect(overlay()).toBeInTheDocument();
-    expect(overlay()).toHaveStyle({ position: 'absolute', pointerEvents: 'none' });
-    expect([overlay()!.width, overlay()!.height]).toEqual([cellCanvas().width, cellCanvas().height]);
+    expect(restLayer()).toBeInTheDocument();
+    expect(restLayer()).toHaveStyle({ position: 'absolute', pointerEvents: 'none', opacity: '1' });
+    expect(focusLayer()).toHaveStyle({ position: 'absolute', pointerEvents: 'none' });
+    expect([restLayer()!.width, restLayer()!.height]).toEqual([cellCanvas().width, cellCanvas().height]);
     // One cell metric is left, so there is no selector, and no row of the edge query became a cell.
     expect(screen.queryByRole('radio')).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByTestId('flow-legend-count')).toHaveTextContent('3 edges');
-    expect(tracedArcs()).toBe(6);
+    expect(arcsIn(restLayer()!)).toBe(3);
+    expect(arcsIn(focusLayer()!)).toBe(0);
   });
 
   it('does not list the edge query in the cell tooltip', () => {
@@ -151,54 +159,60 @@ describe('FleetGridPanel flow overlay', () => {
     expect(section).toHaveTextContent('2.5');
   });
 
-  it('repaints only the overlay when the hovered cell changes, and nothing while the pointer stays in a cell', () => {
+  it('paints only the focus layer when the hovered cell changes, and nothing while the pointer stays in a cell', () => {
     render(<FleetGridPanel {...makeProps([cells(), edges(RING)])} />);
     const cellPaints = paints(cellCanvas());
-    const before = paints(overlay()!);
+    const restPaints = paints(restLayer()!);
 
     hoverHost(0);
-    expect(paints(overlay()!)).toBe(before + 1);
+    expect(arcsIn(focusLayer()!)).toBe(2); // the two edges of node-a1
+    const focusPaints = paints(focusLayer()!);
     hoverHost(0, 20); // the same cell, another pixel
     hoverHost(0, 30);
-    expect(paints(overlay()!)).toBe(before + 1);
+    expect(paints(focusLayer()!)).toBe(focusPaints);
     hoverHost(1);
-    expect(paints(overlay()!)).toBe(before + 2);
-    // A cell without edges emphasises nothing, and leaving the grid restores the resting picture.
+    expect(paints(focusLayer()!)).toBe(focusPaints + 1);
+    // A cell without edges emphasises nothing, and so does leaving the grid.
     hoverHost(3);
-    expect(paints(overlay()!)).toBe(before + 3);
+    expect(arcsIn(focusLayer()!)).toBe(0);
     fireEvent.mouseLeave(container());
-    expect(paints(overlay()!)).toBe(before + 3);
-    // None of this painted the cells again.
+    expect(arcsIn(focusLayer()!)).toBe(0);
+    // None of this painted the cells or the arcs at rest again.
     expect(paints(cellCanvas())).toBe(cellPaints);
+    expect(paints(restLayer()!)).toBe(restPaints);
   });
 
-  it('dims the other arcs while a cell with edges is hovered', () => {
+  it('dims the arcs at rest while a cell with edges is hovered', () => {
     render(<FleetGridPanel {...makeProps([cells(), edges([...RING, ['node-a3', 'node-a4', 1]])])} />);
-    const dims = () => lastPaint(overlay()!).some((e) => e.type === 'globalAlpha' && e.props.value === 0.22);
-    expect(dims()).toBe(false);
+    expect(restLayer()).toHaveStyle({ opacity: '1' });
     hoverHost(0);
-    expect(dims()).toBe(true);
+    expect(restLayer()).toHaveStyle({ opacity: '0.22' });
+    expect(arcsIn(restLayer()!)).toBe(4);
+    hoverHost(3); // node-a4 has one edge
+    expect(restLayer()).toHaveStyle({ opacity: '0.22' });
+    expect(arcsIn(focusLayer()!)).toBe(1);
     fireEvent.mouseLeave(container());
-    expect(dims()).toBe(false);
+    expect(restLayer()).toHaveStyle({ opacity: '1' });
   });
 
   it('draws arcs only for the hovered cell in hover mode', () => {
     render(<FleetGridPanel {...makeProps([cells(), edges(RING)], { ...flowOptions, flowShow: 'hover' })} />);
-    expect(tracedArcs()).toBe(0);
+    expect(arcsIn(restLayer()!)).toBe(0);
     expect(screen.getByTestId('flow-legend-count')).toHaveTextContent('3 edges, shown on hover');
     hoverHost(0);
-    expect(tracedArcs()).toBe(4); // the two edges of node-a1
+    expect(arcsIn(restLayer()!)).toBe(0);
+    expect(arcsIn(focusLayer()!)).toBe(2);
     fireEvent.mouseLeave(container());
-    expect(tracedArcs()).toBe(0);
+    expect(arcsIn(focusLayer()!)).toBe(0);
   });
 
   it('keeps the edges of the clicked cell emphasised while its popover is open', () => {
     render(<FleetGridPanel {...makeProps([cells(), edges(RING)], { ...flowOptions, flowShow: 'hover' })} />);
     fireEvent.click(container(), { clientX: 10, clientY: 5 });
     expect(screen.getByLabelText('Close')).toBeInTheDocument();
-    expect(tracedArcs()).toBe(4);
+    expect(arcsIn(focusLayer()!)).toBe(2);
     fireEvent.mouseLeave(container());
-    expect(tracedArcs()).toBe(4);
+    expect(arcsIn(focusLayer()!)).toBe(2);
   });
 
   it('applies the threshold filter and says how many edges pass it', () => {

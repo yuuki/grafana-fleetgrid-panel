@@ -594,15 +594,19 @@ describe('summarizeFlowNode', () => {
 });
 
 describe('flow overlay bounds', () => {
-  // The worst case the model accepts: MAX_FLOW_ROWS rows that are all distinct edges. The budget is far
-  // above the expected time (well under 200 ms on a laptop): it catches a quadratic step, not noise.
+  // The worst case the model accepts: MAX_FLOW_ROWS rows that are all distinct edges. One build takes
+  // about 100 ms on an idle machine. The budget is far above that and applies to the fastest of three
+  // builds, so it catches a quadratic step and not a busy machine.
   it('builds the model at the row bound within its time budget', () => {
     const hosts = 150; // 150 × 149 ordered pairs > MAX_FLOW_ROWS
-    const start = performance.now();
-    const m = meshModel(hosts, hosts - 1);
-    const elapsed = performance.now() - start;
-    expect(m.stats.readRows).toBe(MAX_FLOW_ROWS);
-    expect(m.edges).toHaveLength(MAX_FLOW_ROWS);
-    expect(elapsed).toBeLessThan(3000);
+    let fastest = Infinity;
+    for (let run = 0; run < 3; run++) {
+      const start = performance.now();
+      const m = meshModel(hosts, hosts - 1);
+      fastest = Math.min(fastest, performance.now() - start);
+      expect(m.stats.readRows).toBe(MAX_FLOW_ROWS);
+      expect(m.edges).toHaveLength(MAX_FLOW_ROWS);
+    }
+    expect(fastest).toBeLessThan(2000);
   });
 });

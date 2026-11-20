@@ -3,18 +3,25 @@ import { FlowEdge } from '../data/edges';
 import { LayoutResult } from '../layout/layout';
 import { FlowArc, FlowRect, flowArc, flowArrowHead, flowBadgePoint } from './flowGeometry';
 
-// The flow overlay's draw pass. It paints arcs on its own canvas, stacked on the cell canvas, so a
-// change of focus (hover) repaints at most MAX_FLOW_ARCS arcs and never the cells.
+// The flow overlay's draw pass. Arcs are painted on canvases of their own, stacked on the cell canvas:
+// one layer for the arcs at rest and one for the arcs in focus. A change of focus (hover) paints the
+// focus layer only; the resting layer is dimmed with CSS, and the cells are never painted again.
 
 export interface FlowRenderContext {
   layout: LayoutResult;
   viewportH: number;
   /** Rectangle of each hierarchy node that can be an endpoint (see flowAnchors). */
   anchors: Map<string, FlowRect>;
-  /** Arcs drawn while nothing is focused, worst first. */
-  base: FlowEdge[];
-  /** Arcs to emphasise, worst first; the other base arcs are dimmed. null when nothing is focused. */
-  focus: FlowEdge[] | null;
+  /** The arcs of this layer, worst first. At most MAX_FLOW_ARCS. */
+  edges: FlowEdge[];
+  /** The focus layer draws its arcs wider and outlines the cells or groups they connect. */
+  emphasised: boolean;
+  /**
+   * Keep an allocated backing store while the layer has no arcs. The focus layer is emptied and filled
+   * on every change of hover, and allocating a canvas each time costs more than clearing it. A layer
+   * that does not retain its store (the resting layer, empty in hover mode) holds none while it is empty.
+   */
+  retain: boolean;
   /** Color of an edge that has a value. An edge without one is drawn dashed in a neutral color. */
   colorOf: (edge: FlowEdge) => string;
   theme: GrafanaTheme2;
@@ -28,10 +35,13 @@ interface Shape {
 
 const HALO = 1; // px of background color on each side of an arc, so it reads on any cell color
 const HALO_ALPHA = 0.85;
-const DIM_ALPHA = 0.22;
+/** CSS opacity of the resting layer while a focus is shown. */
+export const FLOW_DIM_OPACITY = 0.22;
 // Dash and gap of an edge without a value, in line widths.
 const DASH = 2.5;
 const EMPHASIS = 1.6;
+const OUTLINE_WIDTH = 1.5;
+const OUTLINE_GAP = 1; // px between a cell or group and its outline
 const BADGE_FONT_PX = 10;
 const BADGE_CELL = 14; // px; size of the squares used to keep hop numbers from overlapping
 
@@ -44,19 +54,19 @@ export function flowArrowSize(lineWidth: number): number {
   return Math.min(11, Math.max(6, lineWidth * 3.2));
 }
 
-// The overlay must have exactly the cell canvas's size (prepareCanvas in renderer.ts) so that both share
-// one coordinate system. Unlike the cell canvas it keeps its backing store when the size is unchanged:
-// a hover only clears it.
-function prepareOverlay(
-  canvas: HTMLCanvasElement,
-  layout: LayoutResult,
-  viewportH: number,
-  dpr: number
-): CanvasRenderingContext2D | null {
-  const cssW = layout.contentWidth;
-  const cssH = Math.max(layout.contentHeight, viewportH);
-  const width = Math.round(cssW * dpr);
-  const height = Math.round(cssH * dpr);
+// A layer must have exactly the cell canvas's size (prepareCanvas in renderer.ts) so that all canvases
+// share one coordinate system. Unlike the cell canvas it keeps its backing store while the size is
+// unchanged. Returns null when there is nothing to paint on.
+function prepareLayer(canvas: HTMLCanvasElement, rc: FlowRenderContext, dpr: number): CanvasRenderingContext2D | null {
+  const cssW = rc.layout.contentWidth;
+  const cssH = Math.max(rc.layout.contentHeight, rc.viewportH);
+  const fullWidth = Math.round(cssW * dpr);
+  const fullHeight = Math.round(cssH * dpr);
+  const allocated = canvas.width === fullWidth && canvas.height === fullHeight;
+  // An empty layer is released, unless it retains a store that already has the right size.
+  const release = rc.edges.length === 0 && !(rc.retain && allocated);
+  const width = release ? 0 : fullWidth;
+  const height = release ? 0 : fullHeight;
   if (canvas.width !== width) {
     canvas.width = width;
   }
@@ -65,7 +75,7 @@ function prepareOverlay(
   }
   canvas.style.width = `${cssW}px`;
   canvas.style.height = `${cssH}px`;
-  const ctx = canvas.getContext('2d');
+  const ctx = release ? null : canvas.getContext('2d');
   if (!ctx) {
     return null;
   }
@@ -75,10 +85,10 @@ function prepareOverlay(
 }
 
 // Shapes in draw order: the input is worst first, and the worst arcs must end up on top.
-function shapesOf(edges: FlowEdge[], rc: FlowRenderContext, width: number, height: number): Shape[] {
+function shapesOf(rc: FlowRenderContext, width: number, height: number): Shape[] {
   const shapes: Shape[] = [];
-  for (let i = edges.length - 1; i >= 0; i--) {
-    const edge = edges[i];
+  for (let i = rc.edges.length - 1; i >= 0; i--) {
+    const edge = rc.edges[i];
     const from = rc.anchors.get(edge.source);
     const to = rc.anchors.get(edge.destination);
     const arc = from && to ? flowArc(from, to, width, height) : null;
@@ -91,88 +101,81 @@ function shapesOf(edges: FlowEdge[], rc: FlowRenderContext, width: number, heigh
 }
 
 function traceArc(ctx: CanvasRenderingContext2D, arc: FlowArc): void {
+  ctx.beginPath();
   ctx.moveTo(arc.x0, arc.y0);
   ctx.quadraticCurveTo(arc.cx, arc.cy, arc.x1, arc.y1);
 }
 
 function traceArrow(ctx: CanvasRenderingContext2D, arc: FlowArc, size: number): void {
   const [tip, left, right] = flowArrowHead(arc, size);
+  ctx.beginPath();
   ctx.moveTo(tip.x, tip.y);
   ctx.lineTo(left.x, left.y);
   ctx.lineTo(right.x, right.y);
   ctx.closePath();
 }
 
-// Paints consecutive shapes of one color as a single path. Edges are sorted by value, so with
-// thresholds a whole band of arcs is one stroke.
-function paintRuns(shapes: Shape[], trace: (shape: Shape) => void, begin: () => void, paint: (color: string) => void) {
-  let i = 0;
-  while (i < shapes.length) {
-    const color = shapes[i].color;
-    begin();
-    for (; i < shapes.length && shapes[i].color === color; i++) {
-      trace(shapes[i]);
-    }
-    paint(color);
-  }
-}
-
-function strokeRuns(ctx: CanvasRenderingContext2D, shapes: Shape[]): void {
-  paintRuns(
-    shapes,
-    (shape) => traceArc(ctx, shape.arc),
-    () => ctx.beginPath(),
-    (color) => {
-      ctx.strokeStyle = color;
+// Each arc is stroked twice: first wider in the panel's background color (the halo), then in its own
+// color. The halo separates an arc from the cells it crosses, in light and dark themes alike, and from
+// the arcs drawn before it. Every arc is its own path: one path with all arcs is slower to rasterize
+// (measured in Chromium, see docs/design.md), because its strokes overlap each other everywhere.
+function strokeArcs(ctx: CanvasRenderingContext2D, shapes: Shape[], lineWidth: number, background: string): void {
+  const dash = [lineWidth * DASH, lineWidth * DASH];
+  for (const shape of shapes) {
+    traceArc(ctx, shape.arc);
+    ctx.globalAlpha = HALO_ALPHA;
+    ctx.strokeStyle = background;
+    ctx.lineWidth = lineWidth + 2 * HALO;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = shape.color;
+    ctx.lineWidth = lineWidth;
+    // An edge without a value is dashed, so "unknown" does not depend on color alone.
+    if (shape.edge.value === null) {
+      ctx.setLineDash(dash);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    } else {
       ctx.stroke();
     }
-  );
-}
-
-// The colored strokes. An edge without a value is dashed, so "unknown" does not depend on color alone.
-function strokeArcs(ctx: CanvasRenderingContext2D, shapes: Shape[], lineWidth: number): void {
-  ctx.lineWidth = lineWidth;
-  const unknown = shapes.filter((shape) => shape.edge.value === null);
-  if (unknown.length > 0) {
-    ctx.setLineDash([lineWidth * DASH, lineWidth * DASH]);
-    strokeRuns(ctx, unknown);
-    ctx.setLineDash([]);
   }
-  strokeRuns(ctx, unknown.length > 0 ? shapes.filter((shape) => shape.edge.value !== null) : shapes);
 }
 
-// The halo: every arc and arrowhead once more, wider and in the panel's background color, under the
-// colored strokes. It separates an arc from the cells it crosses in light and dark themes alike.
-function strokeHalo(
-  ctx: CanvasRenderingContext2D,
-  shapes: Shape[],
-  lineWidth: number,
-  arrowSize: number,
-  color: string
-): void {
-  ctx.globalAlpha = HALO_ALPHA;
-  ctx.strokeStyle = color;
-  ctx.lineWidth = lineWidth + 2 * HALO;
-  ctx.beginPath();
-  shapes.forEach((shape) => traceArc(ctx, shape.arc));
-  ctx.stroke();
+// The direction cue: a filled arrowhead on the middle of each arc, outlined in the background color.
+// Arrowheads are drawn after all arcs so that no arc covers the direction of another.
+function fillArrows(ctx: CanvasRenderingContext2D, shapes: Shape[], arrowSize: number, background: string): void {
   ctx.lineWidth = 2 * HALO;
-  ctx.beginPath();
-  shapes.forEach((shape) => traceArrow(ctx, shape.arc, arrowSize));
-  ctx.stroke();
-  ctx.globalAlpha = 1;
+  ctx.strokeStyle = background;
+  for (const shape of shapes) {
+    traceArrow(ctx, shape.arc, arrowSize);
+    ctx.globalAlpha = HALO_ALPHA;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = shape.color;
+    ctx.fill();
+  }
 }
 
-function fillArrows(ctx: CanvasRenderingContext2D, shapes: Shape[], arrowSize: number): void {
-  paintRuns(
-    shapes,
-    (shape) => traceArrow(ctx, shape.arc, arrowSize),
-    () => ctx.beginPath(),
-    (color) => {
-      ctx.fillStyle = color;
-      ctx.fill();
+// The focus layer outlines every cell or group its arcs connect: the hovered node and its peers. For
+// edges between groups the outline also shows that an arc belongs to the whole group, which its end
+// point at the group's centre cannot show.
+function outlineEndpoints(ctx: CanvasRenderingContext2D, shapes: Shape[], rc: FlowRenderContext): void {
+  const keys = new Set<string>();
+  for (const shape of shapes) {
+    keys.add(shape.edge.source);
+    keys.add(shape.edge.destination);
+  }
+  const outline = (width: number, color: string, alpha: number) => {
+    ctx.lineWidth = width;
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = alpha;
+    for (const key of keys) {
+      const rect = rc.anchors.get(key)!;
+      ctx.strokeRect(rect.x - OUTLINE_GAP, rect.y - OUTLINE_GAP, rect.w + 2 * OUTLINE_GAP, rect.h + 2 * OUTLINE_GAP);
     }
-  );
+  };
+  outline(OUTLINE_WIDTH + 2 * HALO, rc.theme.colors.background.primary, HALO_ALPHA);
+  outline(OUTLINE_WIDTH, rc.theme.colors.text.primary, 1);
 }
 
 /** The hop number written on an arc: its first numbered hop, with a "+" when the edge carries more hops. */
@@ -184,84 +187,85 @@ export function flowBadgeText(edge: FlowEdge): string | null {
   return `${numbered.order}${edge.hops.length > 1 ? '+' : ''}`;
 }
 
-// Hop numbers, lowest first, each claiming the squares of a coarse grid; a number whose squares are
-// taken is not written. That keeps the numbers legible where many short hops meet, in one pass.
+interface Badge {
+  shape: Shape;
+  text: string;
+  path: string;
+  order: number;
+}
+
+function badgesOf(shapes: Shape[]): Badge[] {
+  const badges: Badge[] = [];
+  for (const shape of shapes) {
+    const numbered = shape.edge.hops.find((hop) => hop.order !== null);
+    const text = flowBadgeText(shape.edge);
+    if (numbered && text !== null) {
+      badges.push({ shape, text, path: numbered.path, order: numbered.order! });
+    }
+  }
+  return badges.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0) || a.order - b.order);
+}
+
+// The squares of a coarse grid that a hop number written at (x, y) covers.
+function badgeSquares(x: number, y: number, text: string): string[] {
+  const halfW = (text.length * BADGE_FONT_PX * 0.62) / 2 + 1;
+  const halfH = BADGE_FONT_PX / 2 + 1;
+  const squares: string[] = [];
+  for (let gx = Math.floor((x - halfW) / BADGE_CELL); gx <= Math.floor((x + halfW) / BADGE_CELL); gx++) {
+    for (let gy = Math.floor((y - halfH) / BADGE_CELL); gy <= Math.floor((y + halfH) / BADGE_CELL); gy++) {
+      squares.push(`${gx},${gy}`);
+    }
+  }
+  return squares;
+}
+
+// Hop numbers, lowest first, each claiming its squares; a number whose squares are taken is not
+// written. That keeps the numbers legible where many short hops meet, in one pass.
 function drawBadges(ctx: CanvasRenderingContext2D, shapes: Shape[], arrowSize: number, theme: GrafanaTheme2): void {
-  const badges = shapes
-    .map((shape) => ({ shape, text: flowBadgeText(shape.edge) }))
-    .filter((badge): badge is { shape: Shape; text: string } => badge.text !== null)
-    .sort((a, b) => {
-      const ha = a.shape.edge.hops.find((hop) => hop.order !== null)!;
-      const hb = b.shape.edge.hops.find((hop) => hop.order !== null)!;
-      return (ha.path < hb.path ? -1 : ha.path > hb.path ? 1 : 0) || ha.order! - hb.order!;
-    });
+  const badges = badgesOf(shapes);
   if (badges.length === 0) {
     return;
   }
   ctx.font = `600 ${BADGE_FONT_PX}px ${theme.typography.fontFamily}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.lineJoin = 'round';
   ctx.lineWidth = 3;
   ctx.strokeStyle = theme.colors.background.primary;
   ctx.fillStyle = theme.colors.text.primary;
   const taken = new Set<string>();
   for (const { shape, text } of badges) {
     const at = flowBadgePoint(shape.arc, arrowSize / 2 + BADGE_FONT_PX * 0.8);
-    const halfW = (text.length * BADGE_FONT_PX * 0.62) / 2 + 1;
-    const halfH = BADGE_FONT_PX / 2 + 1;
-    const squares: string[] = [];
-    for (let gx = Math.floor((at.x - halfW) / BADGE_CELL); gx <= Math.floor((at.x + halfW) / BADGE_CELL); gx++) {
-      for (let gy = Math.floor((at.y - halfH) / BADGE_CELL); gy <= Math.floor((at.y + halfH) / BADGE_CELL); gy++) {
-        squares.push(`${gx},${gy}`);
-      }
-    }
+    const squares = badgeSquares(at.x, at.y, text);
     if (squares.some((square) => taken.has(square))) {
       continue;
     }
     squares.forEach((square) => taken.add(square));
+    // A background-colored outline keeps the number readable on any cell color.
     ctx.strokeText(text, at.x, at.y);
     ctx.fillText(text, at.x, at.y);
   }
 }
 
-function drawArcs(ctx: CanvasRenderingContext2D, shapes: Shape[], lineWidth: number, theme: GrafanaTheme2): void {
-  if (shapes.length === 0) {
+/**
+ * Paints one layer of the flow overlay: its arcs, their arrowheads and their hop numbers. The cost is
+ * proportional to the number of arcs of the layer.
+ */
+export function renderFlowLayer(canvas: HTMLCanvasElement, rc: FlowRenderContext): void {
+  const dpr = window.devicePixelRatio || 1;
+  const ctx = prepareLayer(canvas, rc, dpr);
+  if (!ctx || rc.edges.length === 0) {
     return;
   }
+  const shapes = shapesOf(rc, rc.layout.contentWidth, Math.max(rc.layout.contentHeight, rc.viewportH));
+  const lineWidth = flowLineWidth(rc.layout.cellSize) * (rc.emphasised ? EMPHASIS : 1);
   const arrowSize = flowArrowSize(lineWidth);
+  const background = rc.theme.colors.background.primary;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  strokeHalo(ctx, shapes, lineWidth, arrowSize, theme.colors.background.primary);
-  strokeArcs(ctx, shapes, lineWidth);
-  fillArrows(ctx, shapes, arrowSize);
-  drawBadges(ctx, shapes, arrowSize, theme);
-}
-
-export function renderFlowOverlay(canvas: HTMLCanvasElement, rc: FlowRenderContext): void {
-  const dpr = window.devicePixelRatio || 1;
-  const ctx = prepareOverlay(canvas, rc.layout, rc.viewportH, dpr);
-  if (!ctx) {
-    return;
+  if (rc.emphasised) {
+    outlineEndpoints(ctx, shapes, rc);
   }
-  const width = rc.layout.contentWidth;
-  const height = Math.max(rc.layout.contentHeight, rc.viewportH);
-  const lineWidth = flowLineWidth(rc.layout.cellSize);
-  if (!rc.focus) {
-    drawArcs(ctx, shapesOf(rc.base, rc, width, height), lineWidth, rc.theme);
-    return;
-  }
-  // Focus: the other arcs stay as faint context (color only), the focused ones are drawn wider on top.
-  const focused = new Set(rc.focus);
-  const rest = shapesOf(
-    rc.base.filter((edge) => !focused.has(edge)),
-    rc,
-    width,
-    height
-  );
-  ctx.lineCap = 'round';
-  ctx.globalAlpha = DIM_ALPHA;
-  strokeArcs(ctx, rest, lineWidth);
-  ctx.globalAlpha = 1;
-  drawArcs(ctx, shapesOf(rc.focus, rc, width, height), lineWidth * EMPHASIS, rc.theme);
+  strokeArcs(ctx, shapes, lineWidth, background);
+  fillArrows(ctx, shapes, arrowSize, background);
+  drawBadges(ctx, shapes, arrowSize, rc.theme);
 }

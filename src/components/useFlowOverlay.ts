@@ -14,7 +14,7 @@ import {
 } from '../data/edges';
 import { LayoutResult } from '../layout/layout';
 import { flowAnchors } from '../render/flowGeometry';
-import { renderFlowOverlay } from '../render/flowRenderer';
+import { renderFlowLayer } from '../render/flowRenderer';
 import { CellModel, FleetGridOptions, HierarchyNode } from '../types';
 
 const NO_FRAMES: DataFrame[] = [];
@@ -22,8 +22,9 @@ const NO_FRAMES: DataFrame[] = [];
 export interface FlowOverlayInput {
   /** null while the overlay is off: nothing is mounted and nothing is drawn. */
   model: FlowModel | null;
-  /** The overlay's canvas, stacked on the cell canvas. */
-  canvasRef: React.RefObject<HTMLCanvasElement>;
+  /** The canvas of the arcs at rest and the canvas of the arcs in focus, both stacked on the cell canvas. */
+  restRef: React.RefObject<HTMLCanvasElement>;
+  focusRef: React.RefObject<HTMLCanvasElement>;
   layout: LayoutResult;
   viewportH: number;
   theme: GrafanaTheme2;
@@ -31,11 +32,35 @@ export interface FlowOverlayInput {
   focusCell: CellModel | null;
 }
 
+export interface FlowOverlayState {
+  /** The focused cell's edges for the tooltip, or null when it has none. */
+  summary: FlowNodeSummary | null;
+  /** Whether arcs are in focus, so that the resting layer is to be dimmed. */
+  focused: boolean;
+}
+
 // Edge colors resolved so far, for one model and theme.
 interface ColorCache {
   model: FlowModel | null;
   theme: GrafanaTheme2 | null;
   colors: Map<FlowEdge, string>;
+}
+
+const NO_EDGES: FlowEdge[] = [];
+
+// A display processor formats text as well as picking the color, so each edge is resolved once and kept
+// for the later paints of the same model (the focus layer is painted on every change of focus).
+function edgeColors(cache: ColorCache, model: FlowModel, theme: GrafanaTheme2): (edge: FlowEdge) => string {
+  const processor = model.metricInfo?.processor;
+  return (edge) => {
+    let color = cache.colors.get(edge);
+    if (color === undefined) {
+      const display = edge.value !== null && processor ? processor(edge.value) : undefined;
+      color = display?.color ?? theme.colors.text.secondary;
+      cache.colors.set(edge, color);
+    }
+    return color;
+  };
 }
 
 /**
@@ -63,16 +88,16 @@ export function useFlowModel(
 }
 
 /**
- * Keeps the overlay canvas painted and returns the focused cell's edge summary for the tooltip (null
- * when it has no edges). Each stage is memoized on what it reads, so a pointer move inside one cell (or
- * between the cells of one group) repaints nothing, a change of the focused node repaints the arcs only,
- * and neither runs the layout or the cell pipeline again.
+ * Keeps the two overlay canvases painted. Each stage is memoized on what it reads: a pointer move inside
+ * one cell (or between the cells of one group) paints nothing, a change of the focused node paints the
+ * focus layer only (the resting layer is dimmed with CSS by the caller), and neither runs the layout or
+ * the cell pipeline again.
  */
-export function useFlowOverlay(input: FlowOverlayInput): FlowNodeSummary | null {
-  const { model, canvasRef, layout, viewportH, theme, focusCell } = input;
+export function useFlowOverlay(input: FlowOverlayInput): FlowOverlayState {
+  const { model, restRef, focusRef, layout, viewportH, theme, focusCell } = input;
   const depth = model?.depth ?? 0;
   const anchors = useMemo(() => (depth > 0 ? flowAnchors(layout, depth) : new Map()), [layout, depth]);
-  const base = useMemo(() => (model ? flowBaseEdges(model) : []), [model]);
+  const rest = useMemo(() => (model ? flowBaseEdges(model) : NO_EDGES), [model]);
   // The focus is keyed by the node, not by the cell: the cells of one group share their group's edges.
   const focusKey = model && focusCell ? flowNodeKey(model, focusCell) : null;
   const focus = useMemo(
@@ -86,28 +111,30 @@ export function useFlowOverlay(input: FlowOverlayInput): FlowNodeSummary | null 
   const colorCache = useRef<ColorCache>({ model: null, theme: null, colors: new Map() });
 
   useEffect(() => {
-    const canvas = canvasRef.current;
+    const canvas = restRef.current;
     if (!canvas || !model) {
       return;
     }
-    // A display processor formats text as well as picking the color, so each edge is resolved once and
-    // kept for the later repaints of the same model (a repaint per change of focus).
     if (colorCache.current.model !== model || colorCache.current.theme !== theme) {
       colorCache.current = { model, theme, colors: new Map() };
     }
-    const colors = colorCache.current.colors;
-    const processor = model.metricInfo?.processor;
-    const colorOf = (edge: FlowEdge): string => {
-      let color = colors.get(edge);
-      if (color === undefined) {
-        const display = edge.value !== null && processor ? processor(edge.value) : undefined;
-        color = display?.color ?? theme.colors.text.secondary;
-        colors.set(edge, color);
-      }
-      return color;
-    };
-    renderFlowOverlay(canvas, { layout, viewportH, anchors, base, focus, colorOf, theme });
-  }, [canvasRef, model, layout, viewportH, anchors, base, focus, theme]);
+    const colorOf = edgeColors(colorCache.current, model, theme);
+    const edges = rest;
+    renderFlowLayer(canvas, { layout, viewportH, anchors, edges, emphasised: false, retain: false, colorOf, theme });
+  }, [restRef, model, layout, viewportH, anchors, rest, theme]);
 
-  return summary;
+  useEffect(() => {
+    const canvas = focusRef.current;
+    if (!canvas || !model) {
+      return;
+    }
+    if (colorCache.current.model !== model || colorCache.current.theme !== theme) {
+      colorCache.current = { model, theme, colors: new Map() };
+    }
+    const colorOf = edgeColors(colorCache.current, model, theme);
+    const edges = focus ?? NO_EDGES;
+    renderFlowLayer(canvas, { layout, viewportH, anchors, edges, emphasised: true, retain: true, colorOf, theme });
+  }, [focusRef, model, layout, viewportH, anchors, focus, theme]);
+
+  return { summary, focused: focus !== null };
 }

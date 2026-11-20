@@ -2,7 +2,7 @@ import { createTheme } from '@grafana/data';
 import { FlowEdge } from '../data/edges';
 import { LayoutResult } from '../layout/layout';
 import { FlowRect } from './flowGeometry';
-import { FlowRenderContext, flowArrowSize, flowBadgeText, flowLineWidth, renderFlowOverlay } from './flowRenderer';
+import { FlowRenderContext, flowArrowSize, flowBadgeText, flowLineWidth, renderFlowLayer } from './flowRenderer';
 import { renderCanvas } from './renderer';
 
 const theme = createTheme();
@@ -42,8 +42,9 @@ const context = (over: Partial<FlowRenderContext>): FlowRenderContext => ({
   layout,
   viewportH: 600,
   anchors,
-  base: [],
-  focus: null,
+  edges: [],
+  emphasised: false,
+  retain: false,
   colorOf,
   theme,
   ...over,
@@ -55,25 +56,31 @@ const eventsOf = (canvas: HTMLCanvasElement): CanvasEvent[] =>
 
 function draw(over: Partial<FlowRenderContext>): CanvasEvent[] {
   const canvas = document.createElement('canvas');
-  renderFlowOverlay(canvas, context(over));
+  renderFlowLayer(canvas, context(over));
   return eventsOf(canvas);
 }
 
 const count = (events: CanvasEvent[], type: string) => events.filter((e) => e.type === type).length;
 const values = (events: CanvasEvent[], type: string) => events.filter((e) => e.type === type).map((e) => e.props.value);
-// The stroke colors in the order the strokes were painted.
-function strokeColors(events: CanvasEvent[]): unknown[] {
-  const colors: unknown[] = [];
-  let current: unknown;
+// The colors, widths and opacities of the strokes in the order they were painted.
+function strokes(events: CanvasEvent[]): Array<{ color: unknown; width: unknown; alpha: unknown }> {
+  const painted: Array<{ color: unknown; width: unknown; alpha: unknown }> = [];
+  const state: { color: unknown; width: unknown; alpha: unknown } = { color: undefined, width: undefined, alpha: 1 };
   for (const e of events) {
     if (e.type === 'strokeStyle') {
-      current = e.props.value;
+      state.color = e.props.value;
+    } else if (e.type === 'lineWidth') {
+      state.width = e.props.value;
+    } else if (e.type === 'globalAlpha') {
+      state.alpha = e.props.value;
     } else if (e.type === 'stroke') {
-      colors.push(current);
+      painted.push({ ...state });
     }
   }
-  return colors;
+  return painted;
 }
+
+const LINE = flowLineWidth(layout.cellSize);
 
 describe('flowLineWidth', () => {
   it('is thin on dense grids and capped on large cells', () => {
@@ -85,11 +92,11 @@ describe('flowLineWidth', () => {
   });
 });
 
-describe('renderFlowOverlay', () => {
+describe('renderFlowLayer', () => {
   it('sizes its canvas exactly like the cell canvas, so both share one coordinate system', () => {
     const tall: LayoutResult = { ...layout, contentWidth: 333.5, contentHeight: 120.5 };
     const cells = document.createElement('canvas');
-    const overlay = document.createElement('canvas');
+    const layer = document.createElement('canvas');
     renderCanvas(cells, {
       layout: tall,
       metricInfos: [],
@@ -102,14 +109,14 @@ describe('renderFlowOverlay', () => {
       viewportH: 300,
       categoryStyle: 'strip',
     });
-    renderFlowOverlay(overlay, context({ layout: tall, viewportH: 300 }));
-    expect([overlay.width, overlay.height]).toEqual([cells.width, cells.height]);
-    expect([overlay.style.width, overlay.style.height]).toEqual([cells.style.width, cells.style.height]);
+    renderFlowLayer(layer, context({ layout: tall, viewportH: 300, edges: [edge('a', 'b', 1)] }));
+    expect([layer.width, layer.height]).toEqual([cells.width, cells.height]);
+    expect([layer.style.width, layer.style.height]).toEqual([cells.style.width, cells.style.height]);
   });
 
   it('clears instead of resizing when the size did not change', () => {
     const canvas = document.createElement('canvas');
-    renderFlowOverlay(canvas, context({}));
+    renderFlowLayer(canvas, context({ edges: [edge('a', 'b', 1)] }));
     let resized = 0;
     let width = canvas.width;
     Object.defineProperty(canvas, 'width', {
@@ -119,73 +126,110 @@ describe('renderFlowOverlay', () => {
         resized++;
       },
     });
-    renderFlowOverlay(canvas, context({ base: [edge('a', 'b', 1)] }));
+    renderFlowLayer(canvas, context({ edges: [edge('b', 'c', 1)] }));
     expect(resized).toBe(0);
     expect(count(eventsOf(canvas), 'clearRect')).toBe(2);
   });
 
-  it('draws nothing while no edge is to be shown (hover mode at rest)', () => {
-    const events = draw({});
-    expect(count(events, 'stroke') + count(events, 'fill') + count(events, 'fillText')).toBe(0);
+  it('holds no backing store while it has no arcs, and keeps its place over the cells', () => {
+    const canvas = document.createElement('canvas');
+    renderFlowLayer(canvas, context({ edges: [edge('a', 'b', 1)] }));
+    expect([canvas.width, canvas.height]).toEqual([1000, 600]);
+    renderFlowLayer(canvas, context({}));
+    expect([canvas.width, canvas.height]).toEqual([0, 0]);
+    expect([canvas.style.width, canvas.style.height]).toEqual(['1000px', '600px']);
   });
 
-  it('draws a halo under every arc, then the arcs best first so the worst end up on top', () => {
-    // base is worst first, as the model provides it.
-    const events = draw({ base: [edge('a', 'b', 2), edge('b', 'c', 0)] });
-    expect(strokeColors(events)).toEqual([BACKGROUND, BACKGROUND, '#00ff00', '#ff0000']);
-    // Two halo strokes (arcs, arrowheads) are wider than the arcs they sit under.
-    const lineWidth = flowLineWidth(layout.cellSize);
-    expect(values(events, 'lineWidth').slice(0, 3)).toEqual([lineWidth + 2, 2, lineWidth]);
-    // Each arc is traced twice (halo and color); each arrowhead is traced twice and filled in its color.
-    expect(count(events, 'quadraticCurveTo')).toBe(4);
-    expect(count(events, 'closePath')).toBe(4);
+  it('keeps and clears the store of a retaining layer, but does not allocate one just to stay empty', () => {
+    const canvas = document.createElement('canvas');
+    // Never painted: an empty retaining layer allocates nothing.
+    renderFlowLayer(canvas, context({ retain: true }));
+    expect([canvas.width, canvas.height]).toEqual([0, 0]);
+    // Once it has arcs it keeps its store when they go away, and the old arcs are cleared.
+    renderFlowLayer(canvas, context({ retain: true, edges: [edge('a', 'b', 1)] }));
+    renderFlowLayer(canvas, context({ retain: true }));
+    expect([canvas.width, canvas.height]).toEqual([1000, 600]);
+    const events = eventsOf(canvas);
+    expect(events[events.length - 1].type).toBe('clearRect');
+    // A store of the wrong size is not worth keeping.
+    renderFlowLayer(canvas, context({ retain: true, viewportH: 900 }));
+    expect([canvas.width, canvas.height]).toEqual([0, 0]);
+  });
+
+  it('draws each arc over a halo, best first so the worst end up on top', () => {
+    // edges are worst first, as the model provides them.
+    const events = draw({ edges: [edge('a', 'b', 2), edge('b', 'c', 0)] });
+    expect(strokes(events)).toEqual([
+      // The better arc: halo, then color.
+      { color: BACKGROUND, width: LINE + 2, alpha: 0.85 },
+      { color: '#00ff00', width: LINE, alpha: 1 },
+      // The worse arc, over it.
+      { color: BACKGROUND, width: LINE + 2, alpha: 0.85 },
+      { color: '#ff0000', width: LINE, alpha: 1 },
+      // The outlines of the two arrowheads.
+      { color: BACKGROUND, width: 2, alpha: 0.85 },
+      { color: BACKGROUND, width: 2, alpha: 0.85 },
+    ]);
+    expect(count(events, 'quadraticCurveTo')).toBe(2);
+    // One filled arrowhead per arc, in the arc's color, after all arcs.
     expect(values(events, 'fillStyle')).toEqual(['#00ff00', '#ff0000']);
-  });
-
-  it('paints consecutive arcs of one color as a single stroke', () => {
-    const events = draw({ base: [edge('a', 'b', 3), edge('b', 'c', 2), edge('c', 'd', 1), edge('d', 'a', 0)] });
-    expect(strokeColors(events)).toEqual([BACKGROUND, BACKGROUND, '#00ff00', '#ff0000']);
     expect(count(events, 'fill')).toBe(2);
+    const types = events.map((e) => e.type);
+    expect(types.indexOf('fill')).toBeGreaterThan(types.lastIndexOf('quadraticCurveTo'));
   });
 
   it('draws an edge without a value dashed in a neutral color, not on the color scale', () => {
     const neverCalled = jest.fn(() => '#123456');
-    const events = draw({ base: [edge('a', 'b', null)], colorOf: neverCalled });
+    const events = draw({ edges: [edge('a', 'b', null)], colorOf: neverCalled });
     expect(neverCalled).not.toHaveBeenCalled();
-    expect(strokeColors(events)).toEqual([BACKGROUND, BACKGROUND, NEUTRAL]);
-    const lineWidth = flowLineWidth(layout.cellSize);
+    expect(strokes(events)[1]).toEqual({ color: NEUTRAL, width: LINE, alpha: 1 });
     expect(events.filter((e) => e.type === 'setLineDash').map((e) => e.props.segments)).toEqual([
-      [lineWidth * 2.5, lineWidth * 2.5],
+      [LINE * 2.5, LINE * 2.5],
       [],
     ]);
+    // The dash is on while the arc is stroked in its color, not while its halo is.
+    const types = events.map((e) => e.type);
+    expect(types.indexOf('setLineDash')).toBeGreaterThan(types.indexOf('stroke'));
+  });
+
+  it('draws an edge with a value solid', () => {
+    expect(count(draw({ edges: [edge('a', 'b', 0)] }), 'setLineDash')).toBe(0);
   });
 
   it('skips an edge whose endpoint has no place in the layout', () => {
-    const events = draw({ base: [edge('a', 'missing', 1), edge('a', 'b', 1)] });
-    expect(count(events, 'quadraticCurveTo')).toBe(2);
+    const events = draw({ edges: [edge('a', 'missing', 1), edge('a', 'b', 1)] });
+    expect(count(events, 'quadraticCurveTo')).toBe(1);
   });
 
-  it('dims the other arcs and widens the focused ones', () => {
-    const focused = edge('a', 'b', 0);
-    const other = edge('b', 'c', 2);
-    const events = draw({ base: [other, focused], focus: [focused] });
-    const lineWidth = flowLineWidth(layout.cellSize);
-    // First the dimmed context arc: its color only, no halo and no arrowhead.
-    expect(values(events, 'globalAlpha').slice(0, 2)).toEqual([0.22, 1]);
-    expect(strokeColors(events)).toEqual(['#ff0000', BACKGROUND, BACKGROUND, '#00ff00']);
-    expect(values(events, 'lineWidth')).toEqual([lineWidth, lineWidth * 1.6 + 2, 2, lineWidth * 1.6]);
-    expect(count(events, 'fill')).toBe(1);
+  it('draws the focus layer wider', () => {
+    const events = draw({ edges: [edge('a', 'b', 2)], emphasised: true });
+    expect(strokes(events).slice(0, 2)).toEqual([
+      { color: BACKGROUND, width: LINE * 1.6 + 2, alpha: 0.85 },
+      { color: '#ff0000', width: LINE * 1.6, alpha: 1 },
+    ]);
   });
 
-  it('draws focused edges that are not part of the resting set', () => {
-    // Hover mode, or an edge the draw bound left out of the resting set.
-    const events = draw({ base: [], focus: [edge('a', 'b', 2)] });
-    expect(strokeColors(events)).toEqual([BACKGROUND, BACKGROUND, '#ff0000']);
+  it('outlines each cell or group the focused arcs connect, once, under the arcs', () => {
+    const events = draw({ edges: [edge('a', 'b', 2), edge('b', 'c', 1), edge('c', 'a', 0)], emphasised: true });
+    const rects = events.filter((e) => e.type === 'strokeRect').map((e) => e.props);
+    // Three nodes, each outlined twice: a background-colored halo and the outline itself.
+    expect(rects).toHaveLength(6);
+    expect(rects.slice(3)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ x: 99, y: 299, width: 22, height: 22 }),
+        expect.objectContaining({ x: 499, y: 299, width: 22, height: 22 }),
+        expect.objectContaining({ x: 799, y: 299, width: 22, height: 22 }),
+      ])
+    );
+    const types = events.map((e) => e.type);
+    expect(types.lastIndexOf('strokeRect')).toBeLessThan(types.indexOf('quadraticCurveTo'));
+    // The resting layer has no outlines.
+    expect(count(draw({ edges: [edge('a', 'b', 2)] }), 'strokeRect')).toBe(0);
   });
 
   it('writes the hop number beside the arrowhead', () => {
     const events = draw({
-      base: [edge('a', 'b', 2, [{ path: 'ring-a', order: 1 }]), edge('b', 'c', 0, [{ path: 'ring-a', order: 2 }])],
+      edges: [edge('a', 'b', 2, [{ path: 'ring-a', order: 1 }]), edge('b', 'c', 0, [{ path: 'ring-a', order: 2 }])],
     });
     const texts = events.filter((e) => e.type === 'fillText').map((e) => e.props.text);
     expect(texts).toEqual(['1', '2']);
@@ -194,18 +238,17 @@ describe('renderFlowOverlay', () => {
   });
 
   it('writes no number for an edge without a hop number', () => {
-    const events = draw({ base: [edge('a', 'b', 2, [{ path: 'tree-a', order: null }]), edge('b', 'c', 1)] });
+    const events = draw({ edges: [edge('a', 'b', 2, [{ path: 'tree-a', order: null }]), edge('b', 'c', 1)] });
     expect(count(events, 'fillText')).toBe(0);
   });
 
   it('leaves out a hop number that would overlap one already written', () => {
-    // Two edges between the same nodes in opposite directions and one more far away. The pair's
-    // arrowheads are far apart, so use two nearly coincident sources to force an overlap instead.
+    // Two sources that nearly coincide give two arcs to b whose arrowheads sit on the same spot.
     const near = new Map(anchors);
     near.set('a2', { x: 102, y: 300, w: 20, h: 20 });
     const events = draw({
       anchors: near,
-      base: [
+      edges: [
         edge('a', 'b', 2, [{ path: 'ring-a', order: 2 }]),
         edge('a2', 'b', 2, [{ path: 'ring-a', order: 1 }]),
         edge('c', 'd', 2, [{ path: 'ring-a', order: 3 }]),
