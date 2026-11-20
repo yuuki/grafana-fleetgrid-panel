@@ -1,3 +1,4 @@
+import { PanelOptionsEditorBuilder, standardEditorsRegistry } from '@grafana/data';
 import { declareFitContentSupport, plugin } from './module';
 import { FleetGridOptions } from './types';
 
@@ -39,5 +40,60 @@ describe('declareFitContentSupport', () => {
     const setFitContentSupport = jest.fn();
     declareFitContentSupport({ setFitContentSupport });
     expect(setFitContentSupport).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('flow overlay options', () => {
+  // Grafana registers its standard option editors at start-up; the option builder only looks them up by id.
+  beforeAll(() => {
+    standardEditorsRegistry.setInit(() =>
+      ['text', 'number', 'radio', 'boolean', 'color', 'select'].map((id) => ({ id, name: id, editor: () => null }))
+    );
+  });
+
+  const items = () => {
+    const builder = new PanelOptionsEditorBuilder<FleetGridOptions>();
+    plugin.getPanelOptionsSupplier()(builder, { data: [] });
+    return builder.getItems().filter((item) => item.path.startsWith('flow'));
+  };
+
+  it('defaults to an overlay that is off', () => {
+    expect(plugin.defaults).toMatchObject({
+      flowRefId: '',
+      flowEndpoints: [],
+      flowShow: 'always',
+      flowWorst: 'high',
+      flowOrderLabel: '',
+      flowPathLabel: '',
+    });
+    // No threshold by default: every edge is drawn.
+    expect(plugin.defaults).not.toHaveProperty('flowThreshold');
+  });
+
+  it('keeps the stored option paths', () => {
+    expect(items().map((item) => item.path)).toEqual([
+      'flowRefId',
+      'flowEndpoints',
+      'flowShow',
+      'flowWorst',
+      'flowThreshold',
+      'flowOrderLabel',
+      'flowPathLabel',
+    ]);
+  });
+
+  it('shows the other flow options only once an edge query is named', () => {
+    const dependent = items().filter((item) => item.path !== 'flowRefId');
+    expect(items().find((item) => item.path === 'flowRefId')!.showIf).toBeUndefined();
+    for (const item of dependent) {
+      expect(item.showIf!({} as FleetGridOptions)).toBe(false);
+      expect(item.showIf!({ flowRefId: ' ' } as FleetGridOptions)).toBe(false);
+      expect(item.showIf!({ flowRefId: 'E' } as FleetGridOptions)).toBe(true);
+    }
+  });
+
+  it('carries the flow options through the categoryStyle migration', () => {
+    const stored = { flowRefId: 'E', flowEndpoints: [{ level: 'host', source: 'src_host', destination: 'dst_host' }] };
+    expect(migrate({ categoryStyle: 'topBar', ...stored })).toMatchObject(stored);
   });
 });
