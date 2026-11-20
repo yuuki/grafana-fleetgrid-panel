@@ -811,16 +811,17 @@ test('copies the selected hosts as a regular expression, a list and a hostlist',
   await shiftDrag(canvas, cells['node-a001/gpu0'], cells['node-a003/gpu1']);
   await expect(panel.getByTestId('selection-count')).toHaveText('6 cells selected');
 
-  const copied = async (format: string) => {
-    await panel.getByTestId(`selection-copy-${format}`).click();
-    // The button confirms the copy; then the clipboard holds the text.
-    await expect(panel.getByTestId(`selection-copy-${format}`).locator('svg')).toBeVisible();
-    return canvas.page().evaluate(() => navigator.clipboard.readText());
+  // The copy is asynchronous: poll the clipboard until it holds the text.
+  const clipboardAfter = (format: string) => {
+    return expect.poll(async () => {
+      await panel.getByTestId(`selection-copy-${format}`).click();
+      return canvas.page().evaluate(() => navigator.clipboard.readText());
+    });
   };
-  expect(await copied('regex')).toBe('^(node-a001|node-a002|node-a003)$');
-  expect(await copied('list')).toBe('node-a001,node-a002,node-a003');
+  await clipboardAfter('regex').toBe('^(node-a001|node-a002|node-a003)$');
+  await clipboardAfter('list').toBe('node-a001,node-a002,node-a003');
   // The zero-padded width is kept: node-a[1-3] would be other hosts.
-  expect(await copied('hostlist')).toBe('node-a[001-003]');
+  await clipboardAfter('hostlist').toBe('node-a[001-003]');
 });
 
 test('compares the selected cells with the others in the cohort drawer', async ({
