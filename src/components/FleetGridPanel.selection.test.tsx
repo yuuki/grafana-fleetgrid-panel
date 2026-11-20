@@ -4,6 +4,8 @@ import { createTheme, FieldType, LoadingState, getDefaultTimeRange, toDataFrame 
 import { DEFAULT_LEVEL, LevelDef } from '../types';
 import { FleetGridPanel } from './FleetGridPanel';
 import { SYNC_DELAY_MS } from './useVariableSync';
+import { compactHostlist } from '../selection/hostlist';
+import { syncMessage } from '../selection/variable';
 
 // Cell selection in the panel: the Shift gestures, what they leave untouched, the selection bar and
 // the wiring of the variable sync. The pure parts (selection state, statistics, export formats,
@@ -35,6 +37,17 @@ jest.mock('@grafana/ui', () => ({
       document.body
     ),
 }));
+
+// Pass-through spies: syncMessage runs once per render of the selection bar, and compactHostlist
+// only when a hostlist is built.
+jest.mock('../selection/variable', () => {
+  const actual = jest.requireActual('../selection/variable');
+  return { ...actual, syncMessage: jest.fn(actual.syncMessage) };
+});
+jest.mock('../selection/hostlist', () => {
+  const actual = jest.requireActual('../selection/hostlist');
+  return { ...actual, compactHostlist: jest.fn(actual.compactHostlist) };
+});
 
 const frame = (refId: string, name: string, zone: string, host: string, value: number | null) =>
   toDataFrame({
@@ -349,6 +362,21 @@ describe('FleetGridPanel cell selection', () => {
     expect(screen.getByRole('tooltip')).toBeInTheDocument();
   });
 
+  it('leaves the selection bar alone while the pointer only moves over the grid', () => {
+    render(<FleetGridPanel {...makeProps()} />);
+    shiftClick(LABEL.a);
+    const barRenders = (syncMessage as jest.Mock).mock.calls.length;
+    (compactHostlist as jest.Mock).mockClear();
+    // Every move over another cell renders the panel for the tooltip.
+    for (const point of [CELL.a1, CELL.a2, CELL.b1, CELL.b2]) {
+      fireEvent.mouseMove(container(), { clientX: point[0], clientY: point[1] });
+    }
+    expect(screen.getByRole('tooltip')).toBeInTheDocument();
+    // The bar is not rendered again, and no copy text is built before a copy button is used.
+    expect(syncMessage).toHaveBeenCalledTimes(barRenders);
+    expect(compactHostlist).not.toHaveBeenCalled();
+  });
+
   it('keeps the start of the band on the grid when the panel scrolls during the drag', () => {
     render(<FleetGridPanel {...makeProps()} />);
     press([5, 20]);
@@ -493,6 +521,8 @@ describe('FleetGridPanel cell selection', () => {
     const copy = async (format: string) => {
       await act(async () => {
         fireEvent.click(screen.getByTestId(`selection-copy-${format}`));
+        // Let the copy settle inside act: the Clipboard API first, then the legacy command.
+        await new Promise((resolve) => setTimeout(resolve, 0));
       });
       return writeText.mock.calls[writeText.mock.calls.length - 1]?.[0];
     };

@@ -131,6 +131,8 @@ export function useCellSelection(
     }
   };
 
+  const clear = useCallback(() => setSelection(EMPTY_SELECTION), []);
+
   // Ends the press without selecting anything.
   const abort = useCallback(() => {
     gesture.current = null;
@@ -276,7 +278,7 @@ export function useCellSelection(
     },
   };
 
-  return { resolved, gestures, bandRef, barRef, clear: () => setSelection(EMPTY_SELECTION) };
+  return { resolved, gestures, bandRef, barRef, clear };
 }
 
 /**

@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Button, useTheme2 } from '@grafana/ui';
 import { CellModel } from '../types';
 import { MetricInfo } from '../data/display';
 import { copyText } from '../selection/clipboard';
-import { compactHostlist } from '../selection/hostlist';
+import { compactHostlist, isHostlistName } from '../selection/hostlist';
 import { toList, toRegex } from '../selection/exportFormats';
 import { SyncStatus, syncMessage } from '../selection/variable';
 import { CohortDrawer } from './CohortDrawer';
@@ -56,7 +56,7 @@ const plural = (count: number, noun: string): string => `${count} ${noun}${count
  * label values in three formats, and Clear. Everything in it is a plain button, so it is the keyboard
  * side of the selection.
  */
-export const SelectionBar: React.FC<SelectionBarProps> = ({
+const SelectionBarComponent: React.FC<SelectionBarProps> = ({
   barRef,
   selected,
   rest,
@@ -71,6 +71,8 @@ export const SelectionBar: React.FC<SelectionBarProps> = ({
   const theme = useTheme2();
   const selectedCount = selected.length;
   const [comparing, setComparing] = useState(false);
+  // Hostlist notation cannot express every value. The other formats can.
+  const hostlistPossible = useMemo(() => values.every(isHostlistName), [values]);
   const [copied, setCopied] = useState<CopyFormat | undefined>(undefined);
   // The text of a copy that the browser refused, kept on screen so it can be copied by hand.
   const [failed, setFailed] = useState<string | undefined>(undefined);
@@ -136,8 +138,7 @@ export const SelectionBar: React.FC<SelectionBarProps> = ({
         </span>
       )}
       {FORMATS.map(({ id, name, describe }) => {
-        const text = formatValues(id, values);
-        const unavailable = values.length === 0 || text === null;
+        const unavailable = values.length === 0 || (id === 'hostlist' && !hostlistPossible);
         return (
           <Button
             key={id}
@@ -149,12 +150,14 @@ export const SelectionBar: React.FC<SelectionBarProps> = ({
             data-testid={`selection-copy-${id}`}
             aria-label={`Copy the ${label ?? 'label'} values as ${describe}`}
             tooltip={
-              text === null
+              id === 'hostlist' && !hostlistPossible
                 ? 'Hostlist notation cannot express an empty value or one that contains , [ or ]'
                 : `Copy the ${label ?? 'label'} values as ${describe}`
             }
             onClick={() => {
-              if (!unavailable) {
+              // The text is built here, not while rendering: a selection can hold thousands of values.
+              const text = unavailable ? null : formatValues(id, values);
+              if (text !== null) {
                 copy(id, text);
               }
             }}
@@ -208,3 +211,7 @@ export const SelectionBar: React.FC<SelectionBarProps> = ({
     </div>
   );
 };
+
+// The panel renders on every pointer move over the grid (the hover tooltip). The bar's props keep their
+// identity through that, so it is skipped.
+export const SelectionBar = React.memo(SelectionBarComponent);

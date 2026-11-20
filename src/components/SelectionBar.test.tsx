@@ -70,6 +70,7 @@ describe('SelectionBar', () => {
       render(<SelectionBar {...props({ values: [] })} />);
       await act(async () => {
         fireEvent.click(screen.getByTestId('selection-copy-list'));
+        await new Promise((resolve) => setTimeout(resolve, 0));
       });
       expect(writeText).not.toHaveBeenCalled();
     } finally {

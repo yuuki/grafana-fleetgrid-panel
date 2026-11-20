@@ -15,6 +15,9 @@ import {
  */
 export const SYNC_DELAY_MS = 400;
 
+// One object for "no variable configured", so the status keeps its identity from render to render.
+const OFF: SyncStatus = { state: 'off' };
+
 const runtime: VariableRuntime = {
   getVariables: () => getTemplateSrv()?.getVariables?.() ?? [],
   // `replace: true` updates the URL in place instead of adding a browser history entry per selection.
@@ -32,7 +35,7 @@ const runtime: VariableRuntime = {
  */
 export function useVariableSync(option: string | undefined, values: string[]): SyncStatus {
   const name = variableName(option);
-  const [status, setStatus] = useState<SyncStatus>({ state: 'off' });
+  const [status, setStatus] = useState<SyncStatus>(OFF);
   const owned = useRef<SyncOwnership | null>(null);
   // The page the variable was written on. Views of one dashboard share the path and differ in the query.
   const ownedPath = useRef('');
@@ -74,5 +77,5 @@ export function useVariableSync(option: string | undefined, values: string[]): S
     []
   );
 
-  return name === '' ? { state: 'off' } : status;
+  return name === '' ? OFF : status;
 }
