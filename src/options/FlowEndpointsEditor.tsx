@@ -6,6 +6,9 @@ import { FleetGridOptions, FlowEndpointMapping } from '../types';
 import { collectRangeOverrideSuggestions } from './suggestions';
 
 const EMPTY_MAPPING: FlowEndpointMapping = { level: '', source: '', destination: '' };
+// In Grafana's 8 px grid units. A label and an input fit the options pane on one row.
+const LABEL_WIDTH = 15;
+const INPUT_WIDTH = 14;
 
 function normalizeMapping(value: unknown): FlowEndpointMapping {
   const record = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
@@ -73,16 +76,10 @@ export const FlowEndpointsEditor: React.FC<Props> = ({ value, onChange, context 
       </div>
       {mappings.map((mapping, index) => (
         <div key={index} data-testid={`flow-endpoint-${index}`} style={{ marginBottom: 8 }}>
-          <InlineFieldRow>
-            <InlineField label="Hierarchy label" labelWidth={16}>
-              <Input
-                aria-label={`Hierarchy label ${index + 1}`}
-                list={levelListId}
-                value={mapping.level}
-                onChange={(event) => update(index, { level: event.currentTarget.value })}
-                width={20}
-              />
-            </InlineField>
+          {/* The remove button has a row of its own: the options pane is too narrow in some Grafana versions
+              to hold it beside a label and an input. */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+            <span style={{ opacity: 0.8 }}>{`Mapping ${index + 1}`}</span>
             <IconButton
               name="trash-alt"
               data-testid={`remove-flow-endpoint-${index}`}
@@ -90,26 +87,37 @@ export const FlowEndpointsEditor: React.FC<Props> = ({ value, onChange, context 
               tooltip="Remove mapping"
               onClick={() => onChange(mappings.filter((_, i) => i !== index))}
             />
+          </div>
+          <InlineFieldRow>
+            <InlineField label="Hierarchy label" labelWidth={LABEL_WIDTH}>
+              <Input
+                aria-label={`Hierarchy label ${index + 1}`}
+                list={levelListId}
+                value={mapping.level}
+                onChange={(event) => update(index, { level: event.currentTarget.value })}
+                width={INPUT_WIDTH}
+              />
+            </InlineField>
           </InlineFieldRow>
           <InlineFieldRow>
-            <InlineField label="Source label" labelWidth={16}>
+            <InlineField label="Source label" labelWidth={LABEL_WIDTH}>
               <Input
                 aria-label={`Source label ${index + 1}`}
                 list={labelListId}
                 value={mapping.source}
                 onChange={(event) => update(index, { source: event.currentTarget.value })}
-                width={20}
+                width={INPUT_WIDTH}
               />
             </InlineField>
           </InlineFieldRow>
           <InlineFieldRow>
-            <InlineField label="Destination label" labelWidth={16}>
+            <InlineField label="Destination label" labelWidth={LABEL_WIDTH}>
               <Input
                 aria-label={`Destination label ${index + 1}`}
                 list={labelListId}
                 value={mapping.destination}
                 onChange={(event) => update(index, { destination: event.currentTarget.value })}
-                width={20}
+                width={INPUT_WIDTH}
               />
             </InlineField>
           </InlineFieldRow>

@@ -787,6 +787,37 @@ test('hovering a cell emphasises the flows of its host and lists its peers', asy
   await expect(rest).toHaveCSS('opacity', '1');
 });
 
+test('flow overlay options switch to drawing on hover and filter the edges', async ({
+  gotoPanelEditPage,
+  readProvisionedDashboard,
+  page,
+}) => {
+  const dashboard = await readProvisionedDashboard({ fileName: FILE });
+  const panelEditPage = await gotoPanelEditPage({ dashboard: { uid: dashboard.uid }, id: '7' });
+  const count = page.getByTestId('flow-legend-count');
+  const rest = page.getByTestId('flow-overlay');
+  await expect(count).toHaveText('10 edges');
+  await expect.poll(() => hasArcs(rest)).toBe(true);
+  const options = panelEditPage.getCustomOptions('Flow overlay');
+
+  // On hover: nothing is drawn until a cell is hovered.
+  await options.getRadioGroup('Show arcs').check('On hover');
+  await expect(count).toHaveText('10 edges, shown on hover');
+  await expect.poll(() => hasArcs(rest)).toBe(false);
+  await options.getRadioGroup('Show arcs').check('Always');
+  await expect(count).toHaveText('10 edges');
+  await expect.poll(() => hasArcs(rest)).toBe(true);
+
+  // Lower is worse, so "worse than 0.3" keeps the six edges with a loss below 0.3 % and leaves out the
+  // edge without a value. The number input is changed last: Grafana commits it again after a delay,
+  // which would undo an option that is changed right after it.
+  await options.getRadioGroup('Worse values are').check('Lower');
+  const threshold = options.getNumberInput('Only draw edges worse than');
+  await threshold.fill('0.3');
+  await threshold.blur();
+  await expect(count).toHaveText(/^6 of 10 edges < 0\.30*\s*%$/);
+});
+
 test('a panel without an edge query has no overlay canvas', async ({ gotoDashboardPage, readProvisionedDashboard }) => {
   const dashboard = await readProvisionedDashboard({ fileName: FILE });
   const dashboardPage = await gotoDashboardPage({ uid: dashboard.uid });
