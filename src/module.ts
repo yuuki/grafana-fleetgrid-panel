@@ -6,6 +6,7 @@ import { ReduceCalcEditor } from './options/ReduceCalcEditor';
 import { RangeOverridesEditor } from './options/RangeOverridesEditor';
 import { TooltipLabelsEditor } from './options/TooltipLabelsEditor';
 import { CategoryLabelEditor } from './options/CategoryLabelEditor';
+import { SelectionLabelEditor } from './options/SelectionLabelEditor';
 
 // Hosts older than the Auto Grid fit-content API lack this method. Duck-type so
 // the plugin still loads; Grafana only offers "Auto fit" when the method exists
@@ -117,6 +118,26 @@ export const plugin = new PanelPlugin<FleetGridOptions>(FleetGridPanel).useField
       category: ['Color scale overrides'],
       editor: RangeOverridesEditor,
       defaultValue: [],
+    })
+    // Cell selection itself (Shift+click, Shift+drag) has no switch: it changes nothing until Shift is
+    // held. These two options only say what a selection is exported as; both defaults write nothing.
+    .addCustomEditor({
+      id: 'selectionLabel',
+      path: 'selectionLabel',
+      name: 'Selection label',
+      description:
+        'Hierarchy label whose values are copied and synced for the selected cells. Empty picks the deepest level whose values are unique, such as host above gpu',
+      category: ['Selection'],
+      editor: SelectionLabelEditor,
+      defaultValue: '',
+    })
+    .addTextInput({
+      path: 'selectionVariable',
+      name: 'Sync selection to variable',
+      description:
+        'Name of a dashboard variable that receives the selected label values, so other panels can filter by it. Empty disables the sync',
+      category: ['Selection'],
+      defaultValue: '',
     })
 );
 
