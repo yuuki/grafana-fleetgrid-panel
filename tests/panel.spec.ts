@@ -672,3 +672,126 @@ test('query-B cell has no link and opens the popover instead of navigating', asy
   expect(page.url()).toBe(urlBefore);
   expect(page.url()).not.toContain('drilldown=celllink');
 });
+
+// The Flow Overlay panel (id 7): query A fills the zone → host → gpu grid, query E is the edge query.
+// Its rows name hosts, so the arcs run between host groups: a six-hop ring over two zones, a pair in both
+// directions, an edge without a value, one row to a host that is no cell, and one self-edge.
+// The arcs are drawn on two canvases stacked on the cell canvas: the arcs at rest and the arcs in focus.
+async function openFlowPanel(
+  gotoDashboardPage: (args: {
+    uid: string;
+  }) => Promise<{ getPanelByTitle(title: string): Promise<{ locator: Locator }> }>,
+  uid: string
+): Promise<{ panel: Locator; cells: Locator; rest: Locator; focus: Locator }> {
+  const dashboardPage = await gotoDashboardPage({ uid });
+  const found = await dashboardPage.getPanelByTitle('Flow Overlay');
+  // Open the dedicated panel directly because Grafana does not mount dashboard rows below the viewport.
+  const page = found.locator.page();
+  const panelUrl = new URL(page.url());
+  panelUrl.searchParams.set('viewPanel', '7');
+  await page.goto(panelUrl.toString());
+  const panel = found.locator;
+  await expect(panel).toBeVisible();
+  // The cell canvas comes first in the DOM.
+  const cells = panel.locator('canvas').first();
+  await expect(cells).toBeVisible();
+  await expect.poll(() => isPainted(cells)).toBe(true);
+  return { panel, cells, rest: panel.getByTestId('flow-overlay'), focus: panel.getByTestId('flow-focus') };
+}
+
+/** Whether a flow layer shows arcs. A layer without arcs holds no backing store (0 x 0). */
+async function hasArcs(layer: Locator): Promise<boolean> {
+  const empty = await layer.evaluate((el) => (el as HTMLCanvasElement).width === 0);
+  return empty ? false : isPainted(layer);
+}
+
+/** Scans the cell rows from the first one down and returns a point whose tooltip names the host. */
+async function findHostPoint(cells: Locator, panel: Locator, host: string): Promise<{ x: number; y: number }> {
+  const box = await cells.boundingBox();
+  if (!box) {
+    throw new Error('canvas has no bounding box');
+  }
+  const first = await findCellPoint(cells, panel);
+  for (let y = first.y; y <= box.height; y += 20) {
+    for (let x = 4; x <= box.width; x += 10) {
+      const path = await probePath(cells, panel, x, y);
+      if (path?.host === host) {
+        return { x, y };
+      }
+    }
+  }
+  throw new Error(`no cell found for ${host}`);
+}
+
+test('flow overlay draws the edge query as arcs on its own canvas', async ({
+  gotoDashboardPage,
+  readProvisionedDashboard,
+}) => {
+  const dashboard = await readProvisionedDashboard({ fileName: FILE });
+  const { panel, cells, rest, focus } = await openFlowPanel(gotoDashboardPage, dashboard.uid);
+
+  await expect(rest).toBeVisible();
+  await expect.poll(() => hasArcs(rest)).toBe(true);
+  expect(await hasArcs(focus)).toBe(false);
+  // Both canvases share one coordinate system: same backing store and same CSS box.
+  const size = (canvas: Locator) =>
+    canvas.evaluate((el) => {
+      const c = el as HTMLCanvasElement;
+      const r = c.getBoundingClientRect();
+      return [c.width, c.height, r.left, r.top, r.width, r.height];
+    });
+  expect(await size(rest)).toEqual(await size(cells));
+
+  // 13 rows: 10 edges (two rows of one pair are aggregated), 1 row to a host that is no cell, 1 self-edge.
+  await expect(panel.getByTestId('flow-legend-count')).toHaveText('10 edges');
+  await expect(panel.getByRole('alert')).toContainText('1/13 edge rows were left out');
+  await expect(panel.getByRole('alert')).toContainText('dst_host=node-x9');
+  // The edge query is drawn as arcs, not as a cell metric: there is one cell metric and so no selector.
+  await expect(panel.getByRole('radio')).toHaveCount(0);
+});
+
+test('hovering a cell emphasises the flows of its host and lists its peers', async ({
+  gotoDashboardPage,
+  readProvisionedDashboard,
+}) => {
+  test.setTimeout(90_000);
+  const dashboard = await readProvisionedDashboard({ fileName: FILE });
+  const { panel, cells, rest, focus } = await openFlowPanel(gotoDashboardPage, dashboard.uid);
+  await expect.poll(() => hasArcs(rest)).toBe(true);
+  const restAtRest = await stableHash(rest);
+  const cellsAtRest = await stableHash(cells);
+  await expect(rest).toHaveCSS('opacity', '1');
+
+  // node-b1 is hop 5's destination and hop 6's source on the ring; the cells are its GPUs.
+  const onRing = await findHostPoint(cells, panel, 'node-b1');
+  await hoverCanvas(cells, onRing);
+  const tooltip = panel.getByRole('tooltip');
+  await expect(tooltip).toContainText('Flows of host node-b1: 1 out, 1 in, 2 peers');
+  await expect(tooltip).toContainText('Worst: from node-b3');
+  await expect(tooltip).toContainText(/2\.50?\s*%/);
+  await expect(tooltip).toContainText('ring-a hop 5 in');
+  await expect(tooltip).toContainText('ring-a hop 6 out');
+  // The hover draws the focused arcs on their own layer and dims the arcs at rest with CSS: neither the
+  // cells nor the arcs at rest are painted again.
+  await expect.poll(() => hasArcs(focus)).toBe(true);
+  await expect(rest).toHaveCSS('opacity', '0.22');
+  expect(await frameHash(rest)).toBe(restAtRest);
+  expect(await frameHash(cells)).toBe(cellsAtRest);
+
+  // A host without edges emphasises nothing: the overlay returns to its resting picture.
+  const noEdges = await findHostPoint(cells, panel, 'node-b4');
+  await hoverCanvas(cells, noEdges);
+  await expect(panel.getByRole('tooltip')).toContainText('host: node-b4');
+  await expect(panel.getByRole('tooltip')).not.toContainText('Flows');
+  await expect.poll(() => hasArcs(focus)).toBe(false);
+  await expect(rest).toHaveCSS('opacity', '1');
+});
+
+test('a panel without an edge query has no overlay canvas', async ({ gotoDashboardPage, readProvisionedDashboard }) => {
+  const dashboard = await readProvisionedDashboard({ fileName: FILE });
+  const dashboardPage = await gotoDashboardPage({ uid: dashboard.uid });
+  const panel = await dashboardPage.getPanelByTitle('FleetGrid');
+  await expect(panel.locator.locator('canvas').first()).toBeVisible();
+  await expect(panel.locator.locator('canvas')).toHaveCount(1);
+  await expect(panel.locator.getByTestId('flow-legend')).toHaveCount(0);
+});
