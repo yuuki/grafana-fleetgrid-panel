@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Update the transitive `brace-expansion`, `postcss`, `postcss-selector-parser`, `qs`, `serialize-javascript` and `zod` dependencies to resolve their advisories.
+- Override versions that `@grafana/data`, `@grafana/runtime` and `@grafana/ui` 12.4 pin, to resolve their advisories: `dompurify` 3.4.17, `immutable` 5.1.10, `moment` 2.31.0, `uuid` 11.1.1, and `react-use` 17.6.1, which moves `js-cookie` to 3.0.8. The `@grafana/*` releases that allow the fixed `dompurify` and `moment` (13.2 and later) need React 19. The plugin bundle does not change, because Grafana provides these packages at runtime.
+- Record in `osv-scanner.toml` the advisories that cannot be fixed yet, with the reason for each, until 2027-02-20: `minimatch` and `glob` in the Jest toolchain, and `react-router` 6 in `@grafana/ui`.
+
 ## 0.4.1 - 2026-11-12
 
 - Treat a time series whose reduced value is not finite (for example `Last (not null)` over a `+Inf` sample) as missing, as table results already were, instead of showing `Infinity` and letting it into spatial aggregation.
