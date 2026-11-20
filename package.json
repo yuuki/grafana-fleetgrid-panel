@@ -81,8 +81,11 @@
   },
   "overrides": {
     "dompurify": "^3.4.17",
+    "immutable": "~5.1.8",
     "moment": "^2.31.0",
-    "serialize-javascript": "^7.1.4"
+    "react-use": "^17.6.1",
+    "serialize-javascript": "^7.1.4",
+    "uuid": "^11.1.1"
   },
   "packageManager": "npm@11.20.0"
 }

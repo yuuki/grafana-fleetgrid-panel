@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- Update the transitive `brace-expansion`, `postcss-selector-parser`, `qs`, `serialize-javascript` and `zod` dependencies, and override the `dompurify` (3.4.17) and `moment` (2.31.0) versions that `@grafana/data` and `@grafana/ui` 12.4 pin, to resolve their advisories. The `@grafana/*` releases that allow the fixed versions (13.2 and later) need React 19. The plugin bundle does not include `dompurify` or `moment`: Grafana provides them at runtime.
+- Update the transitive `brace-expansion`, `postcss`, `postcss-selector-parser`, `qs`, `serialize-javascript` and `zod` dependencies to resolve their advisories.
+- Override versions that `@grafana/data`, `@grafana/runtime` and `@grafana/ui` 12.4 pin, to resolve their advisories: `dompurify` 3.4.17, `immutable` 5.1.10, `moment` 2.31.0, `uuid` 11.1.1, and `react-use` 17.6.1, which moves `js-cookie` to 3.0.8. The `@grafana/*` releases that allow the fixed `dompurify` and `moment` (13.2 and later) need React 19. The plugin bundle does not change, because Grafana provides these packages at runtime.
 
 ## 0.4.1 - 2026-11-12
 
