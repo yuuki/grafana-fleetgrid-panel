@@ -23,6 +23,7 @@ The example shows two zones and 200 nodes (100 per zone), with four GPU cells pe
 - **Auto-fitted cells** — Cell size is computed from the panel dimensions. Numbers are drawn only when the formatted text fits; the exact value is always available on hover.
 - **Natural sort** — Numeric segments inside labels are compared as numbers (`node-a2 < node-a10`), ascending by default (descending and "data order" are also selectable).
 - **Multiple metrics** — Show one metric at a time with an in-panel selector (default), or opt in to split each cell into sub-regions to compare its metrics side by side. The tooltip and popover list every metric that returned data.
+- **Cell selection and cohort comparison** — Shift+click cells or group labels, or Shift+drag a rectangle, to select any set of cells. Compare the selected cells with the rest of the grid for every query, copy their hosts as a regular expression, a list or a hostlist (`node-a[001-012]`), and optionally write them to a dashboard variable so that other panels filter by them.
 - **Drilldown** — Click a cell to open a popover with the current value per metric, plus a sparkline whenever time-series data is available for that metric. If the field has Data Links, navigation takes priority over the popover.
 
 ## Compatibility
@@ -185,6 +186,15 @@ Add more ordered rules when another zone, pod, or bandwidth class needs a differ
 
 If a hierarchy extraction regex collapses several source label sets into one cell, all contributing labels must resolve to the same rule. A mix of rules, or of matched and unmatched labels, produces a warning and uses the standard field-config/automatic range for that cell; FleetGrid never chooses according to input order. Leaving `rangeOverrides` empty preserves the previous behavior exactly.
 
+### Selection
+
+| Option                     | Default   | Description                                                                                                                                                                                  |
+| -------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Selection label            | automatic | Hierarchy label whose values are copied and synced for the selected cells. Empty picks the deepest level whose values are unique in the grid: `host` for `zone` → `host` → `gpu`             |
+| Sync selection to variable | empty     | Name of a dashboard variable that receives the selected values. Empty disables the sync. See [Sync to a dashboard variable](#sync-to-a-dashboard-variable) for the variable types and limits |
+
+Selecting cells needs no option: see [Cell selection](#cell-selection).
+
 ## Multiple metrics
 
 The cell model holds each query's value for a cell (marked missing where a query returned no series); only the drawing mode changes.
@@ -204,6 +214,75 @@ Clicking a cell resolves in this order:
 2. **Popover** — Otherwise a card-style popover opens next to the cell, showing the hierarchy path and, per metric, the current value plus a sparkline when time-series data is available (see the instant-query note below); metrics without a time series show "No time series" instead. It auto-flips and clamps to stay inside the visible area and closes on outside-click or `Esc`.
 
 **Instant query note** — When **any** of the panel's queries is instant (no time series in the received frames), clicking re-runs **all** of the panel's queries as range over the dashboard time range via the data source — a query configured as `format: table` is re-issued as `time_series` to request a time series, though whether a matching series actually comes back depends on the query and data source — capped at ~100 data points, then extracts the series matching the clicked cell. The result is cached per panel, so opening additional cells does not trigger another fetch. A failed re-query shows a short message in the popover; that error state is cleared only when the panel's query `requestId` changes (for example on the next dashboard refresh), which is what allows a retry. When the panel already runs range queries, no re-query happens. If re-querying feels slow at your scale, switch to range queries to remove it entirely. This instant-query drilldown path has not yet been verified against a live Prometheus / VictoriaMetrics data source.
+
+## Cell selection
+
+Select the cells that look wrong together, then compare them with the rest of the grid or act on their hosts. A selection is made with the Shift key and the primary button of a mouse or pen:
+
+| Gesture                   | Effect                                                                                                                        |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Shift+click a cell        | Selects the cell, or takes it out of the selection when it is selected                                                        |
+| Shift+click a group label | Selects every cell of the group (a zone, a host). When all of them are selected already, takes them all out                   |
+| Shift+drag                | Draws a rectangle and adds every cell it overlaps. The rectangle shows how many cells it covers. Drags only add, never remove |
+| Escape while dragging     | Abandons the drag; the selection stays as it was                                                                              |
+
+Everything without Shift works as before: a plain click still opens the drilldown popover or follows Data Links, also on a selected cell, and never changes the selection. Shift is read when the button goes down, so releasing Shift before the button does not change the gesture. A drag may leave the panel; it ends where the button is released.
+
+Selected cells get a ring in the theme's strongest contrast color. A bar appears under the grid with the size of the selection, **Compare**, three copy buttons and **Clear**. The grid keeps its layout when the bar appears: no cell moves, and the grid scrolls if the bar covers its last rows.
+
+To clear the selection, use **Clear**, or press Escape while the keyboard focus is in the panel. After a selection gesture the focus is on the bar, so Escape works at once. If a popover or link menu is open, the first Escape closes that. Changing the hierarchy levels also clears the selection.
+
+The selection belongs to the viewer and is not saved in the dashboard. It names cells by their hierarchy path, not by their position, so it stays on the same cells when the data refreshes, the panel is resized or the metric is switched. A selected cell that disappears from the query results stays selected: the bar counts it as "not in the current data", it takes no part in the comparison or the copies, and it is selected again when it comes back.
+
+Limits: cells cannot be selected with the keyboard or by touch (the grid is a canvas without keyboard navigation, and touch has no Shift key); the bar and the comparison are ordinary buttons and work with the keyboard. There is no freeform lasso: build other shapes from rectangles and Shift+clicks. A drag does not scroll the grid; scroll, then drag again.
+
+### Cohort comparison
+
+**Compare** opens a drawer that compares the selected cells with all other cells of the grid, for every query. Each cell counts with the value the grid shows for that query.
+
+| Column     | Meaning                                                                                                                                                                                                                                 |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| With value | Cells that have a value for the query                                                                                                                                                                                                   |
+| No value   | Cells that have none. They are not counted as zero and are left out of the statistics                                                                                                                                                   |
+| Min, Max   | Lowest and highest value                                                                                                                                                                                                                |
+| Median     | The middle value. With an even number of values, the mean of the two middle values                                                                                                                                                      |
+| p95        | The value at position `0.95 × (n − 1)` of the sorted values, interpolated between its two neighbours (the definition of PromQL `quantile`, NumPy and spreadsheets). In a group of up to 21 cells it lies between the two highest values |
+| δ          | Cliff's delta, a measure of how far the two groups overlap                                                                                                                                                                              |
+
+δ compares every selected cell with every other cell: the share of pairs in which the selected cell is higher, minus the share in which it is lower.
+
+- `+1.00`: every selected cell is higher than every other cell. The two groups do not overlap.
+- `−1.00`: every selected cell is lower.
+- `0.00`: a selected cell is as often higher as lower, as it is when the two groups have the same distribution.
+
+The further δ is from 0, the more that query tells the selection apart from the rest. δ uses only the order of the values, so one extreme cell cannot dominate it. It compares levels, not spread: a selection that holds both the highest and the lowest cells has a δ near 0, and Min and Max show the difference. δ is empty when either group has no value.
+
+### Copy the selected hosts
+
+The copy buttons copy the distinct values that the selected cells have for one label, in natural order. That label is the **Selection label** option. When it is empty, FleetGrid takes the deepest hierarchy level whose values are unique in the grid: for `zone` → `host` → `gpu` that is `host`, because `gpu0` exists under every host.
+
+| Button   | Example                         | Notes                                                                                                                                                                                                                        |
+| -------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Regex    | `^(node-a001\|node-a002)$`      | Matches exactly the selected values. Regular expression characters in a value are escaped as one-character classes (`node-a001[.]example`), so the text has no backslash and can be pasted into a PromQL string: `host=~"…"` |
+| List     | `node-a001,node-a002`           | A value that contains a comma or a double quote is quoted as in CSV                                                                                                                                                          |
+| Hostlist | `node-a[001-003,007],node-b012` | The notation of Slurm and pdsh. Zero padding is kept (`node-a[001-012]` is not `node-a[1-12]`). Names that differ in more than one number are listed separately. Disabled when a value contains `,`, `[` or `]`              |
+
+If the browser does not allow access to the clipboard, the bar shows the text in a field so that it can be selected and copied by hand.
+
+### Sync to a dashboard variable
+
+Set **Sync selection to variable** to the name of a dashboard variable, and use that variable in the queries of other panels. FleetGrid then writes the selected values (the same values the copy buttons use) to the variable:
+
+| Variable                                                    | What it receives                                           | Use it as                 |
+| ----------------------------------------------------------- | ---------------------------------------------------------- | ------------------------- |
+| Custom or query variable with **Multi-value**               | The values themselves; Grafana formats them for each query | `host=~"$selected_hosts"` |
+| Text box, or a custom or query variable without multi-value | One regular expression: `^(node-a001\|node-a002)$`         | `host=~"$selected_hosts"` |
+
+- The variable is written 0.4 s after the selection last changed, and only when the values changed. A data refresh writes nothing.
+- When the selection is cleared, the variable gets back the value it had before the first write, for example **All**. If someone changed the variable in the meantime, FleetGrid leaves it alone.
+- The values are written to the dashboard URL (`var-<name>=…`). A selection that would add more than 6,000 characters to the URL is not synced: the bar says so and the variable gets its previous value back. Select fewer cells, or use the copy buttons.
+- The bar also says when the variable is not in the dashboard or has a type that cannot hold a selection (constant, ad hoc filters, data source, interval).
+- The selection is not restored from the variable. After a page reload the variable still has its value from the URL and the panel has no selection; reset the variable with its own picker.
 
 ## Layout notes
 

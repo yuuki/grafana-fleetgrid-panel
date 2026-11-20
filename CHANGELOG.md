@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add cell selection: Shift+click a cell or a group label, or Shift+drag a rectangle, to select any set of cells. Selected cells are ringed, keep their selection through data refreshes and resizes, and are cleared with **Clear** or Escape. Every gesture without Shift works as before.
+- Add a cohort comparison for the selected cells against all other cells: per query, the number of cells with and without a value, min, median, p95, max and Cliff's delta. Cells without a value are counted and never treated as zero.
+- Add one-click copy of the selected cells' label values as a regular expression, a comma-separated list or a hostlist (`node-a[001-012]`), and an optional sync of those values to a dashboard variable (`Sync selection to variable`), which is restored when the selection is cleared. The label is chosen automatically or with `Selection label`.
+
 ## 0.4.1 - 2026-11-12
 
 - Treat a time series whose reduced value is not finite (for example `Last (not null)` over a `+Inf` sample) as missing, as table results already were, instead of showing `Infinity` and letting it into spatial aggregation.

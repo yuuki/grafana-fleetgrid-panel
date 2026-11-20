@@ -31,7 +31,7 @@ DataFrame[]                         (Grafana query result)
   → render      src/render/renderer.ts  single <canvas>, dpr-aware, sticky labels
 ```
 
-Interactive elements — hover tooltip, drilldown popover, metric selector, split legend, link menu — are React DOM overlays positioned in the scroll container's content coordinate space.
+Interactive elements — hover tooltip, drilldown popover, metric selector, split legend, link menu, selection band — are React DOM overlays positioned in the scroll container's content coordinate space. The selection bar is a DOM row under the grid.
 
 **Decision: single canvas + DOM overlay, not per-cell DOM.**
 *Alternatives:* one DOM node per cell (the HPE approach), SVG, canvas.
@@ -151,6 +151,76 @@ Without links, a click opens the **drilldown popover**: per-metric sparklines bu
 **Decision: cap the drilldown popover's rendered outer height to the visible panel height and enable internal vertical scrolling only when its content is taller.**
 *Rationale:* placement must use the same capped height as the rendered border box so the bottom edge remains in bounds, while normal-height content should not gain an unnecessary scroll container. Padding and borders are included in that outer height.
 
+### Cell selection: Shift gestures, cohort comparison, export
+
+An operator who sees a spatial cluster of anomalous cells selects it, compares it with the rest of the grid, and copies its hosts or filters other panels by them. The code is split the same way as the rest of the panel: pure functions in `src/selection/` (selection state, statistics, formats, variable sync) and `src/render/hitTest.ts` (region and label hit tests), a ring in the canvas renderer, and the gestures and controls in `src/components/` (`useCellSelection`, `SelectionBand`, `SelectionBar`, `CohortDrawer`, `useVariableSync`).
+
+| Gesture (primary button, mouse or pen) | Effect |
+|---|---|
+| Shift+click a cell | toggles the cell |
+| Shift+click a group label | toggles the cells of the group as one unit: removed when all of them are selected, added otherwise |
+| Shift+drag | adds every cell the rectangle overlaps |
+| Escape during a drag | abandons the drag |
+| Escape with the keyboard focus in the panel, or **Clear** | clears the selection |
+
+**Decision: Shift is the only trigger, and it is read at pointer-down.**
+*Alternatives:* (a) a "select" mode button in the header, (b) dragging without a modifier, (c) Ctrl/Cmd.
+*Rationale:* every existing gesture stays exactly as it was: a press without Shift never reaches the selection code, so click (Data Links, popover), hover and the legend chips need no mode check, and a plain click never changes or clears a selection. A mode button would add a control to every existing panel and a state in which a click means something else. Ctrl/Cmd+click opens links in a new tab in browsers, and Data Links are links. Shift+click on a page extends the text selection, so `mousedown` is cancelled for a Shift press. Reading Shift once makes the gesture independent of when the key is released: a drag that started with Shift selects even if the key comes up first, and the click event that ends any Shift press is swallowed, also after Escape, so an abandoned drag cannot open a popover or follow a link. The pointer is captured for the press, so a drag that leaves the canvas, the panel or the window still ends where the button is released; the band is clamped to the grid's box so it adds no scrollbars.
+
+**Decision: a rectangle, no freeform lasso.**
+*Rationale:* cells are axis-aligned squares in nested grids, so a rectangle that takes every cell it overlaps is predictable to the pixel, and its hit test is exact. A freeform outline needs a rule for cells it cuts through, which a user cannot see while drawing. Arbitrary shapes (half a rack, a checkerboard) are built from rectangles and single-cell toggles, because drags add and Shift+click toggles.
+
+**Decision: a selection is a set of hierarchy paths; a selected path with no cell stays selected.**
+*Alternatives:* (a) layout indices or pixel regions, (b) cell objects, (c) dropping selected cells that leave the data.
+*Rationale:* the path is the cell's identity in the data model (`pathKey`), so a selection means the same cells after a data refresh, a new layout, a resize, a metric switch or a re-sort; indices, pixels and cell objects do not survive a new model. A node that stops reporting disappears from an instant query's result, and it is often exactly the node the operator selected. Dropping it silently would shrink the cohort and the copied host list without notice, so its key is kept, the bar counts it as "not in the current data", it is on neither side of the comparison, and it is selected again when its cell returns. It contributes no label values to copies or to the variable, because cells hold their labels. Changing the hierarchy levels clears the selection: the paths then name other cells. Like the metric and category selections, it is viewer-local and never saved.
+
+**Decision: the rubber band is one DOM element moved by writing to its style; the selection changes at pointer-up; selected cells get a ring on the same canvas.**
+*Rationale:* a pointer move must not render, lay out or repaint. The band is rendered once, hidden, and `useCellSelection` keeps the gesture in a ref, so a move costs one region query and four style writes. The selection is React state and changes once per gesture, which repaints the canvas once, as a legend-chip highlight does. The ring reuses the band geometry of the category highlight ring (device-pixel aligned, capped so the fill survives) in the theme's maximum-contrast colour, drawn inside `drawCell` so group labels and the pinned label stay on top. It is 1 px without a separator on cells below 14 px: selected cells are selected to be compared, so their fill must stay readable. A second canvas for the selection was rejected: it doubles the backing store, and it breaks the single-canvas assumption that the E2E tests and the pinned-label drawing order rely on. A cell that is both selected and category-highlighted shows the selection ring; the highlight still reads from the dimming of the other cells.
+
+**Decision: the region hit test reads a bucket grid; the point hit test stays a linear scan.**
+*Rationale:* the band shows the number of cells it covers, so `cellsInRect` runs on every pointer move of a drag and returns up to every cell. It buckets the cells once per layout (cached in a `WeakMap`) by their top-left corner and reads only the buckets a matching cell can start in, so its cost follows the rectangle, not the grid. The grid has at most four buckets per cell and at least 64; a sparse or very large layout gets larger buckets instead of more of them, and a layout whose extent is not a finite number falls back to the scan. The property tests compare it with the scan on arbitrary cells and on computed layouts. The earlier decision not to index the point hit test stands: one hover is one scan.
+
+**Decision: the selection bar is a row under the grid, and the layout does not know about it.**
+*Alternatives:* (a) in the header, (b) a floating toolbar over the grid.
+*Rationale:* in the header the bar wraps onto a second line unless the panel is wide, the grid re-fits to the smaller body, and every cell moves the moment the first one is selected, so the next Shift+click lands on another cell (seen in Grafana during development). A floating toolbar hides cells that the user may want to select. The row takes its height from the scroll container only: `computeLayout` still gets the height without the bar, so no cell moves, and the container scrolls when the bar covers its last rows. With Auto Grid fit-content the panel grows by the bar instead.
+
+**Decision: Escape clears only with the keyboard focus inside the panel, and uses up the key press.**
+*Rationale:* Escape closes many things in Grafana, and a selection is worth more than a popover, so a window-wide listener would lose it by accident. A pointer gesture moves the focus to the selection bar (a `role="group"` that is focusable by script only), so Escape works right after selecting, and Tab continues to its buttons. An open popover or link menu takes the first Escape. The key press is stopped at the panel, because Grafana would otherwise also leave the panel view or kiosk mode.
+
+**Limitation, deliberate: cells cannot be selected with the keyboard or by touch.** The grid is one canvas without a focus model: hover and drilldown are pointer-only as well, and arrow keys scroll the container. Cell navigation with a visible cursor over tens of thousands of cells is its own feature. Touch has no Shift, and a touch drag scrolls. What a selection offers afterwards (compare, copy, clear) is plain buttons in the bar and a Grafana `Drawer`.
+
+**Cohort comparison.** For every query the drawer compares the selected cells with all other cells of the grid. A cell's value is the one the grid shows: reduced over time and aggregated over the series in the cell.
+
+- *Missing values:* a cell without a value for the query is counted under "No value" and is in no statistic. It is not zero. Selected cells that are not in the data are on neither side.
+- *Quantiles:* median and p95 are the value at position `q × (n − 1)` of the sorted values, interpolated linearly between its neighbours (NumPy's default, R type 7, `PERCENTILE.INC`, PromQL `quantile`). One value is every quantile of itself; in a small cohort p95 lies between the two highest values, which the drawer says.
+- *Overlap:* Cliff's delta, `δ = (#{x > y} − #{x < y}) / (n_selected × n_other)` over all pairs of a selected value `x` and another value `y`. `+1`: every selected cell is above every other cell, the distributions do not overlap. `−1`: every one is below. `0`: a selected cell is as often above as below, as for identical distributions. It equals `2A − 1` for the probability of superiority `A` (the Mann–Whitney `U / (n₁ n₂)`).
+
+**Decision: Cliff's delta as the overlap measure.**
+*Alternatives:* (a) the overlapping coefficient of two histograms, (b) the Kolmogorov–Smirnov distance, (c) a difference of means in standard deviations.
+*Rationale:* the question is which query tells the cohort apart. Cliff's delta answers it with one signed number that a reader can restate (δ = +0.94 without ties: the selected cell is the higher one in 97 % of the pairs), needs no bin width (a), no unit and no normality (c), counts an outlier once, is defined from one value per side, and is exactly 0 for identical samples. KS has no direction. Its known blind spot is a cohort that holds both the highest and the lowest values: δ is near 0 while min and max differ, which is why the table shows them next to it. Both cohorts are sorted once per query in typed arrays, O(queries × cells × log cells), inside the open drawer and never in a pointer handler.
+
+**Copy formats.** The bar copies the distinct values that the selected cells have for one label, in natural order.
+
+**Decision: by default that label is the deepest hierarchy level whose values are unique in the grid.**
+*Rationale:* with `zone → host → gpu` the cells are GPUs, but `gpu0` exists under every host and names nothing by itself, while the host is what a scheduler command or a query filter takes. The rule finds `host` there, and for `zone → host`, `host → gpu` and a single `host` level, without configuration; the top level always qualifies. `selectionLabel` overrides it. Only hierarchy labels can be chosen, because cells keep only those.
+
+- *Regular expression:* `^(node-a001|node-a002)$`. Anchors make it exact where matching is a search and are harmless where it is anchored already (PromQL, LogQL label matchers); the group is a capturing one, which every dialect reads. **Decision: metacharacters are escaped as one-character classes (`.` → `[.]`), not with a backslash.** `\.` is an invalid escape in a double-quoted PromQL or LogQL string, so a backslash-escaped expression cannot be pasted into a query; a class can, and it is valid in RE2, PCRE, POSIX ERE and JavaScript. Only backslash, `^`, `[` and `]` take a backslash.
+- *List:* comma-separated; a value with a comma, a quote, a line break or outer white space is quoted as in RFC 4180.
+- *Hostlist:* `node-a[001-003,007],login1`, as Slurm and pdsh read it. A range prints its numbers at least as wide as its first number, so zero padding is part of a name: `node-a01` and `node-a1` never share a range, while `098..101` do. One numeric field per name is compacted: the one with the most distinct values, the last one on a tie; names that differ elsewhere are listed separately. Digit runs over 15 digits are text. A value that is empty or contains `,`, `[` or `]` cannot be written in the notation, and the button is disabled. `src/testing/hostlist.ts` is an expander written from the notation's rules; the property test requires `expand(compact(names))` to be exactly the input set.
+- *Clipboard:* the Clipboard API, then the legacy copy command (the API does not exist outside a secure context). If both fail, the bar shows the text in a field to copy by hand.
+
+**Variable sync.** With `selectionVariable` set, the selected values are written to that dashboard variable with `locationService.partial({ 'var-<name>': value }, true)`, the API the plugin documentation gives for it, present in every supported Grafana.
+
+**Decision: raw values for a multi-value variable, one regular expression for a single-value one.**
+*Rationale:* Grafana formats and escapes a multi-value variable per data source when a query uses it, so the panel must not escape. A single-value variable (text box, or a custom or query variable without multi-value) is inserted as it is, so it gets the anchored expression above, whose class escaping survives that. Variable types that hold something else (constant, ad hoc filters, data source, interval) are refused with a message in the bar, as is a name that is not in the dashboard: writing it would only add a stray URL parameter.
+
+**Decision: write once, 400 ms after the selection last changed, and only when the value differs from the last write.**
+*Rationale:* every write re-runs the queries that use the variable. A run of Shift+clicks is one write, and a data refresh, which leaves the values unchanged, writes nothing; that also ends the loop when the panel's own query uses the variable. `replace: true` keeps the browser history free of one entry per selection.
+
+**Decision: clearing puts back the value the variable had before the first write, if the variable still holds what the panel wrote.**
+*Alternatives:* (a) always set "All", (b) an option for the cleared value, (c) leave the last selection.
+*Rationale:* "All" does not exist for every variable, and an empty list cannot be written (Grafana drops the parameter and keeps the value), so the previous value is the only state that is defined for every variable type. If someone changed the variable in between, it is theirs and is left alone. The same restore happens when the selection becomes too large: the `var-` parameters may add at most 6,000 URL characters, which keeps a dashboard URL under the 8 KB request line that common reverse proxies accept. The bar then says so instead of syncing a part of the selection. The panel does not restore on unmount, and a reload keeps the URL's value while the viewer-local selection is gone; the variable is then reset with its own picker.
+
 ### Instant queries: on-demand range requery
 
 Instant queries have no history at hand, so the panel re-issues the dashboard's targets as a range query when the popover needs series:
@@ -178,8 +248,12 @@ Custom options are intentionally few; display formatting/color/link behavior liv
 | `spatialAggregation` | `max` (default) / `mean` / `min` / `sum` |
 | `reduceCalc` | numeric reducers only: `lastNotNull` (default), `last`, `mean`, `min`, `max`, `sum`, `count` |
 | `rangeOverrides` | ordered `RangeOverride[]` (`[]`) — optional refId, one-or-more exact/regex label matchers, optional Min/Max |
+| `selectionLabel` | hierarchy label a selection is copied and synced by (empty: the deepest level with unique values) |
+| `selectionVariable` | dashboard variable that receives the selected values (empty: no sync) |
 
 The **Color scale overrides** editor supports add/remove/reorder and multiple matchers per rule. It derives refId, label-name, and sample-value suggestions from both table and time-series query results while allowing custom values. Inline validation covers missing matchers or labels, invalid regex, non-finite endpoints, neither endpoint set, and `min >= max`; min-only and max-only rules are valid.
+
+Cell selection has no option to switch it on: it does nothing until Shift is held. Its two options only say what a selection is exported as, and both defaults write nothing.
 
 **Decision: restrict `reduceCalc` to an allowlist of numeric reducers rather than the full standard Calculation picker.**
 *Rationale:* non-numeric reducers (`allValues`, `uniqueValues`, …) produce values the color pipeline cannot render; offering them would be an invitation to a broken panel. A guarded Select with a numeric allowlist keeps the standard vocabulary while making invalid states unrepresentable.
@@ -196,12 +270,15 @@ The **Color scale overrides** editor supports add/remove/reorder and multiple ma
 - **Unit (Jest + jest-canvas-mock):** every pipeline stage TDD-tested as a pure function; range resolution covers refId, exact/regex, AND, order, partial endpoints, table/time-series provenance, conflict fallback, and processor reuse; renderer covers cell-specific colors as well as split regions, missing color, and contrast text.
 - **Component (React Testing Library):** option editors (including range-rule add/remove/reorder, suggestions, and validation), panel wiring (multi-range legends, actual-range tooltip, selector, scroll coordinates, data-link priority, link menu, popover close paths, requery race with deferred promises).
 - **E2E (`@grafana/plugin-e2e` + Playwright):** a provisioned TestData dashboard (`uid: fleetgrid-e2e`, generic zone/host/gpu data with unpadded host numbers so natural order differs from lexicographic order) exercised against the default Grafana image **and** `GRAFANA_VERSION=11.6.0`. A dedicated two-zone table panel gives equal values different maxima and verifies the legend, each tooltip range, and different canvas fills. Canvas assertions map CSS coordinates to backing-store coordinates and use locally uniform colors rather than screenshot equality, tolerating DPR and cross-version anti-aliasing differences.
+- **Cell selection:** selection state, statistics, formats and variable sync are unit-tested as pure functions; fast-check properties cover the hostlist round trip against the independent expander, the regular expression (matches exactly the values), the list, Cliff's delta against the pair count of its definition, quantile bounds, and the region hit test against a scan. The gestures are tested in jsdom with a minimal `PointerEvent` (jsdom has none) and in E2E on a dedicated panel, which also checks the clipboard, the drawer and the `selected_hosts` variable in the URL.
 - Checks that genuinely require human eyes or a live Prometheus (visual sparkline quality, in-cell unit suffix at various widths, instant requery against a real datasource, split-region visuals, minimum-cell-size boundary) are explicitly listed as manual follow-ups rather than silently claimed.
 
 ## 13. Out of scope
 
-Deliberately not implemented (YAGNI, confirmed during design): Conditions-style expression or threshold DSL (range matchers select only Min/Max), modifier-click actions, pinned/frozen cells, zoom/pan of the grid, custom URL template mechanisms outside standard Data Links, and datasource-specific code paths (the pipeline is frame-shape-based and datasource-agnostic; Prometheus/VictoriaMetrics are the design targets, not a hard dependency).
+Deliberately not implemented (YAGNI, confirmed during design): Conditions-style expression or threshold DSL (range matchers select only Min/Max), modifier-click actions other than the Shift selection gestures, a freeform lasso, selecting cells with the keyboard or by touch, saving a selection in the dashboard, pinned/frozen cells, zoom/pan of the grid, custom URL template mechanisms outside standard Data Links, and datasource-specific code paths (the pipeline is frame-shape-based and datasource-agnostic; Prometheus/VictoriaMetrics are the design targets, not a hard dependency).
 
 ## 14. Known limitations / future work
 
 - Verification against a live Prometheus/VictoriaMetrics (including instant→range requery behavior) is still outstanding; README states this.
+- A Shift+drag does not scroll the grid when it reaches the edge of a scrolled panel, and Shift+wheel scrolls sideways in browsers. To select beyond the visible part, scroll and drag again: drags add to the selection.
+- The variable sync was exercised with custom and text box variables on Grafana 11.6.0 and 12.4.0; a query variable takes the same code path but was not run against a live data source.
