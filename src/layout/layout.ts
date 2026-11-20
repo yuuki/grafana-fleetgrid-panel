@@ -17,6 +17,8 @@ export interface LayoutCell {
 
 export interface LayoutLabel {
   text: string;
+  /** Hierarchy path of the group this label names: the path prefix shared by every cell under it. */
+  path: string[];
   x: number;
   y: number;
   w: number;
@@ -94,6 +96,24 @@ export function computeLayout(root: HierarchyNode, levels: LevelDef[], width: nu
   };
 }
 
+/**
+ * The top-level group label that is drawn pinned to the top edge of the viewport: the last one the
+ * viewport has scrolled past. The renderer paints it at `scrollTop` and the group-label hit test
+ * resolves a point on it, so both read the rule from here.
+ */
+export function pinnedTopLabel(labels: LayoutLabel[], scrollTop: number): LayoutLabel | undefined {
+  if (scrollTop <= 0) {
+    return undefined;
+  }
+  let pinned: LayoutLabel | undefined;
+  for (const label of labels) {
+    if (label.depth === 1 && label.y <= scrollTop) {
+      pinned = label;
+    }
+  }
+  return pinned;
+}
+
 function layoutNode(
   node: HierarchyNode,
   levels: LevelDef[],
@@ -124,7 +144,15 @@ function layoutNode(
     const h = inner.h + pad * 2 + labelH;
     if (emit) {
       if (labelH) {
-        emit.labels.push({ text: child.key, x: cx + pad, y: cy + pad, w: inner.w, h: LABEL_H, depth: depth + 1 });
+        emit.labels.push({
+          text: child.key,
+          path: child.path,
+          x: cx + pad,
+          y: cy + pad,
+          w: inner.w,
+          h: LABEL_H,
+          depth: depth + 1,
+        });
       }
       if (childDef.showBorder) {
         emit.borders.push({ x: cx, y: cy, w, h, depth: depth + 1 });
