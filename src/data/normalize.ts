@@ -21,12 +21,18 @@ function toFiniteNumberOrNull(raw: unknown): number | null {
 }
 
 // Table format: one record per row, labeled by the frame's string columns, valued by its first numeric field
-function pushTableRows(rows: NormalizedRow[], frame: DataFrame, refId: string, valueField: Field | undefined): void {
+function pushTableRows(
+  rows: NormalizedRow[],
+  frame: DataFrame,
+  refId: string,
+  valueField: Field | undefined,
+  maxRows: number
+): void {
   if (!valueField) {
     return;
   }
   const stringFields = frame.fields.filter((f) => f.type === FieldType.string);
-  for (let i = 0; i < frame.length; i++) {
+  for (let i = 0; i < frame.length && rows.length < maxRows; i++) {
     const labels: Record<string, string> = {};
     for (const f of stringFields) {
       labels[f.name] = String(f.values[i]);
@@ -36,8 +42,17 @@ function pushTableRows(rows: NormalizedRow[], frame: DataFrame, refId: string, v
 }
 
 // Time series format: one record per numeric field
-function pushSeriesRows(rows: NormalizedRow[], numberFields: Field[], refId: string, reduceCalc: string): void {
+function pushSeriesRows(
+  rows: NormalizedRow[],
+  numberFields: Field[],
+  refId: string,
+  reduceCalc: string,
+  maxRows: number
+): void {
   for (const field of numberFields) {
+    if (rows.length >= maxRows) {
+      return;
+    }
     rows.push({
       labels: { ...(field.labels ?? {}) },
       value: reduceToValue(field, reduceCalc),
@@ -46,18 +61,42 @@ function pushSeriesRows(rows: NormalizedRow[], numberFields: Field[], refId: str
   }
 }
 
-export function normalizeFrames(frames: DataFrame[], reduceCalc: string): NormalizedRow[] {
+/**
+ * `maxRows` stops the scan after that many rows. The cell pipeline reads every row; the flow overlay
+ * bounds its work with it, because pairwise (edge) data grows with the square of the fleet.
+ */
+export function normalizeFrames(frames: DataFrame[], reduceCalc: string, maxRows = Infinity): NormalizedRow[] {
   const rows: NormalizedRow[] = [];
   for (const frame of frames) {
+    if (rows.length >= maxRows) {
+      break;
+    }
     const refId = frame.refId ?? 'A';
     const numberFields = frame.fields.filter((f) => f.type === FieldType.number);
     if (isTableFrame(frame)) {
-      pushTableRows(rows, frame, refId, numberFields[0]);
+      pushTableRows(rows, frame, refId, numberFields[0], maxRows);
     } else {
-      pushSeriesRows(rows, numberFields, refId, reduceCalc);
+      pushSeriesRows(rows, numberFields, refId, reduceCalc, maxRows);
     }
   }
   return rows;
+}
+
+/** The number of rows normalizeFrames returns for these frames without a limit, counted without building them. */
+export function countFrameRows(frames: DataFrame[]): number {
+  let count = 0;
+  for (const frame of frames) {
+    let numberFields = 0;
+    for (const field of frame.fields) {
+      numberFields += field.type === FieldType.number ? 1 : 0;
+    }
+    if (isTableFrame(frame)) {
+      count += numberFields > 0 ? frame.length : 0;
+    } else {
+      count += numberFields;
+    }
+  }
+  return count;
 }
 
 function reduceToValue(field: Field, reduceCalc: string): number | null {

@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { FieldType, ReducerID, toDataFrame } from '@grafana/data';
-import { normalizeFrames } from './normalize';
+import { countFrameRows, normalizeFrames } from './normalize';
 import { propertyParams } from '../testing/property';
 
 // The numeric reducers the panel offers (ReduceCalcEditor's allowlist).
@@ -67,6 +67,37 @@ describe('normalizeFrames (properties)', () => {
           expect(isFiniteOrNull(row.value)).toBe(true);
         });
       }),
+      propertyParams()
+    );
+  });
+
+  it('counts the rows without building them, and a row limit returns exactly the first rows', () => {
+    const toSeries = (f: typeof seriesFrame extends fc.Arbitrary<infer T> ? T : never) =>
+      toDataFrame({
+        refId: f.refId,
+        fields: [
+          { name: 'Time', type: FieldType.time, values: Array.from({ length: f.length }, (_, i) => 1000 * (i + 1)) },
+          ...f.series.map((s, i) => ({ name: `Value ${i}`, type: FieldType.number, values: s.values, labels: s.labels })),
+        ],
+      });
+    const toTable = (f: typeof tableFrame extends fc.Arbitrary<infer T> ? T : never) =>
+      toDataFrame({
+        refId: f.refId,
+        fields: [
+          ...f.columns.map((c) => ({ name: c.name, type: FieldType.string, values: c.values })),
+          { name: 'Value', type: FieldType.number, values: f.values },
+        ],
+      });
+    fc.assert(
+      fc.property(
+        fc.array(fc.oneof(seriesFrame.map(toSeries), tableFrame.map(toTable)), { maxLength: 5 }),
+        fc.nat({ max: 30 }),
+        (frames, maxRows) => {
+          const all = normalizeFrames(frames, ReducerID.lastNotNull);
+          expect(countFrameRows(frames)).toBe(all.length);
+          expect(normalizeFrames(frames, ReducerID.lastNotNull, maxRows)).toEqual(all.slice(0, maxRows));
+        }
+      ),
       propertyParams()
     );
   });

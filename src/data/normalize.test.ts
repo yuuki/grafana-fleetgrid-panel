@@ -1,5 +1,5 @@
 import { toDataFrame, FieldType } from '@grafana/data';
-import { isTableFrame, normalizeFrames } from './normalize';
+import { countFrameRows, isTableFrame, normalizeFrames } from './normalize';
 
 describe('isTableFrame', () => {
   const strField = { name: 'zone', type: FieldType.string, values: ['zone-a'] };
@@ -116,5 +116,41 @@ describe('normalizeFrames', () => {
       ],
     });
     expect(normalizeFrames([frame], 'lastNotNull')[0].value).toBeNull();
+  });
+});
+
+describe('normalizeFrames row limit', () => {
+  const table = (refId: string, zones: string[]) =>
+    toDataFrame({
+      refId,
+      fields: [
+        { name: 'zone', type: FieldType.string, values: zones },
+        { name: 'Value', type: FieldType.number, values: zones.map((_, i) => i) },
+      ],
+    });
+  const series = (zones: string[]) =>
+    toDataFrame({
+      refId: 'A',
+      fields: [
+        { name: 'Time', type: FieldType.time, values: [1000] },
+        ...zones.map((zone) => ({ name: 'Value', type: FieldType.number, values: [1], labels: { zone } })),
+      ],
+    });
+  const frames = [table('A', ['zone-a', 'zone-b', 'zone-c']), series(['zone-d', 'zone-e']), table('B', ['zone-f'])];
+
+  it('reads every row without a limit', () => {
+    expect(normalizeFrames(frames, 'lastNotNull')).toHaveLength(6);
+    expect(countFrameRows(frames)).toBe(6);
+  });
+
+  it.each([0, 1, 3, 4, 5, 6, 7])('stops after %d rows, in frame and row order', (maxRows) => {
+    const all = normalizeFrames(frames, 'lastNotNull');
+    expect(normalizeFrames(frames, 'lastNotNull', maxRows)).toEqual(all.slice(0, maxRows));
+  });
+
+  it('counts no rows for a table frame without a numeric column', () => {
+    const labelsOnly = toDataFrame({ fields: [{ name: 'zone', type: FieldType.string, values: ['zone-a'] }] });
+    expect(countFrameRows([labelsOnly])).toBe(0);
+    expect(normalizeFrames([labelsOnly], 'lastNotNull')).toEqual([]);
   });
 });
