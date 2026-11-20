@@ -163,6 +163,9 @@ export const SelectionBar: React.FC<SelectionBarProps> = ({
           </Button>
         );
       })}
+      <Button size="sm" variant="secondary" fill="text" onClick={onClear} data-testid="selection-clear">
+        Clear
+      </Button>
       {message && (
         <span
           data-testid="selection-sync"
@@ -172,9 +175,6 @@ export const SelectionBar: React.FC<SelectionBarProps> = ({
           {message.text}
         </span>
       )}
-      <Button size="sm" variant="secondary" fill="text" onClick={onClear} data-testid="selection-clear">
-        Clear
-      </Button>
       {failed !== undefined && (
         <div role="alert" style={{ flexBasis: '100%', color: theme.colors.warning.text }}>
           <div>The browser did not allow copying. Select this text and copy it:</div>
