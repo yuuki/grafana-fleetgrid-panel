@@ -673,7 +673,7 @@ test('query-B cell has no link and opens the popover instead of navigating', asy
   expect(page.url()).not.toContain('drilldown=celllink');
 });
 
-// The Flow Overlay panel (id 7): query A fills the zone → host → gpu grid, query E is the edge query.
+// The Flow Overlay panel (id 9): query A fills the zone → host → gpu grid, query E is the edge query.
 // Its rows name hosts, so the arcs run between host groups: a six-hop ring over two zones, a pair in both
 // directions, an edge without a value, one row to a host that is no cell, and one self-edge.
 // The arcs are drawn on two canvases stacked on the cell canvas: the arcs at rest and the arcs in focus.
@@ -688,7 +688,7 @@ async function openFlowPanel(
   // Open the dedicated panel directly because Grafana does not mount dashboard rows below the viewport.
   const page = found.locator.page();
   const panelUrl = new URL(page.url());
-  panelUrl.searchParams.set('viewPanel', '7');
+  panelUrl.searchParams.set('viewPanel', '9');
   await page.goto(panelUrl.toString());
   const panel = found.locator;
   await expect(panel).toBeVisible();
@@ -793,7 +793,7 @@ test('flow overlay options switch to drawing on hover and filter the edges', asy
   page,
 }) => {
   const dashboard = await readProvisionedDashboard({ fileName: FILE });
-  const panelEditPage = await gotoPanelEditPage({ dashboard: { uid: dashboard.uid }, id: '7' });
+  const panelEditPage = await gotoPanelEditPage({ dashboard: { uid: dashboard.uid }, id: '9' });
   const count = page.getByTestId('flow-legend-count');
   const rest = page.getByTestId('flow-overlay');
   await expect(count).toHaveText('10 edges');
