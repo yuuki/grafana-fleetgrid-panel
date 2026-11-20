@@ -37,6 +37,27 @@ describe('CellTooltip', () => {
     mockUseTheme2.mockReturnValue(theme);
   });
 
+  it('renders extra content below the metrics and reserves its rows when placing itself', () => {
+    const infos = buildMetricInfos([frames[0]], theme, 'browser');
+    const cell = {
+      path: ['zone-a', '0'],
+      labels: { zone: 'zone-a' },
+      values: new Map<string, number | null>([['A', 503]]),
+    };
+    const bounds = { minX: 0, minY: 0, maxX: 400, maxY: 200 };
+    // Near the bottom edge the tooltip flips above the pointer by its estimated height.
+    const view = render(<CellTooltip cell={cell} metricInfos={infos} missingColor="#444" x={10} y={150} {...bounds} />);
+    const plainTop = parseFloat(screen.getByRole('tooltip').style.top);
+    view.rerender(
+      <CellTooltip cell={cell} metricInfos={infos} missingColor="#444" x={10} y={150} {...bounds} extraRows={3}>
+        <div data-testid="extra">Flows: 1 out, 0 in, 1 peer</div>
+      </CellTooltip>
+    );
+    const tooltip = screen.getByRole('tooltip');
+    expect(tooltip.lastElementChild).toBe(screen.getByTestId('extra'));
+    expect(parseFloat(tooltip.style.top)).toBe(plainTop - 3 * 18);
+  });
+
   it('uses the current theme for its surface', () => {
     const infos = buildMetricInfos([frames[0]], theme, 'browser');
     const cell = {

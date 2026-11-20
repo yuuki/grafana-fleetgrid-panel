@@ -18,6 +18,9 @@ export interface CellTooltipProps {
   minY?: number;
   maxX?: number;
   maxY?: number;
+  /** Extra content below the metrics (the flow overlay's summary), and its height in rows for the placement. */
+  children?: React.ReactNode;
+  extraRows?: number;
 }
 
 const MAX_W = 320;
@@ -29,6 +32,8 @@ export const CellTooltip: React.FC<CellTooltipProps> = ({
   tooltipLabels = [],
   x,
   y,
+  children,
+  extraRows = 0,
   ...bounds
 }) => {
   const theme = useTheme2();
@@ -54,7 +59,7 @@ export const CellTooltip: React.FC<CellTooltipProps> = ({
   const availableH = hasBounds ? bounds.maxY! - bounds.minY! : 0;
   const outerW = hasBounds ? Math.min(MAX_W, availableW) : undefined;
   const estimatedH =
-    (labels.length + extraLabels.length) * 18 +
+    (labels.length + extraLabels.length + extraRows) * 18 +
     refIds.reduce((height, refId) => {
       const range = cell.ranges?.get(refId);
       const hasValue = cell.values.get(refId) != null && infoByRef.has(refId);
@@ -152,6 +157,7 @@ export const CellTooltip: React.FC<CellTooltipProps> = ({
           </div>
         );
       })}
+      {children}
     </div>
   );
 };
