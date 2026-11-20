@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Update the transitive `brace-expansion`, `postcss-selector-parser`, `qs`, `serialize-javascript` and `zod` dependencies, and override the `dompurify` (3.4.17) and `moment` (2.31.0) versions that `@grafana/data` and `@grafana/ui` 12.4 pin, to resolve their advisories. The `@grafana/*` releases that allow the fixed versions (13.2 and later) need React 19. The plugin bundle does not include `dompurify` or `moment`: Grafana provides them at runtime.
+
 ## 0.4.1 - 2026-11-12
 
 - Treat a time series whose reduced value is not finite (for example `Last (not null)` over a `+Inf` sample) as missing, as table results already were, instead of showing `Infinity` and letting it into spatial aggregation.

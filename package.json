@@ -80,6 +80,8 @@
     "react-dom": "^18.3.0"
   },
   "overrides": {
+    "dompurify": "^3.4.17",
+    "moment": "^2.31.0",
     "serialize-javascript": "^7.1.4"
   },
   "packageManager": "npm@11.20.0"
