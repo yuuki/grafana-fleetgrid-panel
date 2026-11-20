@@ -4,9 +4,9 @@ import { FleetGridPanel } from './components/FleetGridPanel';
 import { LevelsEditor } from './options/LevelsEditor';
 import { ReduceCalcEditor } from './options/ReduceCalcEditor';
 import { RangeOverridesEditor } from './options/RangeOverridesEditor';
+import { SelectionLabelEditor } from './options/SelectionLabelEditor';
 import { TooltipLabelsEditor } from './options/TooltipLabelsEditor';
 import { CategoryLabelEditor } from './options/CategoryLabelEditor';
-import { SelectionLabelEditor } from './options/SelectionLabelEditor';
 
 // Hosts older than the Auto Grid fit-content API lack this method. Duck-type so
 // the plugin still loads; Grafana only offers "Auto fit" when the method exists
