@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { createTheme } from '@grafana/data';
 import { MetricInfo } from '../data/display';
 import { FlowModel, FlowNodeSummary, MAX_FLOW_ARCS } from '../data/edges';
-import { FlowTooltipSection } from './FlowTooltipSection';
+import { FlowTooltipSection, flowTooltipRows } from './FlowTooltipSection';
 
 const theme = createTheme();
 jest.mock('@grafana/ui', () => ({
@@ -80,6 +80,25 @@ describe('FlowTooltipSection', () => {
     expect(section()).toHaveTextContent('Path hop 1 out');
     expect(section()).not.toHaveTextContent('tree-a');
     expect(section()).toHaveTextContent('+2 more hops');
+  });
+
+  it('renders nothing without a model or without edges for the cell', () => {
+    const { container } = render(
+      <>
+        <FlowTooltipSection model={null} summary={summary()} missingColor="#444" />
+        <FlowTooltipSection model={model()} summary={null} missingColor="#444" />
+      </>
+    );
+    expect(container).toBeEmptyDOMElement();
+    expect(flowTooltipRows(null)).toBe(0);
+  });
+
+  it('tells the tooltip how many rows it adds', () => {
+    expect(flowTooltipRows(summary())).toBe(3);
+    const hop = { path: 'ring-a', order: 1, direction: 'out' as const };
+    expect(flowTooltipRows(summary({ hops: [hop, hop] }))).toBe(5);
+    expect(flowTooltipRows(summary({ hops: [hop, hop, hop, hop] }))).toBe(7);
+    expect(flowTooltipRows(summary({ outCount: MAX_FLOW_ARCS, inCount: 1 }))).toBe(4);
   });
 
   it('says when a node has more edges than are drawn', () => {

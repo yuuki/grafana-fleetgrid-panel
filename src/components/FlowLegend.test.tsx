@@ -44,6 +44,7 @@ const model = (
   config: {
     refId: 'E',
     endpoints: [{ level: 'host', source: 'src_host', destination: 'dst_host' }],
+    incompleteEndpoints: 0,
     show: 'always',
     worst: 'high',
     threshold: undefined,
@@ -145,6 +146,11 @@ describe('FlowLegend', () => {
     expect(screen.getByTestId('range-gradient')).toBeInTheDocument();
     expect(screen.getByTestId('flow-legend-count')).toHaveTextContent('2 edges');
     expect(legend).toHaveAttribute('title', 'Edge query E: 2 of 2 rows read');
+  });
+
+  it('renders nothing while the overlay is off', () => {
+    const { container } = render(<FlowLegend model={null} width={800} />);
+    expect(container).toBeEmptyDOMElement();
   });
 
   it('shows no color scale when no edge has a value', () => {

@@ -223,7 +223,7 @@ DataFrame[] of the edge query
   → draw        src/render/flowRenderer.ts  arcs, arrowheads, hop numbers on the overlay canvases
 ```
 
-`src/components/useFlowOverlay.ts` wires the stages into the panel; `FlowLegend` and `FlowTooltipSection` are its two DOM parts.
+`src/components/useFlowOverlay.ts` wires the stages into the panel: `useCellQueries` keeps the edge query out of the cell pipeline, `useFlowModel` builds the model and `useFlowOverlay` paints. `FlowLayers` holds the canvases; `FlowLegend` and `FlowTooltipSection` are the two DOM parts. The panel component itself gains no branches for the overlay.
 
 ### Data contract
 
@@ -331,7 +331,7 @@ A path is given as its hops: each edge row can carry a hop number (`flowOrderLab
 | Several paths | Told apart by the path name. Without `flowPathLabel` all numbered hops are one path. |
 | Hop number | A whole number from 0 (at most 9 digits). Any other value keeps the edge, drops the number and is counted in a warning. |
 | Gaps | Shown as they are. A missing number means the hop is absent, has an endpoint outside the grid, or is hidden by the filter. |
-| Same pair on several paths, or twice on one | One edge and one arc; its value aggregates all rows. The arc shows its lowest hop number followed by `+`. |
+| Same pair on several paths, or twice on one | One edge and one arc; its value aggregates all rows. The arc shows its first hop number (by path name, then by number) followed by `+`. |
 | Overlapping numbers | Numbers claim squares of a coarse grid in path and hop order; a number whose squares are taken is not written. |
 
 **Decision: hops, not members.**
@@ -350,7 +350,7 @@ A path is given as its hops: each edge row can carry a hop number (`flowOrderLab
 | `flowOrderLabel` | label name (`''`) |
 | `flowPathLabel` | label name (`''`) |
 
-Unknown or missing values are normalized at runtime (`resolveFlowConfig`), so a dashboard saved before these options existed, or edited by hand, behaves like the defaults. An edge query without a usable endpoint mapping draws nothing and says so in the banner.
+Unknown or missing values are normalized at runtime (`resolveFlowConfig`), so a dashboard saved before these options existed, or edited by hand, behaves like the defaults. An edge query without endpoint mappings draws nothing and says so in the banner. So does one with a mapping that is incomplete or that names no hierarchy label: such a mapping is not skipped, because the mappings together decide the level at which the endpoints resolve, and drawing with the remaining ones would show the edges at a level nobody asked for.
 
 ### Known limits
 

@@ -4,8 +4,17 @@ import { FlowModel, FlowNodeHop, FlowNodeSummary, MAX_FLOW_ARCS } from '../data/
 import { formatFlowValue } from './FlowLegend';
 
 const HOP_LINES = 3;
-/** Rows the section adds to the cell tooltip, for its placement estimate. */
-export const FLOW_TOOLTIP_ROWS = 3 + HOP_LINES;
+
+/** Rows the section adds to the cell tooltip, for its placement estimate; none without a summary. */
+export function flowTooltipRows(summary: FlowNodeSummary | null): number {
+  if (!summary) {
+    return 0;
+  }
+  const crowded = summary.outCount + summary.inCount > MAX_FLOW_ARCS ? 1 : 0;
+  const more = summary.hops.length > HOP_LINES ? 1 : 0;
+  // The edge counts, the worst peer, and the rule above them.
+  return 3 + crowded + Math.min(summary.hops.length, HOP_LINES) + more;
+}
 
 const plural = (count: number, noun: string): string => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
@@ -15,8 +24,10 @@ function hopText(hop: FlowNodeHop): string {
 }
 
 export interface FlowTooltipSectionProps {
-  model: FlowModel;
-  summary: FlowNodeSummary;
+  /** null while the overlay is off. */
+  model: FlowModel | null;
+  /** null when the hovered cell has no edges. */
+  summary: FlowNodeSummary | null;
   missingColor: string;
 }
 
@@ -26,6 +37,9 @@ export interface FlowTooltipSectionProps {
  */
 export const FlowTooltipSection: React.FC<FlowTooltipSectionProps> = ({ model, summary, missingColor }) => {
   const theme = useTheme2();
+  if (!model || !summary) {
+    return null;
+  }
   const { worst } = summary;
   const total = summary.outCount + summary.inCount;
   const display =

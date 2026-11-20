@@ -32,6 +32,8 @@ export interface FlowConfig {
   refId: string;
   /** Complete mappings only (hierarchy label, source label and destination label all set). */
   endpoints: FlowEndpointMapping[];
+  /** Number of stored mappings that are not complete. Any of them stops the overlay: see configWarnings. */
+  incompleteEndpoints: number;
   show: FlowShowMode;
   worst: FlowWorstDirection;
   threshold: number | undefined;
@@ -118,13 +120,13 @@ export function resolveFlowConfig(options: FleetGridOptions): FlowConfig | null 
   if (refId === '') {
     return null;
   }
-  const endpoints = (Array.isArray(options.flowEndpoints) ? options.flowEndpoints : []).filter(
-    (m) => m && !isBlank(m.level) && !isBlank(m.source) && !isBlank(m.destination)
-  );
+  const stored = Array.isArray(options.flowEndpoints) ? options.flowEndpoints : [];
+  const endpoints = stored.filter((m) => m && !isBlank(m.level) && !isBlank(m.source) && !isBlank(m.destination));
   const threshold = options.flowThreshold;
   return {
     refId,
     endpoints,
+    incompleteEndpoints: stored.length - endpoints.length,
     show: options.flowShow === 'hover' ? 'hover' : 'always',
     worst: options.flowWorst === 'low' ? 'low' : 'high',
     threshold: typeof threshold === 'number' && Number.isFinite(threshold) ? threshold : undefined,
@@ -205,6 +207,11 @@ interface Collector {
   stats: FlowStats;
 }
 
+// A label of a row by a user-configured name. Only the row's own labels count, so a name such as
+// "constructor" does not read a property of every object.
+const ownLabel = (labels: Record<string, string>, name: string): string | undefined =>
+  Object.prototype.hasOwnProperty.call(labels, name) ? labels[name] : undefined;
+
 type EndpointFailure = 'missingLabel' | 'unmatched' | 'ambiguous';
 
 interface ResolvedEndpoint {
@@ -218,19 +225,23 @@ function resolveEndpoint(
   labels: Record<string, string>,
   names: string[]
 ): ResolvedEndpoint | EndpointFailure {
-  const values = names.map((name) => labels[name]);
+  const values = names.map((name) => ownLabel(labels, name));
   if (values.some((value) => value === undefined || value === '')) {
     return 'missingLabel';
   }
   const key = c.index.byValues.get(JSON.stringify(values));
   if (key === undefined) {
-    const example = names.map((name, i) => `${name}=${values[i]}`).join(', ');
-    if (c.stats.examples.length < EXAMPLE_LIMIT && !c.stats.examples.includes(example)) {
-      c.stats.examples.push(example);
-    }
     return 'unmatched';
   }
   return key === null ? 'ambiguous' : { key, label: values.join(' / ') };
+}
+
+// Keeps up to EXAMPLE_LIMIT distinct endpoints of rows that were counted as unmatched, as `label=value`.
+function recordUnmatched(c: Collector, labels: Record<string, string>, names: string[]): void {
+  const example = names.map((name) => `${name}=${ownLabel(labels, name)}`).join(', ');
+  if (c.stats.examples.length < EXAMPLE_LIMIT && !c.stats.examples.includes(example)) {
+    c.stats.examples.push(example);
+  }
 }
 
 // A row that cannot be drawn is counted once, by the first of these reasons that applies to either side.
@@ -256,8 +267,8 @@ function registerNode(c: Collector, endpoint: ResolvedEndpoint): void {
 // The row's membership in a path, or null when it carries neither a path name nor a hop number.
 function rowHop(c: Collector, labels: Record<string, string>): FlowHop | null {
   const { orderLabel, pathLabel } = c.config;
-  const path = pathLabel === '' ? undefined : labels[pathLabel];
-  const rawOrder = orderLabel === '' ? undefined : labels[orderLabel];
+  const path = pathLabel === '' ? undefined : ownLabel(labels, pathLabel);
+  const rawOrder = orderLabel === '' ? undefined : ownLabel(labels, orderLabel);
   let order: number | null = null;
   if (rawOrder !== undefined && rawOrder !== '') {
     if (ORDER_RE.test(rawOrder)) {
@@ -277,6 +288,9 @@ function addRow(c: Collector, row: NormalizedRow): void {
   if (failure !== null || typeof source === 'string' || typeof destination === 'string') {
     if (failure !== null) {
       c.stats[failure]++;
+    }
+    if (failure === 'unmatched') {
+      recordUnmatched(c, row.labels, source === 'unmatched' ? c.sourceLabels : c.destinationLabels);
     }
     return;
   }
@@ -305,10 +319,7 @@ function addRow(c: Collector, row: NormalizedRow): void {
 
 const compareText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
-function compareHops(a: FlowHop, b: FlowHop): number {
-  return compareText(a.path, b.path) || (a.order ?? Infinity) - (b.order ?? Infinity);
-}
-
+// Hop numbers ascending; a hop without a number comes last.
 function compareOrder(a: number | null, b: number | null): number {
   if (a === b) {
     return 0;
@@ -317,6 +328,10 @@ function compareOrder(a: number | null, b: number | null): number {
     return 1;
   }
   return b === null ? -1 : a - b;
+}
+
+function compareHops(a: FlowHop, b: FlowHop): number {
+  return compareText(a.path, b.path) || compareOrder(a.order, b.order);
 }
 
 /**
@@ -540,20 +555,21 @@ function emptyModel(config: FlowConfig, warnings: string[]): FlowModel {
   };
 }
 
-function configWarnings(config: FlowConfig, levels: LevelDef[], allMappings: number): string[] {
-  const warnings: string[] = [];
+// Why the endpoint mappings cannot be used, or nothing when they can. A mapping that is half filled in
+// or names no hierarchy label is not skipped: the mappings together say which level an endpoint resolves
+// to, so drawing with the rest would show the edges at a level the user did not ask for.
+function configWarnings(config: FlowConfig, levels: LevelDef[]): string[] {
+  if (config.incompleteEndpoints > 0) {
+    return ['Flow overlay: every endpoint mapping needs a hierarchy label, a source label and a destination label'];
+  }
+  if (config.endpoints.length === 0) {
+    return ['Flow overlay: map at least one hierarchy label to a source and a destination label of the edge query'];
+  }
   const levelLabels = new Set(levels.map((level) => level.label));
   const unknown = config.endpoints.filter((m) => !levelLabels.has(m.level)).map((m) => `"${m.level}"`);
-  if (unknown.length > 0) {
-    warnings.push(`Flow overlay: endpoint mapping ${[...new Set(unknown)].join(', ')} is not a hierarchy label`);
-  } else if (config.endpoints.length === 0) {
-    warnings.push(
-      allMappings > 0
-        ? 'Flow overlay: every endpoint mapping needs a hierarchy label, a source label and a destination label'
-        : 'Flow overlay: map at least one hierarchy label to a source and a destination label of the edge query'
-    );
-  }
-  return warnings;
+  return unknown.length > 0
+    ? [`Flow overlay: endpoint mapping ${[...new Set(unknown)].join(', ')} is not a hierarchy label`]
+    : [];
 }
 
 function edgeValueRange(edges: FlowEdge[]): { min: number; max: number } | undefined {
@@ -582,7 +598,7 @@ export function buildFlowModel(
   timeZone: string
 ): FlowModel {
   const levels = options.levels;
-  const invalid = configWarnings(config, levels, options.flowEndpoints?.length ?? 0);
+  const invalid = configWarnings(config, levels);
   if (invalid.length > 0) {
     return emptyModel(config, invalid);
   }

@@ -57,8 +57,12 @@ export function flowLegendSummary(model: FlowModel): FlowLegendSummary {
   return { text, bound: model.edges.length > MAX_FLOW_ARCS, details };
 }
 
-const FlowLegendComponent: React.FC<{ model: FlowModel; width: number }> = ({ model, width }) => {
+const FlowLegendComponent: React.FC<{ model: FlowModel | null; width: number }> = ({ model, width }) => {
   const theme = useTheme2();
+  // No legend while the overlay is off.
+  if (!model) {
+    return null;
+  }
   const summary = flowLegendSummary(model);
   return (
     <div

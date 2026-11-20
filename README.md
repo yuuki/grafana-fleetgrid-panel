@@ -249,6 +249,7 @@ max by (src_host, dst_host) (fabric_probe_loss_ratio)
 
 - An endpoint resolves at the **deepest mapped hierarchy level**. With `zone` → `host` → `gpu` and a mapping for `host` only, an edge runs between two host groups: its ends sit on the centre of each group's cells. Add a second mapping (`gpu` ← `src_gpu`, `dst_gpu`) to run the edges between GPU cells.
 - Map every label that is needed to name one cell or group. `gpu0` alone exists under every host, so mapping only `gpu` matches more than one cell and the row is left out.
+- Every mapping must be complete and must name a hierarchy label. Otherwise nothing is drawn and the banner says why, because a skipped mapping would move the edges to another level.
 - The two directions of a pair are two edges and two arcs. An arc bulges to the left of its direction of travel and carries an arrowhead at its middle.
 - Rows of the same ordered pair are one edge. Its value is their **Spatial aggregation**.
 - An edge whose rows have no finite value is kept and drawn **dashed in a neutral color**. It is never treated as 0. With a filter it is not drawn, because it cannot be compared.
@@ -280,7 +281,7 @@ To show a communication path such as a ring, give each edge row its position on 
 Set **Hop number label** (`hop`) and, when several paths are shown together, **Path label** (`job`).
 
 - Every hop is a row with its own source and destination, so the panel does not infer hops from a list of members. A ring is a path whose last hop returns to the first source; an open path simply ends. A tree is a set of hops that share sources: number its hops by depth, or leave the hop number out and set only the path label.
-- The hop number is written beside the arrowhead. Where numbers would overlap, the lowest ones are kept. An arc that carries more than one hop shows the lowest number followed by `+`.
+- The hop number is written beside the arrowhead. Where numbers would overlap, the lowest ones are kept. An arc that carries several hops (the same pair on two paths, or twice on one path) shows the first of them, by path name and then by number, followed by `+`.
 - Hovering a cell on a path emphasises the **whole path**, not only the hops at that cell. The tooltip lists the hops that enter and leave the cell.
 - Hop numbers must be whole numbers from 0. A row with another value keeps its arc, loses its number and is counted in a warning. Gaps in the numbers are shown as they are: a missing number means that hop is absent from the query result, has an endpoint outside the grid, or is hidden by the filter.
 - The same pair on two paths is one arc with one (aggregated) value.

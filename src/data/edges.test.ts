@@ -49,6 +49,7 @@ const hostMapping = { level: 'host', source: 'src_host', destination: 'dst_host'
 const config = (over: Partial<FlowConfig> = {}): FlowConfig => ({
   refId: 'E',
   endpoints: [hostMapping],
+  incompleteEndpoints: 0,
   show: 'always',
   worst: 'high',
   threshold: undefined,
@@ -132,7 +133,8 @@ describe('resolveFlowConfig', () => {
         flowPathLabel: ' ',
       })
     );
-    expect(resolved).toEqual(config());
+    // The two unusable mappings are counted, so the model can refuse to draw with only the usable one.
+    expect(resolved).toEqual(config({ incompleteEndpoints: 2 }));
   });
 
   it('keeps the configured values', () => {
@@ -224,6 +226,12 @@ describe('collectFlowEdges', () => {
     expect(stats.examples).toEqual(['dst_host=node-x9', 'src_host=node-x9', 'src_host=node-x7']);
   });
 
+  it('takes its examples only from rows it counted as unmatched', () => {
+    // The source matches nothing, but the row is counted for its missing destination label.
+    const { stats } = collect([{ labels: { src_host: 'node-x9' }, value: 1, refId: 'E' }]);
+    expect(stats).toMatchObject({ missingLabel: 1, unmatched: 0, examples: [] });
+  });
+
   it('counts each excluded row once, by its first reason', () => {
     const cfg = config({ endpoints: [{ level: 'gpu', source: 'src_gpu', destination: 'dst_gpu' }] });
     const { stats } = collect(
@@ -236,6 +244,20 @@ describe('collectFlowEdges', () => {
       cfg
     );
     expect(stats).toMatchObject({ missingLabel: 2, unmatched: 1, ambiguous: 1, edgeCount: 0 });
+  });
+
+  it('reads only the labels a row has, whatever the configured label names are', () => {
+    // "constructor" and "toString" exist on every object; they are not labels of the row.
+    const cfg = config({
+      endpoints: [{ level: 'host', source: 'constructor', destination: 'dst_host' }],
+      orderLabel: 'toString',
+      pathLabel: 'valueOf',
+    });
+    const { stats } = collect([{ labels: { dst_host: 'node-a2' }, value: 1, refId: 'E' }], cfg);
+    expect(stats).toMatchObject({ missingLabel: 1, unmatched: 0, invalidOrder: 0 });
+    const ok = collect([edgeRow('node-a1', 'node-a2', 1)], config({ orderLabel: 'toString', pathLabel: 'valueOf' }));
+    expect(ok.stats.invalidOrder).toBe(0);
+    expect(ok.edges[0].hops).toEqual([]);
   });
 
   it('labels a node with the raw endpoint value of the edge query', () => {
@@ -405,9 +427,17 @@ describe('buildFlowModel', () => {
     expect(model([frame], { flowEndpoints: [] }).warnings).toEqual([
       'Flow overlay: map at least one hierarchy label to a source and a destination label of the edge query',
     ]);
+    const incomplete =
+      'Flow overlay: every endpoint mapping needs a hierarchy label, a source label and a destination label';
     expect(
       model([frame], { flowEndpoints: [{ level: 'host', source: 'src_host', destination: '' }] }).warnings
-    ).toEqual(['Flow overlay: every endpoint mapping needs a hierarchy label, a source label and a destination label']);
+    ).toEqual([incomplete]);
+    // A half-filled second mapping is not skipped: it would move the edges to another level than asked for.
+    const halfFilled = model([frame], {
+      flowEndpoints: [hostMapping, { level: 'gpu', source: 'src_gpu', destination: '' }],
+    });
+    expect(halfFilled.warnings).toEqual([incomplete]);
+    expect(halfFilled.edges).toEqual([]);
     const unknown = model([frame], { flowEndpoints: [{ level: 'rack', source: 's', destination: 'd' }] });
     expect(unknown.warnings).toEqual(['Flow overlay: endpoint mapping "rack" is not a hierarchy label']);
     expect(unknown.edges).toEqual([]);

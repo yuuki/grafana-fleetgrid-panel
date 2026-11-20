@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import { DataFrame, GrafanaTheme2 } from '@grafana/data';
+import { DataFrame, DataQueryRequest, GrafanaTheme2, PanelData } from '@grafana/data';
 import {
   FlowEdge,
   FlowModel,
@@ -8,6 +8,7 @@ import {
   flowBaseEdges,
   flowFocusEdges,
   flowNodeKey,
+  flowRefId,
   frameHasRefId,
   resolveFlowConfig,
   summarizeFlowNode,
@@ -28,11 +29,16 @@ export interface FlowOverlayInput {
   layout: LayoutResult;
   viewportH: number;
   theme: GrafanaTheme2;
-  /** The cell whose edges are emphasised (the hovered cell, or the cell of the open popover). */
-  focusCell: CellModel | null;
+  /**
+   * The cells whose edges can be emphasised, most important first: the hovered cell, then the cell of
+   * the open popover. The first one that is set is in focus.
+   */
+  focusCandidates: Array<{ cell: CellModel } | null>;
 }
 
 export interface FlowOverlayState {
+  /** Whether an edge query is named, so that the overlay canvases are to be mounted. */
+  active: boolean;
   /** The focused cell's edges for the tooltip, or null when it has none. */
   summary: FlowNodeSummary | null;
   /** Whether arcs are in focus, so that the resting layer is to be dimmed. */
@@ -49,18 +55,66 @@ interface ColorCache {
 const NO_EDGES: FlowEdge[] = [];
 
 // A display processor formats text as well as picking the color, so each edge is resolved once and kept
-// for the later paints of the same model (the focus layer is painted on every change of focus).
-function edgeColors(cache: ColorCache, model: FlowModel, theme: GrafanaTheme2): (edge: FlowEdge) => string {
+// for the later paints of the same model (the focus layer is painted on every change of focus). Called
+// from the paint effects only: it replaces the cache when the model or the theme changed.
+function edgeColors(
+  cacheRef: React.MutableRefObject<ColorCache>,
+  model: FlowModel,
+  theme: GrafanaTheme2
+): (edge: FlowEdge) => string {
+  if (cacheRef.current.model !== model || cacheRef.current.theme !== theme) {
+    cacheRef.current = { model, theme, colors: new Map() };
+  }
+  const colors = cacheRef.current.colors;
   const processor = model.metricInfo?.processor;
   return (edge) => {
-    let color = cache.colors.get(edge);
+    let color = colors.get(edge);
     if (color === undefined) {
       const display = edge.value !== null && processor ? processor(edge.value) : undefined;
       color = display?.color ?? theme.colors.text.secondary;
-      cache.colors.set(edge, color);
+      colors.set(edge, color);
     }
     return color;
   };
+}
+
+export interface CellQueries {
+  /** The frames the cells are built from: all frames but the edge query's. */
+  series: DataFrame[];
+  /** refIds of the cell queries, in the order of the panel's targets. */
+  targetRefIds: string[];
+  /** The panel's request without the edge query's target, for the drilldown requery. */
+  request: DataQueryRequest | undefined;
+}
+
+/**
+ * The panel's queries without the flow overlay's edge query. The edge query is not a cell metric: its
+ * frames and its target stay out of the cell pipeline, the metric selector and the drilldown requery
+ * (which would re-run a possibly very large pairwise query as a range query). While no edge query is
+ * named, the frames and the request are returned as they are.
+ */
+export function useCellQueries(data: PanelData, options: FleetGridOptions): CellQueries {
+  const edgeRefId = flowRefId(options);
+  const series = useMemo(
+    () => (edgeRefId === '' ? data.series : data.series.filter((frame) => !frameHasRefId(frame, edgeRefId))),
+    [data.series, edgeRefId]
+  );
+  const request = useMemo(() => {
+    if (edgeRefId === '' || !data.request) {
+      return data.request;
+    }
+    return { ...data.request, targets: (data.request.targets ?? []).filter((t) => t.refId !== edgeRefId) };
+  }, [data.request, edgeRefId]);
+  const targetRefIds = useMemo(
+    () => (request?.targets ?? []).map((t) => t.refId).filter((r): r is string => Boolean(r)),
+    [request]
+  );
+  return { series, targetRefIds, request };
+}
+
+/** The cell warnings followed by the flow overlay's; the cell warnings themselves while there are none to add. */
+export function withFlowWarnings(warnings: string[], model: FlowModel | null): string[] {
+  return model && model.warnings.length > 0 ? [...warnings, ...model.warnings] : warnings;
 }
 
 /**
@@ -94,7 +148,8 @@ export function useFlowModel(
  * the cell pipeline again.
  */
 export function useFlowOverlay(input: FlowOverlayInput): FlowOverlayState {
-  const { model, restRef, focusRef, layout, viewportH, theme, focusCell } = input;
+  const { model, restRef, focusRef, layout, viewportH, theme, focusCandidates } = input;
+  const focusCell = focusCandidates.find((candidate) => candidate !== null)?.cell ?? null;
   const depth = model?.depth ?? 0;
   const anchors = useMemo(() => (depth > 0 ? flowAnchors(layout, depth) : new Map()), [layout, depth]);
   const rest = useMemo(() => (model ? flowBaseEdges(model) : NO_EDGES), [model]);
@@ -115,10 +170,7 @@ export function useFlowOverlay(input: FlowOverlayInput): FlowOverlayState {
     if (!canvas || !model) {
       return;
     }
-    if (colorCache.current.model !== model || colorCache.current.theme !== theme) {
-      colorCache.current = { model, theme, colors: new Map() };
-    }
-    const colorOf = edgeColors(colorCache.current, model, theme);
+    const colorOf = edgeColors(colorCache, model, theme);
     const edges = rest;
     renderFlowLayer(canvas, { layout, viewportH, anchors, edges, emphasised: false, retain: false, colorOf, theme });
   }, [restRef, model, layout, viewportH, anchors, rest, theme]);
@@ -128,13 +180,10 @@ export function useFlowOverlay(input: FlowOverlayInput): FlowOverlayState {
     if (!canvas || !model) {
       return;
     }
-    if (colorCache.current.model !== model || colorCache.current.theme !== theme) {
-      colorCache.current = { model, theme, colors: new Map() };
-    }
-    const colorOf = edgeColors(colorCache.current, model, theme);
+    const colorOf = edgeColors(colorCache, model, theme);
     const edges = focus ?? NO_EDGES;
     renderFlowLayer(canvas, { layout, viewportH, anchors, edges, emphasised: true, retain: true, colorOf, theme });
   }, [focusRef, model, layout, viewportH, anchors, focus, theme]);
 
-  return { summary, focused: focus !== null };
+  return { active: model !== null, summary, focused: focus !== null };
 }
