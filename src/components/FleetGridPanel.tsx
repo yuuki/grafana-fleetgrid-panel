@@ -12,10 +12,9 @@ import { hitTest } from '../render/hitTest';
 import { splitRects } from '../render/split';
 import { drilldownSeries, getCellLinks } from '../drilldown/series';
 import { fetchDrilldownFrames } from '../drilldown/requery';
-import { labelValues, resolveSelectionLabel } from '../selection/exportFormats';
-import { useCellSelection, useElementHeight } from './useCellSelection';
-import { useVariableSync } from './useVariableSync';
-import { SELECTION_BAR_H, SelectionBar } from './SelectionBar';
+import { useCellSelection, useSelectionBarHeight } from './useCellSelection';
+import { useSelectionExport } from './useSelectionExport';
+import { SelectionFooter } from './SelectionBar';
 import { SelectionBand } from './SelectionBand';
 import { CellTooltip } from './CellTooltip';
 import { DrilldownPopover } from './DrilldownPopover';
@@ -43,9 +42,6 @@ const measureVisibleBounds = (el: HTMLElement): VisibleBounds => {
 
 const sameVisibleBounds = (a: VisibleBounds, b: VisibleBounds): boolean =>
   a.minX === b.minX && a.minY === b.minY && a.maxX === b.maxX && a.maxY === b.maxY;
-
-// One array for "no selected values", so the variable sync sees the same input until cells are selected.
-const NO_VALUES: string[] = [];
 
 // fitContent is on PanelProps only after the Auto Grid API lands in @grafana/data.
 // Older hosts omit it; treat missing as false so the fixed-height path stays default.
@@ -331,28 +327,22 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
   const hideHover = useCallback(() => setHover(null), []);
   const {
     resolved: cellSelection,
+    selectedSet: selectedCells,
     gestures: selectionGestures,
     bandRef: selectionBandRef,
     barRef: selectionBarRef,
     clear: clearSelection,
   } = useCellSelection(model.root, layout, options.levels, hideHover);
-  const selectedCells = cellSelection?.selected;
-  const hasSelection = cellSelection !== undefined;
-  // The label whose values are copied and synced, and those values. Both wait until cells are selected:
-  // choosing the label reads every cell. It depends on the grid, not on which cells are selected.
-  const selectionLabel = useMemo(
-    () => (hasSelection ? resolveSelectionLabel(options.selectionLabel, model.root, options.levels) : undefined),
-    [hasSelection, options.selectionLabel, model.root, options.levels]
+  const selectionExport = useSelectionExport(
+    cellSelection,
+    options.selectionLabel,
+    options.selectionVariable,
+    model.root,
+    options.levels
   );
-  const selectionValues = useMemo(
-    () => (selectedCells && selectionLabel !== undefined ? labelValues(selectedCells, selectionLabel) : NO_VALUES),
-    [selectedCells, selectionLabel]
-  );
-  const selectionSync = useVariableSync(options.selectionVariable, selectionValues);
   // The selection bar appears under the grid. The layout above ignores it on purpose: the cells stay
   // where they are when the first cell is selected, and the grid scrolls if the bar takes its last rows.
-  const selectionBarH = useElementHeight(selectionBarRef, hasSelection, SELECTION_BAR_H);
-  const gridViewportH = fitContent ? viewportH : Math.max(0, viewportH - selectionBarH);
+  const gridViewportH = Math.max(0, viewportH - useSelectionBarHeight(selectionBarRef, cellSelection, fitContent));
 
   useEffect(() => {
     if (canvasRef.current) {
@@ -364,7 +354,7 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
         showValues: options.showValues,
         missingColor: options.missingColor,
         category: model.category,
-        selectedCells: cellSelection?.selectedSet,
+        selectedCells,
         categoryStyle: normalizeCategoryStyle(options.categoryStyle),
         selectedCategoryValues: effectiveSelection,
         hoverCategoryValue: effectiveHover,
@@ -376,7 +366,7 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
   }, [
     layout,
     model,
-    cellSelection,
+    selectedCells,
     selectedRefId,
     displayMode,
     options,
@@ -697,20 +687,14 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
             );
           })()}
       </div>
-      {cellSelection && (
-        <SelectionBar
-          barRef={selectionBarRef}
-          selected={cellSelection.selected}
-          rest={cellSelection.rest}
-          missingCount={cellSelection.missing}
-          label={selectionLabel}
-          values={selectionValues}
-          sync={selectionSync}
-          refIds={model.refIds}
-          metricInfos={model.metricInfos}
-          onClear={clearSelection}
-        />
-      )}
+      <SelectionFooter
+        barRef={selectionBarRef}
+        selection={cellSelection}
+        exported={selectionExport}
+        refIds={model.refIds}
+        metricInfos={model.metricInfos}
+        onClear={clearSelection}
+      />
     </div>
   );
 };

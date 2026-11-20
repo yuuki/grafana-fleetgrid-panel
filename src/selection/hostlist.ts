@@ -102,6 +102,53 @@ function rangeItems(strings: string[]): string[] {
   return [...runs(unpadded, 1), ...widths.reverse().flatMap((width) => runs(padded.get(width)!, width))];
 }
 
+// Names with the same text around the same number of numeric fields form one family.
+function families(names: string[]): ParsedName[][] {
+  const byTexts = new Map<string, ParsedName[]>();
+  for (const name of names) {
+    const parsed = parseName(name);
+    const key = JSON.stringify(parsed.texts);
+    const family = byTexts.get(key) ?? [];
+    family.push(parsed);
+    byTexts.set(key, family);
+  }
+  return [...byTexts.values()];
+}
+
+// The name with one numeric field cut out: what stands before the field and what stands after it.
+function around({ texts, digits }: ParsedName, field: number): { prefix: string; suffix: string } {
+  let prefix = texts[0];
+  for (let i = 0; i < field; i++) {
+    prefix += digits[i] + texts[i + 1];
+  }
+  let suffix = texts[field + 1];
+  for (let i = field + 1; i < digits.length; i++) {
+    suffix += digits[i] + texts[i + 1];
+  }
+  return { prefix, suffix };
+}
+
+// The hostlist items of one family: names that agree on everything but one field share a bracket.
+function familyItems(family: ParsedName[]): string[] {
+  if (family[0].digits.length === 0) {
+    return [family[0].texts[0]];
+  }
+  const field = varyingField(family);
+  const groups = new Map<string, { prefix: string; suffix: string; strings: string[] }>();
+  for (const name of family) {
+    const { prefix, suffix } = around(name, field);
+    const key = JSON.stringify([prefix, suffix]);
+    const group = groups.get(key) ?? { prefix, suffix, strings: [] };
+    group.strings.push(name.digits[field]);
+    groups.set(key, group);
+  }
+  return [...groups.values()].map(({ prefix, suffix, strings }) => {
+    const items = rangeItems(strings);
+    const single = items.length === 1 && !items[0].includes('-');
+    return single ? `${prefix}${items[0]}${suffix}` : `${prefix}[${items.join(',')}]${suffix}`;
+  });
+}
+
 /**
  * Compacts names into hostlist notation. The result expands to exactly the given set of names:
  * duplicates collapse, the order of the input does not matter, and a name without a number is listed
@@ -115,43 +162,5 @@ export function compactHostlist(names: Iterable<string>): string | null {
   if (!unique.every(isHostlistName)) {
     return null;
   }
-  // Names with the same text around the same number of numeric fields form one family.
-  const families = new Map<string, ParsedName[]>();
-  for (const name of unique) {
-    const parsed = parseName(name);
-    const key = JSON.stringify(parsed.texts);
-    const family = families.get(key) ?? [];
-    family.push(parsed);
-    families.set(key, family);
-  }
-  const pieces: string[] = [];
-  for (const family of families.values()) {
-    if (family[0].digits.length === 0) {
-      pieces.push(family[0].texts[0]);
-      continue;
-    }
-    const field = varyingField(family);
-    // Within a family, names that agree on every other field share one bracket.
-    const groups = new Map<string, { prefix: string; suffix: string; strings: string[] }>();
-    for (const { texts, digits } of family) {
-      let prefix = texts[0];
-      for (let i = 0; i < field; i++) {
-        prefix += digits[i] + texts[i + 1];
-      }
-      let suffix = texts[field + 1];
-      for (let i = field + 1; i < digits.length; i++) {
-        suffix += digits[i] + texts[i + 1];
-      }
-      const key = JSON.stringify([prefix, suffix]);
-      const group = groups.get(key) ?? { prefix, suffix, strings: [] };
-      group.strings.push(digits[field]);
-      groups.set(key, group);
-    }
-    for (const { prefix, suffix, strings } of groups.values()) {
-      const items = rangeItems(strings);
-      const single = items.length === 1 && !items[0].includes('-');
-      pieces.push(single ? `${prefix}${items[0]}${suffix}` : `${prefix}[${items.join(',')}]${suffix}`);
-    }
-  }
-  return pieces.join(',');
+  return families(unique).flatMap(familyItems).join(',');
 }

@@ -144,6 +144,21 @@ function selectionBandsDev(g: CellGeom): RingBands {
   return { ring, sep: large ? Math.min(Math.round(g.dpr), cap - ring) : 0 };
 }
 
+// The ring a cell gets, if any. Both rings hug the cell's outer edge, so a cell that is selected and
+// highlighted shows the selection ring: the category highlight still reads from the dimming of the other
+// cells, the selection has no other mark. `highlightColor` is set only on a cell that matches the highlight.
+function ringFor(
+  cell: CellModel,
+  g: CellGeom,
+  p: CellPass,
+  highlightColor: string | undefined
+): { bands: RingBands; color: string } | undefined {
+  if (p.rc.selectedCells?.has(cell)) {
+    return { bands: selectionBandsDev(g), color: p.selectionColor };
+  }
+  return highlightColor ? { bands: ringBandsDev(g), color: highlightColor } : undefined;
+}
+
 // The bottom strip only eats from the cell's lower edge, so its cap is the shortest row's visible fill.
 function stripHeightDev(g: CellGeom): number {
   const logical = Math.max(2, Math.round(g.logicalH * 0.15)); // ~15% of the *logical* height, floored at 2px
@@ -443,22 +458,17 @@ function drawCell(ctx: CanvasRenderingContext2D, c: LayoutCell, p: CellPass): vo
     drawCategoryDecoration(ctx, g, categoryColor, rc.categoryStyle, bgColor);
   }
 
-  // Both rings hug the cell's outer edge, so a cell that is selected and highlighted shows the selection
-  // ring: the category highlight still reads from the dimming of the other cells, the selection has no
-  // other mark.
-  const selected = rc.selectedCells?.has(c.cell) ?? false;
-  const highlightBands = matched && ringColor ? ringBandsDev(g) : undefined;
-  const ringBands = selected ? selectionBandsDev(g) : highlightBands;
+  const ring = ringFor(c.cell, g, p, ringColor);
   if (!p.split && rc.showValues && display) {
     // Shrink the fit region by the decoration/ring safe insets so the value never sits under a band.
-    const insets = textInsets(g, rc.categoryStyle, !!categoryColor, ringBands);
+    const insets = textInsets(g, rc.categoryStyle, !!categoryColor, ring?.bands);
     drawValueText(ctx, g, display, insets, rc.theme, rc.missingColor);
   }
   ctx.globalAlpha = 1;
 
   // Draw the ring last, at full alpha, so it sits above the fill/decoration/text of the cell.
-  if (ringBands) {
-    drawCellRing(ctx, g, selected ? p.selectionColor : ringColor!, bgColor, ringBands);
+  if (ring) {
+    drawCellRing(ctx, g, ring.color, bgColor, ring.bands);
   }
 }
 

@@ -6,7 +6,10 @@ import { copyText } from '../selection/clipboard';
 import { compactHostlist, isHostlistName } from '../selection/hostlist';
 import { toList, toRegex } from '../selection/exportFormats';
 import { SyncStatus, syncMessage } from '../selection/variable';
+import { ResolvedSelection } from '../selection/selection';
 import { CohortDrawer } from './CohortDrawer';
+import { SELECTION_BAR_H } from './useCellSelection';
+import { SelectionExport } from './useSelectionExport';
 
 export interface SelectionBarProps {
   /** The bar takes the keyboard focus after a pointer gesture. */
@@ -25,9 +28,6 @@ export interface SelectionBarProps {
   metricInfos: MetricInfo[];
   onClear: () => void;
 }
-
-/** Height of the bar on one line; the panel uses it where the real height cannot be measured. */
-export const SELECTION_BAR_H = 32;
 
 type CopyFormat = 'regex' | 'list' | 'hostlist';
 
@@ -56,7 +56,7 @@ const plural = (count: number, noun: string): string => `${count} ${noun}${count
  * label values in three formats, and Clear. Everything in it is a plain button, so it is the keyboard
  * side of the selection.
  */
-const SelectionBarComponent: React.FC<SelectionBarProps> = ({
+export const SelectionBar: React.FC<SelectionBarProps> = ({
   barRef,
   selected,
   rest,
@@ -212,6 +212,44 @@ const SelectionBarComponent: React.FC<SelectionBarProps> = ({
   );
 };
 
-// The panel renders on every pointer move over the grid (the hover tooltip). The bar's props keep their
-// identity through that, so it is skipped.
-export const SelectionBar = React.memo(SelectionBarComponent);
+export interface SelectionFooterProps {
+  barRef: React.Ref<HTMLDivElement>;
+  /** The selection, split into selected cells and the rest; undefined while nothing is selected. */
+  selection: ResolvedSelection | undefined;
+  exported: SelectionExport;
+  refIds: string[];
+  metricInfos: MetricInfo[];
+  onClear: () => void;
+}
+
+/**
+ * The selection bar while cells are selected, nothing otherwise. The panel renders on every pointer
+ * move over the grid (the hover tooltip); these props keep their identity through that, so the bar is
+ * skipped.
+ */
+export const SelectionFooter = React.memo(function SelectionFooter({
+  barRef,
+  selection,
+  exported,
+  refIds,
+  metricInfos,
+  onClear,
+}: SelectionFooterProps) {
+  if (!selection) {
+    return null;
+  }
+  return (
+    <SelectionBar
+      barRef={barRef}
+      selected={selection.selected}
+      rest={selection.rest}
+      missingCount={selection.missing}
+      label={exported.label}
+      values={exported.values}
+      sync={exported.sync}
+      refIds={refIds}
+      metricInfos={metricInfos}
+      onClear={onClear}
+    />
+  );
+});

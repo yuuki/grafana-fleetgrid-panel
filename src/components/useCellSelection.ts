@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { HierarchyNode, LevelDef } from '../types';
+import { CellModel, HierarchyNode, LevelDef } from '../types';
 import { LayoutResult } from '../layout/layout';
 import { cellsInRect, hitTest, labelAt, Rect, rectFromPoints } from '../render/hitTest';
 import {
@@ -56,6 +56,8 @@ export interface SelectionGestures {
 export interface CellSelectionApi {
   /** The selection split into present selected cells and the rest; undefined while nothing is selected. */
   resolved: ResolvedSelection | undefined;
+  /** The selected cells of the current data, for the renderer; undefined while nothing is selected. */
+  selectedSet: ReadonlySet<CellModel> | undefined;
   gestures: SelectionGestures;
   /** The rubber band element, positioned by the hook while a rectangle is dragged. */
   bandRef: React.RefObject<HTMLDivElement>;
@@ -278,19 +280,28 @@ export function useCellSelection(
     },
   };
 
-  return { resolved, gestures, bandRef, barRef, clear };
+  return { resolved, selectedSet: resolved?.selectedSet, gestures, bandRef, barRef, clear };
 }
 
+/** Height of the selection bar on one line, used where the real height cannot be measured (jsdom). */
+export const SELECTION_BAR_H = 32;
+
 /**
- * The rendered height of an element that is not always there (the selection bar), kept current while
- * it wraps or unwraps. `fallback` is used where nothing can be measured, as in jsdom.
+ * The height the selection bar takes from the grid's box: its rendered height while cells are
+ * selected, kept current while it wraps or unwraps, and 0 otherwise. With Auto Grid fit-content it
+ * is always 0, because the panel then grows by the bar instead.
  */
-export function useElementHeight(ref: React.RefObject<HTMLElement>, present: boolean, fallback: number): number {
+export function useSelectionBarHeight(
+  barRef: React.RefObject<HTMLElement>,
+  resolved: ResolvedSelection | undefined,
+  fitContent: boolean | undefined
+): number {
+  const present = resolved !== undefined && !fitContent;
   const [height, setHeight] = useState(0);
   useLayoutEffect(() => {
-    const element = present ? ref.current : null;
+    const element = present ? barRef.current : null;
     // Sync the DOM measurement into state after layout (measure-then-set), before the browser paints.
-    const measure = () => setHeight(element ? element.offsetHeight || fallback : 0);
+    const measure = () => setHeight(element ? element.offsetHeight || SELECTION_BAR_H : 0);
     measure();
     if (element && typeof ResizeObserver !== 'undefined') {
       const observer = new ResizeObserver(measure);
@@ -298,8 +309,8 @@ export function useElementHeight(ref: React.RefObject<HTMLElement>, present: boo
       return () => observer.disconnect();
     }
     return undefined;
-  }, [ref, present, fallback]);
-  // The state still holds the old height in the render that removes the element.
+  }, [barRef, present]);
+  // The state still holds the old height in the render that removes the bar.
   return present ? height : 0;
 }
 
