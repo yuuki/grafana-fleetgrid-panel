@@ -878,8 +878,10 @@ test('writes the selected hosts to the dashboard variable and restores it when t
   await canvas.click({ position: cells['node-a002/gpu1'], modifiers: ['Shift'] });
   await expect.poll(variable).toEqual(['node-a001', 'node-a003']);
 
-  // Clearing the selection puts back what the variable held before: All.
-  await panel.getByTestId('selection-clear').click();
+  // Clearing the selection puts back what the variable held before: All. Grafana 13 floats its
+  // "View panel" pane over the right side of the panel, so the click is dispatched to the button
+  // instead of aimed at its position.
+  await panel.getByTestId('selection-clear').dispatchEvent('click');
   await expect(panel.getByTestId('selection-bar')).toHaveCount(0);
   await expect.poll(variable).toEqual(['$__all']);
 });
