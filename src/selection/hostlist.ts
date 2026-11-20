@@ -66,7 +66,7 @@ function runs(values: number[], width: number): string[] {
   const print = (value: number) => String(value).padStart(width, '0');
   const sorted = [...values].sort((a, b) => a - b);
   const items: string[] = [];
-  for (let i = 0; i < sorted.length; ) {
+  for (let i = 0; i < sorted.length;) {
     let j = i;
     while (j + 1 < sorted.length && sorted[j + 1] === sorted[j] + 1) {
       j++;

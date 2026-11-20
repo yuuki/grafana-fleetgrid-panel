@@ -42,12 +42,16 @@ const rect = fc.record({ x: coordinate, y: coordinate, w: size, h: size });
 describe('cellsInRect (properties)', () => {
   it('returns exactly the cells a scan finds, in layout order, for any cells and rectangle', () => {
     fc.assert(
-      fc.property(fc.array(rect, { maxLength: 60 }), fc.array(rect, { minLength: 1, maxLength: 8 }), (cells, queries) => {
-        const layout = layoutOf(cells);
-        for (const query of queries) {
-          expect(cellsInRect(layout, query)).toEqual(scan(layout, query));
+      fc.property(
+        fc.array(rect, { maxLength: 60 }),
+        fc.array(rect, { minLength: 1, maxLength: 8 }),
+        (cells, queries) => {
+          const layout = layoutOf(cells);
+          for (const query of queries) {
+            expect(cellsInRect(layout, query)).toEqual(scan(layout, query));
+          }
         }
-      }),
+      ),
       propertyParams()
     );
   });

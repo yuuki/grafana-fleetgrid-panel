@@ -30,10 +30,7 @@ const root = group(
     group(
       ['zone-a'],
       [
-        group(
-          ['zone-a', 'node-a001'],
-          [leaf('zone-a', 'node-a001', 'gpu0'), leaf('zone-a', 'node-a001', 'gpu1')]
-        ),
+        group(['zone-a', 'node-a001'], [leaf('zone-a', 'node-a001', 'gpu0'), leaf('zone-a', 'node-a001', 'gpu1')]),
         group(['zone-a', 'node-a002'], [leaf('zone-a', 'node-a002', 'gpu0')]),
       ]
     ),
@@ -126,12 +123,7 @@ describe('cell selection', () => {
         group(['zone-b'], [group(['zone-b', 'node-b001'], [leaf('zone-b', 'node-b001', 'gpu0')])]),
         group(
           ['zone-a'],
-          [
-            group(
-              ['zone-a', 'node-a001'],
-              [leaf('zone-a', 'node-a001', 'gpu1'), leaf('zone-a', 'node-a001', 'gpu0')]
-            ),
-          ]
+          [group(['zone-a', 'node-a001'], [leaf('zone-a', 'node-a001', 'gpu1'), leaf('zone-a', 'node-a001', 'gpu0')])]
         ),
       ]
     );

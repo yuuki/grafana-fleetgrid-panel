@@ -17,17 +17,21 @@ const value = fc.oneof(
 describe('toRegex (properties)', () => {
   it('compiles, matches every value and matches no other string', () => {
     fc.assert(
-      fc.property(fc.array(value, { minLength: 1, maxLength: 8 }), fc.array(value, { maxLength: 8 }), (values, others) => {
-        const regex = new RegExp(toRegex(values));
-        for (const v of values) {
-          expect(regex.test(v)).toBe(true);
+      fc.property(
+        fc.array(value, { minLength: 1, maxLength: 8 }),
+        fc.array(value, { maxLength: 8 }),
+        (values, others) => {
+          const regex = new RegExp(toRegex(values));
+          for (const v of values) {
+            expect(regex.test(v)).toBe(true);
+          }
+          // Other strings, and near misses of the values themselves.
+          const candidates = [...others, ...values.flatMap((v) => [`${v}x`, `x${v}`, v.slice(1), v.slice(0, -1)])];
+          for (const candidate of candidates) {
+            expect(regex.test(candidate)).toBe(values.includes(candidate));
+          }
         }
-        // Other strings, and near misses of the values themselves.
-        const candidates = [...others, ...values.flatMap((v) => [`${v}x`, `x${v}`, v.slice(1), v.slice(0, -1)])];
-        for (const candidate of candidates) {
-          expect(regex.test(candidate)).toBe(values.includes(candidate));
-        }
-      }),
+      ),
       propertyParams()
     );
   });

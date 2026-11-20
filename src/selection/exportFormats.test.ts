@@ -14,7 +14,10 @@ import {
 
 const level = (label: string, over: Partial<LevelDef> = {}): LevelDef => ({ ...DEFAULT_LEVEL, label, ...over });
 
-function build(levels: LevelDef[], labelSets: Array<Record<string, string>>): { root: HierarchyNode; cells: CellModel[] } {
+function build(
+  levels: LevelDef[],
+  labelSets: Array<Record<string, string>>
+): { root: HierarchyNode; cells: CellModel[] } {
   const rows: NormalizedRow[] = labelSets.map((labels) => ({ labels, value: 1, refId: 'A' }));
   const { root } = buildHierarchy(rows, levels);
   attachCells(root, rows, levels, 'max');

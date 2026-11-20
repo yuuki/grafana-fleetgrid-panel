@@ -168,7 +168,10 @@ export function syncVariable(
     return { status: { state: 'synced', name }, owned };
   }
   runtime.setQuery({ [`var-${name}`]: next });
-  return { status: { state: 'synced', name }, owned: { name, written: next, previous: owned?.previous ?? target.value } };
+  return {
+    status: { state: 'synced', name },
+    owned: { name, written: next, previous: owned?.previous ?? target.value },
+  };
 }
 
 /** A sentence for the selection bar, or undefined when there is nothing to say. */
@@ -179,9 +182,15 @@ export function syncMessage(status: SyncStatus): { text: string; problem: boolea
     case 'missing':
       return { text: `Variable "${status.name}" is not in this dashboard`, problem: true };
     case 'unsupported':
-      return { text: `Variable "${status.name}" has the type ${status.type}, which cannot hold a selection`, problem: true };
+      return {
+        text: `Variable "${status.name}" has the type ${status.type}, which cannot hold a selection`,
+        problem: true,
+      };
     case 'tooLarge':
-      return { text: `Selection too large for $${status.name} (${status.length} of ${MAX_URL_CHARS} URL characters)`, problem: true };
+      return {
+        text: `Selection too large for $${status.name} (${status.length} of ${MAX_URL_CHARS} URL characters)`,
+        problem: true,
+      };
     case 'failed':
       return { text: `Could not set $${status.name}`, problem: true };
     default:
