@@ -1,0 +1,36 @@
+# Known vulnerabilities that `make vuln` and the Security workflow do not report, each with the
+# reason it cannot be fixed yet and a date to check again. osv-scanner reports a vulnerability
+# again after its ignoreUntil date. Remove an entry when a fix can be installed.
+
+# minimatch 10 comes from Jest 30.5.2, the latest release, through glob 13 and test-exclude,
+# and from typescript-eslint 8.72 (8.73 moves to minimatch 11, but Jest still needs 10).
+# minimatch 11 removes the RegExp-based Minimatch.set that glob 13 uses, so it cannot be
+# forced. Only the repository's own glob patterns reach it, in tests and lint. It is not in
+# the plugin bundle.
+[[IgnoredVulns]]
+id = "GHSA-g3hv-75wg-m249"
+ignoreUntil = 2027-02-20
+reason = "minimatch 10 is required by Jest dev tooling; only the repository's own patterns reach it"
+
+# glob 13 comes from Jest 30.5.2 and glob 10 from test-exclude 7 (Jest's coverage); the latest
+# releases of both still require glob 13 or older. glob 14 changes how ignore patterns are
+# resolved, so forcing it can change which test files Jest finds. The advisory needs an
+# AbortSignal, and neither Jest nor test-exclude passes one.
+[[IgnoredVulns]]
+id = "GHSA-3g3m-2fjr-6pw4"
+ignoreUntil = 2027-02-20
+reason = "glob 10 and 13 are required by Jest dev tooling, which passes no AbortSignal"
+
+# react-router 6.30 comes from @grafana/ui 12.4 through react-router-dom-v5-compat, which pins
+# it. Only react-router 7.18 has the fixes, and even @grafana/ui 13.3 still uses
+# react-router-dom-v5-compat 6. The plugin does not import react-router, and Grafana provides
+# @grafana/ui at runtime, so this copy runs only in Jest tests.
+[[IgnoredVulns]]
+id = "GHSA-337j-9hxr-rhxg"
+ignoreUntil = 2027-02-20
+reason = "react-router 6.30 is pinned by @grafana/ui 12.4; the plugin does not use it and Grafana provides @grafana/ui at runtime"
+
+[[IgnoredVulns]]
+id = "GHSA-wrjc-x8rr-h8h6"
+ignoreUntil = 2027-02-20
+reason = "react-router 6.30 is pinned by @grafana/ui 12.4; the plugin does not use it and Grafana provides @grafana/ui at runtime"
