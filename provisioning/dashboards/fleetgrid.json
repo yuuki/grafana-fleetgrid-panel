@@ -605,6 +605,116 @@
       ],
       "title": "Category Mode",
       "type": "yuuk1-fleetgrid-panel"
+    },
+    {
+      "datasource": {
+        "type": "grafana-testdata-datasource",
+        "uid": "trlxrdZVk"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
+          "unit": "watt"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "celsius"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 33
+      },
+      "id": 7,
+      "options": {
+        "levels": [
+          {
+            "label": "zone",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "vertical",
+            "showBorder": true,
+            "showLabel": true
+          },
+          {
+            "label": "host",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "grid",
+            "gridColumns": 4,
+            "showBorder": true,
+            "showLabel": true
+          },
+          {
+            "label": "gpu",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "grid",
+            "gridColumns": 2,
+            "showBorder": false,
+            "showLabel": true
+          }
+        ],
+        "displayMode": "single",
+        "defaultMetric": "",
+        "showValues": true,
+        "missingColor": "rgb(70,70,70)",
+        "spatialAggregation": "max",
+        "reduceCalc": "lastNotNull",
+        "selectionLabel": "",
+        "selectionVariable": "selected_hosts"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "trlxrdZVk"
+          },
+          "refId": "A",
+          "scenarioId": "csv_content",
+          "csvContent": "zone,host,gpu,power\nzone-a,node-a001,gpu0,100\nzone-a,node-a001,gpu1,110\nzone-a,node-a002,gpu0,120\nzone-a,node-a002,gpu1,130\nzone-a,node-a003,gpu0,140\nzone-a,node-a003,gpu1,150\nzone-a,node-a004,gpu0,160\nzone-a,node-a004,gpu1,170\nzone-b,node-b001,gpu0,300\nzone-b,node-b001,gpu1,310\nzone-b,node-b002,gpu0,320\nzone-b,node-b002,gpu1,330"
+        },
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "trlxrdZVk"
+          },
+          "refId": "B",
+          "scenarioId": "csv_content",
+          "csvContent": "zone,host,gpu,temp\nzone-a,node-a001,gpu0,50\nzone-a,node-a001,gpu1,52\nzone-a,node-a002,gpu0,54\nzone-a,node-a002,gpu1,56\nzone-a,node-a003,gpu0,58\nzone-a,node-a003,gpu1,60\nzone-b,node-b001,gpu0,80\nzone-b,node-b001,gpu1,82\nzone-b,node-b002,gpu0,84\nzone-b,node-b002,gpu1,86"
+        }
+      ],
+      "title": "Selection",
+      "type": "yuuk1-fleetgrid-panel"
+    },
+    {
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 33
+      },
+      "id": 8,
+      "options": {
+        "mode": "markdown",
+        "content": "Hosts selected in the **Selection** panel (Shift+click or Shift+drag its cells), as the `selected_hosts` variable gives them to a query:\n\n`${selected_hosts:csv}`"
+      },
+      "title": "Selected hosts",
+      "type": "text"
     }
   ],
   "preload": false,
@@ -615,7 +725,65 @@
     "e2e"
   ],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "description": "Written by the Selection panel: the hosts of its selected cells. All while nothing is selected.",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Selected hosts",
+        "multi": true,
+        "name": "selected_hosts",
+        "options": [
+          {
+            "selected": true,
+            "text": "All",
+            "value": "$__all"
+          },
+          {
+            "selected": false,
+            "text": "node-a001",
+            "value": "node-a001"
+          },
+          {
+            "selected": false,
+            "text": "node-a002",
+            "value": "node-a002"
+          },
+          {
+            "selected": false,
+            "text": "node-a003",
+            "value": "node-a003"
+          },
+          {
+            "selected": false,
+            "text": "node-a004",
+            "value": "node-a004"
+          },
+          {
+            "selected": false,
+            "text": "node-b001",
+            "value": "node-b001"
+          },
+          {
+            "selected": false,
+            "text": "node-b002",
+            "value": "node-b002"
+          }
+        ],
+        "query": "node-a001,node-a002,node-a003,node-a004,node-b001,node-b002",
+        "skipUrlSync": false,
+        "type": "custom"
+      }
+    ]
   },
   "time": {
     "from": "now-6h",
