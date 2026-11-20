@@ -13,12 +13,13 @@ This repository contains a **Grafana plugin**. You must Read @./.config/AGENTS/i
 - Plugin ID and type (`src/plugin.json`): never change; its `grafanaDependency` is the support promise of README.md.
 - Panel option paths and values in dashboard JSON (`src/module.ts`, `src/types.ts`): a rename needs a migration in `setMigrationHandler`.
 - The panel semantics documented in README.md and `docs/design.md`; the E2E dashboard `provisioning/dashboards/fleetgrid.json` ↔ `tests/`.
+- What a cell selection copies and writes to a dashboard variable (`src/selection/exportFormats.ts`, `hostlist.ts`, `variable.ts`): users paste it into commands and queries.
 - Release artifact `yuuk1-fleetgrid-panel-<version>.zip` (`release.yml`); the tag matches `version` in `package.json`.
 
 ## Before opening a pull request
 - `npm ci`, then `make check`; also `make test-integration` (with `npm run server`) for rendering, interactions, option editors, `provisioning/`, `tests/`.
-- `src/data/`, `src/layout/`, `src/render/hitTest.ts`: also `make test-fuzz`; `@grafana/*` usage or versions: `npm run compat`; dependencies: `make vuln`.
+- `src/data/`, `src/layout/`, `src/render/hitTest.ts`, `src/selection/`: also `make test-fuzz`; `@grafana/*` usage or versions: `npm run compat`; dependencies: `make vuln`.
 
 ## Git conventions
 - Branches: `<type>/<issue>-<summary>` (`<type>/<summary>` without an issue); tools' `agent/*`, `claude/*`, `copilot/*`, `dependabot/*` keep their names.
-- Commits and PR titles: Conventional Commits 1.0.0, types `feat` `fix` `perf` `refactor` `test` `docs` `build` `ci` `chore` `revert`; scopes: `data`, `layout`, `render`, `drilldown`, `options`, `components`, `e2e`.
+- Commits and PR titles: Conventional Commits 1.0.0, types `feat` `fix` `perf` `refactor` `test` `docs` `build` `ci` `chore` `revert`; scopes: `data`, `layout`, `render`, `drilldown`, `selection`, `options`, `components`, `e2e`.
