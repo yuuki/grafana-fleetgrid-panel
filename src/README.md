@@ -11,6 +11,7 @@ All cells are drawn on a single `<canvas>`, with the tooltip, drilldown popover,
 - **Auto-fitted cells** — Cell size is computed from the panel dimensions. Numbers are drawn only when the formatted text fits; the exact value is always available on hover.
 - **Natural sort** — Numeric segments inside labels are compared as numbers (`node-a2` before `node-a10`), ascending by default (descending and data-order are also selectable).
 - **Multiple metrics** — Show one metric at a time with an in-panel selector (default), or opt in to split each cell into sub-regions to compare its metrics side by side. The tooltip and popover list every metric that returned data.
+- **Flow overlay** — Optionally draw the rows of one more query as arcs between cells or groups, for pairwise metrics such as packet loss between hosts or the ordered hops of a job's ring. Arcs are colored by Grafana's thresholds, can be limited to the degraded pairs, and are emphasised for the hovered cell. The overlay is off until an edge query is named; see the repository README for its data contract and limits.
 - **Drilldown** — Click a cell to open a popover with the current value per metric, plus a sparkline whenever time-series data is available for that metric. If the field has Data Links, navigation takes priority over the popover.
 
 ## Requirements

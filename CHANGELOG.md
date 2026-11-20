@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add an optional flow overlay that draws the rows of one query (the edge query) as arcs between cells or groups, for pairwise metrics such as packet loss or round-trip time between hosts. Arcs take their color from the edge query's standard field config, show their direction with an arrowhead, can be limited to the edges worse than a number, and are emphasised for the hovered cell, whose tooltip lists its peers and its worst peer. Hop number and path labels show ordered paths such as a job's ring.
+- The overlay is off until an edge query is named under the new **Flow overlay** options (`flowRefId`, `flowEndpoints`, `flowShow`, `flowWorst`, `flowThreshold`, `flowOrderLabel`, `flowPathLabel`); existing dashboards are unchanged. At most 20,000 edge rows are read and 500 arcs drawn, worst first, and the panel says so when a limit applies. Edge rows that cannot be drawn are reported, and an edge without a value is drawn dashed instead of as 0.
+
 ## 0.4.1 - 2026-11-12
 
 - Treat a time series whose reduced value is not finite (for example `Last (not null)` over a `+Inf` sample) as missing, as table results already were, instead of showing `Infinity` and letting it into spatial aggregation.

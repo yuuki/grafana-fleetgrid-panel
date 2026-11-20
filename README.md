@@ -23,6 +23,7 @@ The example shows two zones and 200 nodes (100 per zone), with four GPU cells pe
 - **Auto-fitted cells** — Cell size is computed from the panel dimensions. Numbers are drawn only when the formatted text fits; the exact value is always available on hover.
 - **Natural sort** — Numeric segments inside labels are compared as numbers (`node-a2 < node-a10`), ascending by default (descending and "data order" are also selectable).
 - **Multiple metrics** — Show one metric at a time with an in-panel selector (default), or opt in to split each cell into sub-regions to compare its metrics side by side. The tooltip and popover list every metric that returned data.
+- **Flow overlay** — Optionally draw the rows of one more query as arcs between cells or groups: pairwise metrics such as packet loss or round-trip time between hosts, or the ordered hops of a job's ring. Arcs take their color from Grafana's thresholds, can be limited to the degraded pairs, and are emphasised for the hovered cell.
 - **Drilldown** — Click a cell to open a popover with the current value per metric, plus a sparkline whenever time-series data is available for that metric. If the field has Data Links, navigation takes priority over the popover.
 
 ## Compatibility
@@ -185,6 +186,20 @@ Add more ordered rules when another zone, pod, or bandwidth class needs a differ
 
 If a hierarchy extraction regex collapses several source label sets into one cell, all contributing labels must resolve to the same rule. A mix of rules, or of matched and unmatched labels, produces a warning and uses the standard field-config/automatic range for that cell; FleetGrid never chooses according to input order. Leaving `rangeOverrides` empty preserves the previous behavior exactly.
 
+### Flow overlay
+
+All options are in the **Flow overlay** category. The overlay is off while **Edge query (refId)** is empty, and the other options are hidden until it is set. See [Edges between cells](#edges-between-cells-flow-overlay) for what the options mean.
+
+| Option                     | Default  | Description                                                                                                                                     |
+| -------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Edge query (refId)         | empty    | The query whose rows are edges. It is drawn as arcs and is no longer a cell metric. Empty turns the overlay off                                 |
+| Endpoint labels            | none     | One or more mappings from a hierarchy label to the edge query's source label and destination label, for example `host` ← `src_host`, `dst_host` |
+| Show arcs                  | `Always` | `Always` draws the arcs all the time; `On hover` draws only the arcs of the cell under the pointer                                              |
+| Worse values are           | `Higher` | `Higher` for loss, latency and errors; `Lower` for throughput and success ratios. Sets the filter direction and which edges win the draw limit  |
+| Only draw edges worse than | empty    | A number in the edge query's unit. Only edges strictly worse than it are drawn. Empty draws every edge                                          |
+| Hop number label           | empty    | Label of the edge query with the position of an edge in an ordered path                                                                         |
+| Path label                 | empty    | Label of the edge query that names the path an edge belongs to, for example a job ID                                                            |
+
 ## Multiple metrics
 
 The cell model holds each query's value for a cell (marked missing where a query returned no series); only the drawing mode changes.
@@ -204,6 +219,73 @@ Clicking a cell resolves in this order:
 2. **Popover** — Otherwise a card-style popover opens next to the cell, showing the hierarchy path and, per metric, the current value plus a sparkline when time-series data is available (see the instant-query note below); metrics without a time series show "No time series" instead. It auto-flips and clamps to stay inside the visible area and closes on outside-click or `Esc`.
 
 **Instant query note** — When **any** of the panel's queries is instant (no time series in the received frames), clicking re-runs **all** of the panel's queries as range over the dashboard time range via the data source — a query configured as `format: table` is re-issued as `time_series` to request a time series, though whether a matching series actually comes back depends on the query and data source — capped at ~100 data points, then extracts the series matching the clicked cell. The result is cached per panel, so opening additional cells does not trigger another fetch. A failed re-query shows a short message in the popover; that error state is cleared only when the panel's query `requestId` changes (for example on the next dashboard refresh), which is what allows a retry. When the panel already runs range queries, no re-query happens. If re-querying feels slow at your scale, switch to range queries to remove it entirely. This instant-query drilldown path has not yet been verified against a live Prometheus / VictoriaMetrics data source.
+
+## Edges between cells (flow overlay)
+
+Cells show the state of one endpoint. Many faults in an AI / HPC cluster are between two endpoints: a lossy link between two hosts, pause frames that spread from one rack to another, or one slow hop in a job's ring. The flow overlay draws such pairwise data as arcs on top of the grid.
+
+![Flow overlay: arcs between host groups, with a numbered ring of six hops](./src/img/fleetgrid-flow-overlay.png)
+
+The example shows two zones of eight hosts with two GPUs each. The edge query names hosts, so the arcs run between host groups. The numbered arcs are the six hops of one ring. The two arcs between the hosts numbered 6 are the two directions of one pair, and the dashed arc is an edge without a value. The banner reports one edge row whose destination is not in the grid.
+
+### The edge query
+
+Add one more query that returns **one row (or series) per directed pair**, and enter its refId under **Edge query (refId)**. The row needs a label for the source, a label for the destination and a numeric value:
+
+```promql
+# Query E — packet loss between hosts, one series per (src_host, dst_host)
+max by (src_host, dst_host) (fabric_probe_loss_ratio)
+```
+
+- The overlay is bound to a query by its refId, never by label names. A dashboard whose queries happen to carry labels such as `src_host` does not change until an edge query is named.
+- The edge query is taken out of the cell pipeline. It does not create cells, is not offered in the metric selector, and is not part of the drilldown re-query.
+- Time-series frames and table frames are both read, as for cells. A range query is reduced with the panel's **Reduce calculation**. In a table, the first numeric column that is not one of the configured labels is the value.
+- Unit, decimals, color scheme and **Thresholds** of the arcs come from Grafana's standard field config. Use **Overrides → Fields returned by query** for the edge query to give it its own unit and thresholds.
+- Frames are selected by their refId, so a transformation that merges the queries into one frame also removes the edge query.
+
+### Matching endpoints to the grid
+
+**Endpoint labels** says which hierarchy label an endpoint label refers to. The value of the endpoint label is compared with the **raw** value of that hierarchy label in the cell queries, before the level's extraction. So `src_host="node-a001"` matches the cells with `host="node-a001"` even when the host level shows only the trailing number.
+
+- An endpoint resolves at the **deepest mapped hierarchy level**. With `zone` → `host` → `gpu` and a mapping for `host` only, an edge runs between two host groups: its ends sit on the centre of each group's cells. Add a second mapping (`gpu` ← `src_gpu`, `dst_gpu`) to run the edges between GPU cells.
+- Map every label that is needed to name one cell or group. `gpu0` alone exists under every host, so mapping only `gpu` matches more than one cell and the row is left out.
+- The two directions of a pair are two edges and two arcs. An arc bulges to the left of its direction of travel and carries an arrowhead at its middle.
+- Rows of the same ordered pair are one edge. Its value is their **Spatial aggregation**.
+- An edge whose rows have no finite value is kept and drawn **dashed in a neutral color**. It is never treated as 0. With a filter it is not drawn, because it cannot be compared.
+
+Rows that cannot be drawn are counted and reported; they are never dropped silently. The warning banner gives the number of rows without an endpoint label, with an endpoint that matches no cell or group (with up to three examples), and with an endpoint that matches more than one. A row whose two ends resolve to the same cell or group (a self-edge) has no arc; the legend's tooltip gives their number.
+
+### Filter, limits and legend
+
+- **Only draw edges worse than** keeps the edges strictly worse than a number: above it when **Worse values are** is `Higher` (for example loss > 0, or RTT above the objective), below it when `Lower` (for example throughput below the objective).
+- At most **20,000 rows** of the edge query are read, and at most **500 arcs** are drawn at once. When more edges remain, the worst 500 are drawn (ties are broken by the endpoints, so the choice does not depend on the order of the query result). Pairwise data grows with the square of the fleet: narrow a large edge query in the data source, for example with `topk` or a `> 0` comparison.
+- The header shows the edge query's color scale and how many edges are drawn, for example `12 of 240 edges > 0%` or `500 of 4032 edges drawn, worst first`. The banner says so when rows beyond the first 20,000 were not read.
+
+### Hover
+
+Hovering a cell emphasises the edges of that cell, or of its group when the edges run between groups, outlines the cells or groups at their other ends, and dims the remaining arcs. The cell tooltip adds the number of outgoing and incoming edges, the number of peers and the worst peer with its value. While the drilldown popover of a cell is open, its edges stay emphasised. A hovered cell can show edges that the 500-arc limit left out of the resting picture; the filter always applies.
+
+With **Show arcs: On hover** nothing is drawn until a cell is hovered. Use it with an unfiltered edge query to see all peers of one host at a time.
+
+### Ordered paths
+
+To show a communication path such as a ring, give each edge row its position on the path:
+
+| `src_host` | `dst_host` | `job`    | `hop` | value |
+| ---------- | ---------- | -------- | ----- | ----- |
+| `node-a1`  | `node-a2`  | `ring-a` | `1`   | 0     |
+| `node-a2`  | `node-b1`  | `ring-a` | `2`   | 0.4   |
+| `node-b1`  | `node-a1`  | `ring-a` | `3`   | 0     |
+
+Set **Hop number label** (`hop`) and, when several paths are shown together, **Path label** (`job`).
+
+- Every hop is a row with its own source and destination, so the panel does not infer hops from a list of members. A ring is a path whose last hop returns to the first source; an open path simply ends. A tree is a set of hops that share sources: number its hops by depth, or leave the hop number out and set only the path label.
+- The hop number is written beside the arrowhead. Where numbers would overlap, the lowest ones are kept. An arc that carries more than one hop shows the lowest number followed by `+`.
+- Hovering a cell on a path emphasises the **whole path**, not only the hops at that cell. The tooltip lists the hops that enter and leave the cell.
+- Hop numbers must be whole numbers from 0. A row with another value keeps its arc, loses its number and is counted in a warning. Gaps in the numbers are shown as they are: a missing number means that hop is absent from the query result, has an endpoint outside the grid, or is hidden by the filter.
+- The same pair on two paths is one arc with one (aggregated) value.
+
+The overlay has no animation. The direction of a flow is shown by the arrowhead, so a dashboard with many panels does not run a render loop.
 
 ## Layout notes
 
