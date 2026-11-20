@@ -616,11 +616,43 @@ describe('FleetGridPanel cell selection', () => {
       wait();
       expect(screen.getByTestId('selection-sync')).toHaveTextContent('Could not set $hosts');
 
+      // Nothing was written, so there is nothing to put back when the panel goes away, and the write
+      // that was still waiting is dropped.
       mockPartial.mockReset();
       shiftClick(CELL.a2);
       view.unmount();
       wait();
       expect(mockPartial).not.toHaveBeenCalled();
+    });
+
+    it('restores the variable when the panel unmounts on the same page, and not on another page', () => {
+      const variables = () => [{ name: 'hosts', type: 'custom', multi: true, current: { value: '$__all' as unknown } }];
+      mockPartial.mockImplementation((query: Record<string, unknown>) => {
+        mockVariables[0].current = { value: query['var-hosts'] };
+      });
+      const select = () => {
+        mockVariables = variables();
+        const view = render(<FleetGridPanel {...makeProps(frames(), { selectionVariable: 'hosts' })} />);
+        shiftClick(CELL.a1);
+        wait();
+        expect(mockPartial).toHaveBeenLastCalledWith({ 'var-hosts': ['node-a001'] }, true);
+        return view;
+      };
+
+      // Grafana remounts the panel for the panel view or the editor: the selection is gone, so is its filter.
+      select().unmount();
+      expect(mockPartial).toHaveBeenLastCalledWith({ 'var-hosts': '$__all' }, true);
+
+      // The user went to another dashboard: its URL is not touched.
+      const view = select();
+      const calls = mockPartial.mock.calls.length;
+      window.history.pushState({}, '', '/d/other/dashboard');
+      try {
+        view.unmount();
+        expect(mockPartial).toHaveBeenCalledTimes(calls);
+      } finally {
+        window.history.pushState({}, '', '/');
+      }
     });
 
     it('says in the selection bar when the variable does not exist', () => {

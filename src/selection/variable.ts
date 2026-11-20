@@ -111,9 +111,11 @@ export function sameVariableValue(a: VariableValue | undefined, b: VariableValue
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-// Puts back the value the variable had before the selection, but only while the variable still holds
-// what the sync wrote: a value that somebody changed since then is theirs.
-function release(runtime: VariableRuntime, owned: SyncOwnership): void {
+/**
+ * Puts back the value the variable had before the selection, but only while the variable still holds
+ * what the sync wrote: a value that somebody changed since then is theirs.
+ */
+export function releaseVariable(runtime: VariableRuntime, owned: SyncOwnership): void {
   const target = describeVariable(runtime.getVariables(), owned.name);
   // An empty list cannot be written: Grafana drops the URL parameter and keeps the variable's value.
   const restorable = owned.previous !== undefined && !(Array.isArray(owned.previous) && owned.previous.length === 0);
@@ -137,7 +139,7 @@ export function syncVariable(
   owned: SyncOwnership | null
 ): { status: SyncStatus; owned: SyncOwnership | null } {
   if (owned && owned.name !== name) {
-    release(runtime, owned);
+    releaseVariable(runtime, owned);
     owned = null;
   }
   if (name === '') {
@@ -152,7 +154,7 @@ export function syncVariable(
   }
   if (values.length === 0) {
     if (owned) {
-      release(runtime, owned);
+      releaseVariable(runtime, owned);
     }
     return { status: { state: 'idle', name }, owned: null };
   }
@@ -160,7 +162,7 @@ export function syncVariable(
   const length = urlLength(name, next);
   if (length > MAX_URL_CHARS) {
     if (owned) {
-      release(runtime, owned);
+      releaseVariable(runtime, owned);
     }
     return { status: { state: 'tooLarge', name, length }, owned: null };
   }

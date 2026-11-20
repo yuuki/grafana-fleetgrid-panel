@@ -232,7 +232,7 @@ Selected cells get a ring in the theme's strongest contrast color. A bar appears
 
 To clear the selection, use **Clear**, or press Escape while the keyboard focus is in the panel. After a selection gesture the focus is on the bar, so Escape works at once. If a popover or link menu is open, the first Escape closes that. Changing the hierarchy levels also clears the selection.
 
-The selection belongs to the viewer and is not saved in the dashboard. It names cells by their hierarchy path, not by their position, so it stays on the same cells when the data refreshes, the panel is resized or the metric is switched. A selected cell that disappears from the query results stays selected: the bar counts it as "not in the current data", it takes no part in the comparison or the copies, and it is selected again when it comes back.
+The selection belongs to the viewer and is not saved in the dashboard; like the selected metric, it ends when Grafana re-creates the panel, for example when the panel view opens. It names cells by their hierarchy path, not by their position, so it stays on the same cells when the data refreshes, the panel is resized or the metric is switched. A selected cell that disappears from the query results stays selected: the bar counts it as "not in the current data", it takes no part in the comparison or the copies, and it is selected again when it comes back.
 
 Limits: cells cannot be selected with the keyboard or by touch (the grid is a canvas without keyboard navigation, and touch has no Shift key); the bar and the comparison are ordinary buttons and work with the keyboard. There is no freeform lasso: build other shapes from rectangles and Shift+clicks. A drag does not scroll the grid; scroll, then drag again.
 
@@ -282,7 +282,8 @@ Set **Sync selection to variable** to the name of a dashboard variable, and use 
 - When the selection is cleared, the variable gets back the value it had before the first write, for example **All**. If someone changed the variable in the meantime, FleetGrid leaves it alone.
 - The values are written to the dashboard URL (`var-<name>=…`). A selection that would add more than 6,000 characters to the URL is not synced: the bar says so and the variable gets its previous value back. Select fewer cells, or use the copy buttons.
 - The bar also says when the variable is not in the dashboard or has a type that cannot hold a selection (constant, ad hoc filters, data source, interval).
-- The selection is not restored from the variable. After a page reload the variable still has its value from the URL and the panel has no selection; reset the variable with its own picker.
+- When Grafana re-creates the panel on the same dashboard (for example when the panel view or the panel editor opens), the selection ends, and the variable gets its previous value back as with **Clear**.
+- The selection is not restored from the variable. After a page reload, or after leaving the dashboard and coming back with the browser's Back button, the variable still has its value from the URL and the panel has no selection; reset the variable with its own picker.
 
 ## Layout notes
 
