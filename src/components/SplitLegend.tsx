@@ -8,7 +8,8 @@ import { DisplayRangeInfo } from '../data/cellRange';
 const SplitLegendComponent: React.FC<{
   metricInfos: MetricInfo[];
   rangeInfosByRef?: Map<string, DisplayRangeInfo[]>;
-}> = ({ metricInfos, rangeInfosByRef }) => {
+  modeLabelsByRef?: Map<string, string>;
+}> = ({ metricInfos, rangeInfosByRef, modeLabelsByRef }) => {
   const theme = useTheme2();
   const shown = metricInfos.slice(0, MAX_SPLIT);
   const rects = splitRects(shown.length);
@@ -19,6 +20,7 @@ const SplitLegendComponent: React.FC<{
         const rangeInfos = rangeInfosByRef?.get(info.refId);
         const multipleRanges = (rangeInfos?.length ?? 0) > 1;
         const displayedRange = rangeInfos?.length === 1 ? rangeInfos[0] : info;
+        const modeLabel = modeLabelsByRef?.get(info.refId);
         return (
           <span key={info.refId} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             {/* Zone-position miniature: which zone within the cell this metric is drawn in (the spec's position-mapping diagram) */}
@@ -59,6 +61,7 @@ const SplitLegendComponent: React.FC<{
                 whiteSpace: 'nowrap',
               }}
             >
+              {modeLabel && <span style={{ color: theme.colors.text.secondary }}>{modeLabel}</span>}
               {multipleRanges ? (
                 <>
                   <span>Label-based ranges</span>

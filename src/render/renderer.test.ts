@@ -685,4 +685,83 @@ describe('renderCanvas', () => {
         .map((event) => event.props.value)
     ).not.toContain(0.22);
   });
+
+  it.each(['single', 'split'] as const)(
+    'renders typed-array frameSlicesByRef values in %s mode and respects overridesCellRanges',
+    (displayMode) => {
+      const standard = jest.fn((v: number): DisplayValue => ({ numeric: v, text: `std ${v}`, color: '#111111' }));
+      const override = jest.fn((v: number): DisplayValue => ({ numeric: v, text: `ovr ${v}`, color: '#222222' }));
+      const diverging = jest.fn(
+        (v: unknown): DisplayValue => ({ numeric: Number(v), text: `+${v}`, color: '#b2182b' })
+      );
+      const layout = makeLayout([['A', 1]]);
+      layout.cells[0].cell.ranges = new Map([['A', cellRange(override)]]);
+
+      const canvas = document.createElement('canvas');
+      const frameSlicesByRef = new Map([
+        [
+          'A',
+          {
+            values: Float64Array.from([42]),
+            rangeInfo: {
+              effectiveMin: -50,
+              effectiveMax: 50,
+              minConfigured: false,
+              maxConfigured: false,
+              processor: diverging,
+            },
+            overridesCellRanges: true,
+          },
+        ],
+      ]);
+
+      renderCanvas(
+        canvas,
+        baseCtx({
+          metricInfos: [makeInfo('A', standard)],
+          layout,
+          displayMode,
+          frameSlicesByRef,
+          cellIndexByLayout: Int32Array.from([0]),
+        })
+      );
+
+      expect(diverging).toHaveBeenCalledWith(42);
+      expect(override).not.toHaveBeenCalled();
+      expect(standard).not.toHaveBeenCalled();
+      expect(fillStyles(canvas)).toContain('#b2182b');
+    }
+  );
+
+  it('paints missingColor for NaN entries in frameSlicesByRef and avoids reallocating unchanged canvas dimensions', () => {
+    const spy = jest.fn((v: unknown): DisplayValue => ({ numeric: Number(v), text: String(v), color: '#abcdef' }));
+    const canvas = document.createElement('canvas');
+    const layout = makeLayout([['A', 1]]);
+    const frameSlicesByRef = new Map([
+      [
+        'A',
+        {
+          values: Float64Array.from([Number.NaN]),
+          rangeInfo: {
+            effectiveMin: 0,
+            effectiveMax: 100,
+            minConfigured: false,
+            maxConfigured: false,
+            processor: spy,
+          },
+          overridesCellRanges: false,
+        },
+      ],
+    ]);
+
+    renderCanvas(canvas, baseCtx({ metricInfos: [makeInfo('A', spy)], layout, frameSlicesByRef }));
+    expect(spy).not.toHaveBeenCalled();
+    expect(fillStyles(canvas)).toContain('#123456');
+
+    const widthSetter = jest.spyOn(canvas, 'width', 'set');
+    const heightSetter = jest.spyOn(canvas, 'height', 'set');
+    renderCanvas(canvas, baseCtx({ metricInfos: [makeInfo('A', spy)], layout, frameSlicesByRef }));
+    expect(widthSetter).not.toHaveBeenCalled();
+    expect(heightSetter).not.toHaveBeenCalled();
+  });
 });

@@ -24,14 +24,15 @@ The example shows two zones and 200 nodes (100 per zone), with four GPU cells pe
 - **Natural sort** — Numeric segments inside labels are compared as numbers (`node-a2 < node-a10`), ascending by default (descending and "data order" are also selectable).
 - **Multiple metrics** — Show one metric at a time with an in-panel selector (default), or opt in to split each cell into sub-regions to compare its metrics side by side. The tooltip and popover list every metric that returned data.
 - **Drilldown** — Click a cell to open a popover with the current value per metric, plus a sparkline whenever time-series data is available for that metric. If the field has Data Links, navigation takes priority over the popover.
+- **Time-scrubbing playback & Delta / Spatial Z-score modes** — Optionally scrub and play back range queries across timestamps in the panel footer, or switch coloring to Temporal Delta (`v(t) - v(t - Δt)`) or Spatial Z-score (sibling deviation) on a diverging palette.
 
 ## Compatibility
 
-| Requirement | Value                          |
-| ----------- | ------------------------------ |
-| Grafana     | `>= 11.6.0`                    |
-| Data source | Prometheus / VictoriaMetrics   |
-| Query type  | Instant (recommended) or Range |
+| Requirement | Value                                                                          |
+| ----------- | ------------------------------------------------------------------------------ |
+| Grafana     | `>= 11.6.0`                                                                    |
+| Data source | Prometheus / VictoriaMetrics                                                   |
+| Query type  | Instant (recommended for static views) or Range (required for playback & Delta) |
 
 Coloring, units, and drilldown rely on Grafana's standard field config, so any data source that produces labeled numeric series can work, but the plugin is designed for Prometheus / VictoriaMetrics. The automated end-to-end tests run against Grafana's built-in TestData data source; verification against a live Prometheus / VictoriaMetrics instance — including the instant-query drilldown re-query — is still outstanding and recommended before production use.
 
@@ -135,6 +136,26 @@ Selecting `b` in the category legend keeps matching cells bright and dims non-ma
 | ------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Spatial aggregation | `Max`             | Combines multiple series that fall on the same cell (e.g. when the hierarchy stops above the series granularity). `Max` / `Mean` / `Min` / `Sum` |
 | Reduce calculation  | `Last (not null)` | Folds a range query into one current value per series. Limited to reducers that return a number                                                  |
+
+### Color mode
+
+| Option                | Default                  | Description                                                                                                                                                                   |
+| --------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Coloring mode         | `Value`                  | `Value` (standard metric value), `Delta (Δt)` (change `v(t) - v(t - Δt)` on a diverging palette), or `Spatial Z-score` (deviation from sibling group mean or median)          |
+| Delta lookback (s)    | `0` (previous step)      | Lookback offset `Δt` in seconds for `Delta (Δt)` mode. `0` compares against the immediately preceding sample                                                                  |
+| Z-score sibling group | `Parent group (default)` | Hierarchy level defining the sibling group (e.g. compare GPUs within the same `host`, or within the same `zone`, or across the entire fleet)                                  |
+| Z-score method        | `Mean / StdDev`          | `Mean / StdDev` or robust `Median / MAD` estimator                                                                                                                            |
+| Z-score color limit   | `3` (`±3σ`)              | Symmetric diverging scale clamp in standard deviations (`0` auto-scales to `±max(\|z\|)`)                                                                                     |
+
+In `Delta (Δt)` and `Spatial Z-score` modes, cells use a theme-aware blue ↔ neutral ↔ red diverging palette with `0` pinned to neutral. Hovering a cell shows both the transformed value and the underlying current value (plus baseline `prev` value in delta mode, or sibling group center/spread in Z-score mode).
+
+### Time playback
+
+| Option        | Default | Description                                                                                                                                                         |
+| ------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Time scrubber | off     | Show a footer timeline scrubber with play/pause, single-step, speed (`1/s`–`60/s`), and `Live` reset controls whenever range queries return two or more timestamps |
+
+Range frames are pre-indexed into typed arrays (`Float64Array`) so scrubbing and playback repaint the single `<canvas>` without re-running layout or creating DOM nodes. Scrubbing combines with `Value`, `Delta (Δt)`, and `Spatial Z-score` modes.
 
 ### Color scale overrides
 

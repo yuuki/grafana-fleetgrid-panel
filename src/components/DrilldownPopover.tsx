@@ -1,7 +1,8 @@
 import React from 'react';
-import { FieldType, formattedValueToString } from '@grafana/data';
+import { DisplayValue, FieldType, formattedValueToString } from '@grafana/data';
 import { Sparkline, useTheme2 } from '@grafana/ui';
 import { CellModel } from '../types';
+import { MetricFrameSlice } from '../data/colorModes';
 import { MetricInfo } from '../data/display';
 import { placeOverlay } from './overlay';
 import { cellRangeFor } from '../data/cellRange';
@@ -28,6 +29,31 @@ export interface DrilldownPopoverProps {
   maxX: number;
   maxY: number;
   onClose: () => void;
+  frameSlicesByRef?: Map<string, MetricFrameSlice>;
+  cellIndex?: number;
+}
+
+function resolvePopoverDisplay(
+  cell: CellModel,
+  info: MetricInfo,
+  slice: MetricFrameSlice | undefined,
+  cellIndex: number | undefined
+): DisplayValue | null {
+  if (slice && cellIndex !== undefined && cellIndex >= 0 && cellIndex < slice.values.length) {
+    const raw = slice.values[cellIndex];
+    if (!Number.isFinite(raw)) {
+      return null;
+    }
+    const cellRange = cell.ranges?.get(info.refId);
+    const processor = slice.overridesCellRanges
+      ? slice.rangeInfo.processor
+      : cellRange?.source === 'override'
+        ? cellRange.processor
+        : slice.rangeInfo.processor;
+    return processor(raw);
+  }
+  const v = cell.values.get(info.refId) ?? null;
+  return v === null ? null : cellRangeFor(cell, info).processor(v);
 }
 
 export const DrilldownPopover: React.FC<DrilldownPopoverProps> = (props) => {
@@ -73,8 +99,12 @@ export const DrilldownPopover: React.FC<DrilldownPopoverProps> = (props) => {
         </button>
       </div>
       {props.metricInfos.map((info) => {
-        const v = props.cell.values.get(info.refId) ?? null;
-        const disp = v === null ? null : cellRangeFor(props.cell, info).processor(v);
+        const disp = resolvePopoverDisplay(
+          props.cell,
+          info,
+          props.frameSlicesByRef?.get(info.refId),
+          props.cellIndex
+        );
         const { frame, seriesCount, aggregated } = props.seriesFor(info.refId);
         const yField = frame?.fields.find((f) => f.type === FieldType.number);
         const xField = frame?.fields.find((f) => f.type === FieldType.time);

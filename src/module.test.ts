@@ -41,3 +41,40 @@ describe('declareFitContentSupport', () => {
     expect(setFitContentSupport).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('playback and color mode options', () => {
+  it('registers playback and delta/z-score options with backward-compatible defaults', () => {
+    interface RecordedOption {
+      path: string;
+      defaultValue?: unknown;
+      showIf?: (opts: FleetGridOptions) => boolean;
+    }
+    const recorded = new Map<string, RecordedOption>();
+    const record = (opt: RecordedOption) => {
+      recorded.set(opt.path, opt);
+      return builder;
+    };
+    const builder = {
+      addCustomEditor: record,
+      addRadio: record,
+      addTextInput: record,
+      addBooleanSwitch: record,
+      addColorPicker: record,
+      addSelect: record,
+      addNumberInput: record,
+    };
+    plugin.getPanelOptionsSupplier()(builder as never, {} as never);
+
+    expect(recorded.get('colorMode')?.defaultValue).toBe('value');
+    expect(recorded.get('deltaLookbackSec')?.defaultValue).toBe(0);
+    expect(recorded.get('zScoreGroupDepth')?.defaultValue).toBe(-1);
+    expect(recorded.get('zScoreMethod')?.defaultValue).toBe('mean');
+    expect(recorded.get('zScoreLimit')?.defaultValue).toBe(3);
+    expect(recorded.get('enablePlayback')?.defaultValue).toBe(false);
+
+    expect(recorded.get('deltaLookbackSec')?.showIf?.({ colorMode: 'delta' } as FleetGridOptions)).toBe(true);
+    expect(recorded.get('deltaLookbackSec')?.showIf?.({ colorMode: 'value' } as FleetGridOptions)).toBe(false);
+    expect(recorded.get('zScoreMethod')?.showIf?.({ colorMode: 'zscore' } as FleetGridOptions)).toBe(true);
+    expect(recorded.get('zScoreMethod')?.showIf?.({ colorMode: 'delta' } as FleetGridOptions)).toBe(false);
+  });
+});
