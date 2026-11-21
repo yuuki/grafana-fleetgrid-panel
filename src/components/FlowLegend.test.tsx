@@ -95,6 +95,14 @@ describe('flowLegendSummary', () => {
     });
   });
 
+  it('does not claim that arcs are drawn at rest in hover mode', () => {
+    const many = Array.from({ length: MAX_FLOW_ARCS + 234 }, (_, i) => edge(i));
+    expect(flowLegendSummary(withConfig(model(many), { show: 'hover' }))).toMatchObject({
+      text: `${MAX_FLOW_ARCS + 234} edges, shown on hover`,
+      bound: false,
+    });
+  });
+
   it('names the filter with the formatted threshold and its direction', () => {
     const filtered = model([edge(1)], {}, { edgeCount: 4 });
     expect(flowLegendSummary(withConfig(filtered, { threshold: 0.5 })).text).toBe('1 of 4 edges > 0.5%');

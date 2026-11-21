@@ -21,12 +21,16 @@ export interface FlowLegendSummary {
   details: string[];
 }
 
+// Whether the draw bound leaves edges out of the resting picture. In hover mode nothing is drawn at
+// rest, and the bound applies to each hovered cell instead (the tooltip says so there).
+const restIsBound = (model: FlowModel): boolean => model.config.show === 'always' && model.edges.length > MAX_FLOW_ARCS;
+
 function countText(model: FlowModel): string {
   const { edges, stats, config } = model;
   if (stats.edgeCount === 0) {
     return 'no edges';
   }
-  if (edges.length > MAX_FLOW_ARCS) {
+  if (restIsBound(model)) {
     return `${MAX_FLOW_ARCS} of ${edges.length} edges drawn, worst first`;
   }
   if (config.threshold === undefined) {
@@ -54,7 +58,7 @@ export function flowLegendSummary(model: FlowModel): FlowLegendSummary {
     details.push(`${excluded} rows left out (see the warning)`);
   }
   const text = countText(model) + (config.show === 'hover' ? ', shown on hover' : '');
-  return { text, bound: model.edges.length > MAX_FLOW_ARCS, details };
+  return { text, bound: restIsBound(model), details };
 }
 
 const FlowLegendComponent: React.FC<{ model: FlowModel | null; width: number }> = ({ model, width }) => {
