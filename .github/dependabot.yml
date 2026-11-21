@@ -17,6 +17,28 @@ updates:
     commit-message:
       prefix: 'build'
       include: 'scope'
+    # Updates that cannot be installed or that break the build. Remove a rule when its reason
+    # no longer holds.
+    ignore:
+      # The plugin supports Grafana 11.6 and later (React 18) and builds against @grafana/* 12.x
+      # (docs/design.md, section 11). The 13.2 and later packages need React 19.
+      - dependency-name: '@grafana/data'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@grafana/runtime'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@grafana/schema'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@grafana/ui'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@grafana/i18n'
+        versions: ['>=13.2.0']
+      # Version 10 has no flat.js, which .config/eslint.config.mjs (managed by
+      # @grafana/create-plugin) imports. Update it together with the scaffold.
+      - dependency-name: '@grafana/eslint-config'
+        update-types: ['version-update:semver-major']
+      # eslint-plugin-react 7.37.5 (the latest release) supports ESLint 9 at most.
+      - dependency-name: 'eslint'
+        update-types: ['version-update:semver-major']
     groups:
       unit-test:
         patterns:

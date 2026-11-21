@@ -5,6 +5,9 @@
 - Add cell selection: Shift+click a cell or a group label, or Shift+drag a rectangle, to select any set of cells. Selected cells are ringed, keep their selection through data refreshes and resizes, and are cleared with **Clear** or Escape. Every gesture without Shift works as before.
 - Add a cohort comparison for the selected cells against all other cells: per query, the number of cells with and without a value, min, median, p95, max and Cliff's delta. Cells without a value are counted and never treated as zero.
 - Add one-click copy of the selected cells' label values as a regular expression, a comma-separated list or a hostlist (`node-a[001-012]`), and an optional sync of those values to a dashboard variable (`Sync selection to variable`), which is restored when the selection is cleared. The label is chosen automatically or with `Selection label`.
+- Update the transitive `brace-expansion`, `postcss`, `postcss-selector-parser`, `qs`, `serialize-javascript` and `zod` dependencies to resolve their advisories.
+- Override versions that `@grafana/data`, `@grafana/runtime` and `@grafana/ui` 12.4 pin, to resolve their advisories: `dompurify` 3.4.17, `immutable` 5.1.10, `moment` 2.31.0, `uuid` 11.1.1, and `react-use` 17.6.1, which moves `js-cookie` to 3.0.8. The `@grafana/*` releases that allow the fixed `dompurify` and `moment` (13.2 and later) need React 19. The plugin bundle does not change, because Grafana provides these packages at runtime.
+- Record in `osv-scanner.toml` the advisories that cannot be fixed yet, with the reason for each, until 2027-02-20: `minimatch` and `glob` in the Jest toolchain, and `react-router` 6 in `@grafana/ui`.
 
 ## 0.4.1 - 2026-11-12
 
