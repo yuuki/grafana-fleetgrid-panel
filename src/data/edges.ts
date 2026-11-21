@@ -89,8 +89,12 @@ export interface FlowModel {
   /** Hierarchy label of that level, and whether its nodes are groups rather than cells. */
   levelLabel: string;
   groupLevel: boolean;
-  /** The edges that pass the threshold filter, worst first. Indexes below point into this list. */
+  /**
+   * The edges that pass the threshold filter, worst first: first the `valuedCount` edges with a value,
+   * then the edges without one. Indexes below point into this list.
+   */
   edges: FlowEdge[];
+  valuedCount: number;
   nodes: Map<string, FlowNode>;
   /** Node key → its edges (both directions), worst first. Makes hover independent of the edge count. */
   byNode: Map<string, number[]>;
@@ -539,6 +543,7 @@ function emptyModel(config: FlowConfig, warnings: string[]): FlowModel {
     levelLabel: '',
     groupLevel: false,
     edges: [],
+    valuedCount: 0,
     nodes: new Map(),
     byNode: new Map(),
     byPath: new Map(),
@@ -640,6 +645,7 @@ export function buildFlowModel(
     levelLabel: levels[index.depth - 1]?.label ?? '',
     groupLevel: index.depth < levels.length,
     edges,
+    valuedCount: edges.filter((edge) => edge.value !== null).length,
     nodes: collected.nodes,
     ...buildFlowIndex(edges),
     stats,
@@ -653,30 +659,78 @@ export function flowNodeKey(model: FlowModel, cell: CellModel): string {
   return pathKey(cell.path.slice(0, model.depth));
 }
 
-/** The arcs drawn while nothing is focused: the worst MAX_FLOW_ARCS edges, or none in hover mode. */
+/**
+ * How a bound on the number of arcs is shared between the edges with a value and the edges without one,
+ * when both do not fit. An edge without a value cannot be ranked: its probe may have failed because the
+ * path is the most broken one, so it must not be the first to go. It must not crowd out the edges that
+ * are known to be degraded either. So the edges without a value get what the valued ones leave free, and
+ * at least half of the bound.
+ */
+export function shareFlowBound(valued: number, unknown: number, bound: number): { valued: number; unknown: number } {
+  if (valued + unknown <= bound) {
+    return { valued, unknown };
+  }
+  const unknownShare = Math.min(unknown, Math.max(Math.floor(bound / 2), bound - valued));
+  return { valued: bound - unknownShare, unknown: unknownShare };
+}
+
+/** How many edges with and without a value are drawn while nothing is focused; none in hover mode. */
+export function flowRestShare(model: FlowModel): { valued: number; unknown: number } {
+  if (model.config.show === 'hover') {
+    return { valued: 0, unknown: 0 };
+  }
+  return shareFlowBound(model.valuedCount, model.edges.length - model.valuedCount, MAX_FLOW_ARCS);
+}
+
+/** The arcs drawn while nothing is focused, worst first, then those without a value; none in hover mode. */
 export function flowBaseEdges(model: FlowModel): FlowEdge[] {
-  return model.config.show === 'hover' ? [] : model.edges.slice(0, MAX_FLOW_ARCS);
+  const share = flowRestShare(model);
+  return [
+    ...model.edges.slice(0, share.valued),
+    ...model.edges.slice(model.valuedCount, model.valuedCount + share.unknown),
+  ];
+}
+
+// The first index of an ascending list of edge indexes that points at an edge without a value.
+function firstUnknown(indexes: number[], valuedCount: number): number {
+  let low = 0;
+  let high = indexes.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (indexes[mid] < valuedCount) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+  return low;
+}
+
+// At most `bound` of a node's edge indexes (ascending: worst first, then those without a value), shared
+// like the resting arcs. Reads only what it returns.
+function boundedIndexes(model: FlowModel, indexes: number[], bound: number): number[] {
+  if (indexes.length <= bound) {
+    return indexes;
+  }
+  const split = firstUnknown(indexes, model.valuedCount);
+  const share = shareFlowBound(split, indexes.length - split, bound);
+  return [...indexes.slice(0, share.valued), ...indexes.slice(split, split + share.unknown)];
 }
 
 /**
  * The edges to emphasise for a set of node keys (today the hovered cell's node; a selection can pass
  * several): every edge that touches one of the nodes, then the other edges of the paths those edges are
  * on, so that pointing at one member of a ring shows the whole ring. Returns null when the nodes have no
- * edge, so that an unrelated cell does not dim the overlay. At most MAX_FLOW_ARCS edges, worst first;
- * the cost depends on the edges found, not on the number of edges in the model.
+ * edge, so that an unrelated cell does not dim the overlay. At most MAX_FLOW_ARCS edges, worst first and
+ * shared with the edges without a value like the resting arcs; the cost depends on the edges returned,
+ * not on the number of edges in the model.
  */
 export function flowFocusEdges(model: FlowModel, nodeKeys: string[]): FlowEdge[] | null {
   const picked = new Set<number>();
-  const add = (indexes: number[] | undefined) => {
-    for (const index of indexes ?? []) {
-      if (picked.size >= MAX_FLOW_ARCS) {
-        return;
-      }
+  for (const key of nodeKeys) {
+    for (const index of boundedIndexes(model, model.byNode.get(key) ?? [], MAX_FLOW_ARCS - picked.size)) {
       picked.add(index);
     }
-  };
-  for (const key of nodeKeys) {
-    add(model.byNode.get(key));
   }
   if (picked.size === 0) {
     return null;
@@ -686,7 +740,12 @@ export function flowFocusEdges(model: FlowModel, nodeKeys: string[]): FlowEdge[]
     model.edges[index].hops.forEach((hop) => paths.add(hop.path));
   }
   for (const path of paths) {
-    add(model.byPath.get(path));
+    for (const index of model.byPath.get(path) ?? []) {
+      if (picked.size >= MAX_FLOW_ARCS) {
+        break;
+      }
+      picked.add(index);
+    }
   }
   return [...picked].sort((a, b) => a - b).map((index) => model.edges[index]);
 }

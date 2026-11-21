@@ -234,7 +234,7 @@ DataFrame[] of the edge query
 | Endpoint | `flowEndpoints` maps a hierarchy label to the edge query's source label and destination label. The endpoint's value is compared with the **raw** value of that hierarchy label on the cells (`CellModel.labelSets`). |
 | Level | An endpoint resolves at the deepest mapped hierarchy level: to a cell when that is the leaf level, otherwise to the group. All edges of a panel resolve at the same level. |
 | Edge | One per ordered pair of nodes. Its value is the worst of the rows of the pair (`flowWorst`). A→B and B→A are two edges. |
-| Value | `number`, or `null` when none of the rows has a finite value. `null` is "unknown": drawn dashed in a neutral color, never 0, and left out by a filter. |
+| Value | `number`, or `null` when none of the rows has a finite value. `null` is "unknown": drawn dashed in a neutral color, never 0, and left out by a filter (the legend then says how many). |
 | Not drawn | A row without an endpoint label, with an endpoint that matches no node, or with one that matches several nodes; and a self-edge (both ends resolve to one node). All four are counted. The first three are reported in the warning banner, self-edges in the legend's tooltip. |
 
 **Decision: bind the edge query by an explicit refId and explicit label names, never by recognizing label names.**
@@ -265,7 +265,10 @@ Pairwise data grows with the square of the fleet: 1,000 hosts can report a milli
 | Rows read (`MAX_FLOW_ROWS`) | 20,000 | The first 20,000 rows are read. The banner says how many there were and asks to narrow the query. Which rows come first is the data source's order, so this bound is a guard, not a ranking. |
 | Arcs drawn (`MAX_FLOW_ARCS`) | 500 | The worst 500 edges that pass the filter are drawn, and the legend reads `500 of N edges drawn, worst first`. The same bound applies to the arcs of a hovered node. |
 
-Edges are ranked by value in the worse direction, edges without a value last, ties by source and destination key. The ranking is therefore the same for any order of the query result.
+Edges are ranked by value in the worse direction, ties by source and destination key. The ranking is therefore the same for any order of the query result.
+
+**Decision: edges without a value share the arc bound instead of being cut first.**
+*Rationale:* an edge without a value cannot be ranked, and the first implementation put it last. With 600 healthy edges and 20 whose probe returned nothing, none of the 20 was drawn, while the legend's tooltip said they were dashed. A probe that returns nothing may be the most broken path of all. When the edges do not all fit, the edges without a value now get what the valued ones leave free, and at least half of the bound (`shareFlowBound`); the same rule applies to the edges of a hovered node. They cannot take the whole bound either, because the edges that are known to be degraded must stay. The legend's visible text says how many of them are drawn (`250 of 300 edges without a value drawn`), and, with a filter, that none is (`12 edges without a value not drawn`).
 
 | Step | Cost | Runs when |
 |---|---|---|

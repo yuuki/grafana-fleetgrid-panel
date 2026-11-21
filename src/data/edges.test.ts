@@ -12,6 +12,8 @@ import {
   collectFlowEdges,
   flowBaseEdges,
   flowFocusEdges,
+  flowRestShare,
+  shareFlowBound,
   flowNodeKey,
   flowRefId,
   resolveFlowConfig,
@@ -586,7 +588,58 @@ function meshModel(hosts: number, fanOut: number, over: Partial<FleetGridOptions
   return buildFlowModel([frame], hierarchy(rows, lv), opts, resolveFlowConfig(opts)!, theme, 'utc');
 }
 
+describe('shareFlowBound', () => {
+  it('draws everything that fits', () => {
+    expect(shareFlowBound(300, 200, 500)).toEqual({ valued: 300, unknown: 200 });
+    expect(shareFlowBound(0, 0, 500)).toEqual({ valued: 0, unknown: 0 });
+  });
+
+  it('does not cut the edges without a value first', () => {
+    // 600 healthy edges and 20 whose probe returned nothing: all 20 are drawn.
+    expect(shareFlowBound(600, 20, 500)).toEqual({ valued: 480, unknown: 20 });
+  });
+
+  it('keeps at least half of the bound for the edges with a value, when they need it', () => {
+    expect(shareFlowBound(600, 600, 500)).toEqual({ valued: 250, unknown: 250 });
+    expect(shareFlowBound(100, 600, 500)).toEqual({ valued: 100, unknown: 400 });
+    expect(shareFlowBound(0, 600, 500)).toEqual({ valued: 0, unknown: 500 });
+    expect(shareFlowBound(600, 0, 501)).toEqual({ valued: 501, unknown: 0 });
+  });
+});
+
 describe('flowBaseEdges', () => {
+  it('draws edges without a value even when the bound cuts healthy ones', () => {
+    // 620 distinct pairs: 600 healthy (0) and 20 whose probe returned nothing.
+    const names = Array.from({ length: 40 }, (_, i) => `node-a${i}`);
+    const lv: LevelDef[] = [{ ...DEFAULT_LEVEL, label: 'host' }];
+    const rows: NormalizedRow[] = names.map((host) => ({ labels: { host }, value: 1, refId: 'A' }));
+    const src: string[] = [];
+    const dst: string[] = [];
+    for (let i = 0; i < names.length && src.length < 620; i++) {
+      for (let j = 0; j < names.length && src.length < 620; j++) {
+        if (i !== j) {
+          src.push(names[i]);
+          dst.push(names[j]);
+        }
+      }
+    }
+    const loss = src.map((_, i) => (i >= 600 ? null : 0));
+    const opts = options({ levels: lv });
+    const m = buildFlowModel(
+      [edgeTable({ src_host: src, dst_host: dst, loss })],
+      hierarchy(rows, lv),
+      opts,
+      resolveFlowConfig(opts)!,
+      theme,
+      'utc'
+    );
+    expect([m.edges.length, m.valuedCount]).toEqual([620, 600]);
+    const base = flowBaseEdges(m);
+    expect(base).toHaveLength(MAX_FLOW_ARCS);
+    expect(base.filter((e) => e.value === null)).toHaveLength(20);
+    expect(flowRestShare(m)).toEqual({ valued: 480, unknown: 20 });
+  });
+
   it('draws at most MAX_FLOW_ARCS edges, the worst ones', () => {
     const m = meshModel(300, 5);
     expect(m.edges).toHaveLength(1500);
@@ -655,6 +708,26 @@ describe('flowFocusEdges', () => {
     expect(focus).toHaveLength(MAX_FLOW_ARCS);
     // The node's worst edges are the ones kept.
     expect(focus[0]).toBe(m.edges[m.byNode.get(node)![0]]);
+  });
+
+  it('keeps the edges without a value of a node that has more edges than the bound', () => {
+    // One host with 600 healthy edges and 20 edges whose probe returned nothing.
+    const names = Array.from({ length: 621 }, (_, i) => `node-a${i}`);
+    const lv: LevelDef[] = [{ ...DEFAULT_LEVEL, label: 'host' }];
+    const rows: NormalizedRow[] = names.map((host) => ({ labels: { host }, value: 1, refId: 'A' }));
+    const opts = options({ levels: lv });
+    const frame = edgeTable({
+      src_host: names.slice(1).map(() => names[0]),
+      dst_host: names.slice(1),
+      loss: names.slice(1).map((_, i) => (i >= 600 ? null : i)),
+    });
+    const m = buildFlowModel([frame], hierarchy(rows, lv), opts, resolveFlowConfig(opts)!, theme, 'utc');
+    const focus = flowFocusEdges(m, [pathKey([names[0]])])!;
+    expect(focus).toHaveLength(MAX_FLOW_ARCS);
+    expect(focus.filter((e) => e.value === null)).toHaveLength(20);
+    // The valued ones that are kept are the worst.
+    expect(focus[0].value).toBe(599);
+    expect(Math.min(...focus.filter((e) => e.value !== null).map((e) => e.value!))).toBe(120);
   });
 
   it('looks at the edges it returns, not at every edge of the model', () => {
