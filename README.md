@@ -251,7 +251,7 @@ max by (src_host, dst_host) (fabric_probe_loss_ratio)
 - Map every label that is needed to name one cell or group. `gpu0` alone exists under every host, so mapping only `gpu` matches more than one cell and the row is left out.
 - Every mapping must be complete and must name a hierarchy label. Otherwise nothing is drawn and the banner says why, because a skipped mapping would move the edges to another level.
 - The two directions of a pair are two edges and two arcs. An arc bulges to the left of its direction of travel and carries an arrowhead at its middle.
-- Rows of the same ordered pair are one edge. Its value is their **Spatial aggregation**.
+- Rows of the same ordered pair are one edge, for example the RNIC pairs of one host pair. Its value is the **worst** of them: the highest when **Worse values are** is `Higher`, the lowest when it is `Lower`. So one degraded row is never hidden by healthy ones. The cells' **Spatial aggregation** is not used for edges; to add rows up (byte rates, for example), aggregate in the query with `sum by (src_host, dst_host)`.
 - An edge whose rows have no finite value is kept and drawn **dashed in a neutral color**. It is never treated as 0. With a filter it is not drawn, because it cannot be compared.
 
 Rows that cannot be drawn are counted and reported; they are never dropped silently. The warning banner gives the number of rows without an endpoint label, with an endpoint that matches no cell or group (with up to three examples), and with an endpoint that matches more than one. A row whose two ends resolve to the same cell or group (a self-edge) has no arc; the legend's tooltip gives their number.
@@ -284,7 +284,7 @@ Set **Hop number label** (`hop`) and, when several paths are shown together, **P
 - The hop number is written beside the arrowhead. Where numbers would overlap, the lowest ones are kept. An arc that carries several hops (the same pair on two paths, or twice on one path) shows the first of them, by path name and then by number, followed by `+`.
 - Hovering a cell on a path emphasises the **whole path**, not only the hops at that cell. The tooltip lists the hops that enter and leave the cell.
 - Hop numbers must be whole numbers from 0. A row with another value keeps its arc, loses its number and is counted in a warning. Gaps in the numbers are shown as they are: a missing number means that hop is absent from the query result, has an endpoint outside the grid, or is hidden by the filter.
-- The same pair on two paths is one arc with one (aggregated) value.
+- The same pair on two paths is one arc with one value, the worst of its rows.
 
 The overlay has no animation. The direction of a flow is shown by the arrowhead, so a dashboard with many panels does not run a render loop.
 

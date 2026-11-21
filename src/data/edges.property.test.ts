@@ -7,9 +7,9 @@ import { FlowEdge, FlowModel, buildFlowModel, flowFocusEdges, resolveFlowConfig,
 import { propertyParams } from '../testing/property';
 
 // Model-based check of the flow overlay's data stage: every edge-query row is either part of exactly
-// one edge or counted under exactly one reason, an edge's value is the spatial aggregation of the
-// finite values of its ordered pair (never 0 for "unknown"), and the ranking, the filter and the
-// hover index agree with a naive reference.
+// one edge or counted under exactly one reason, an edge's value is the worst of the finite values of
+// its ordered pair (never 0 for "unknown", and never the cells' spatial aggregation), and the ranking,
+// the filter and the hover index agree with a naive reference.
 
 const theme = createTheme();
 const levels: LevelDef[] = [
@@ -84,18 +84,9 @@ function buildModel(rows: DrawnRow[], over: Partial<FleetGridOptions>): FlowMode
 const isKnown = (host: string) => KNOWN.includes(host);
 const isFiniteValue = (v: number | null): v is number => v !== null && Number.isFinite(v);
 
-function fold(values: number[], agg: SpatialAggregation): number {
-  switch (agg) {
-    case 'max':
-      return values.reduce((a, b) => Math.max(a, b));
-    case 'min':
-      return values.reduce((a, b) => Math.min(a, b));
-    case 'sum':
-      return values.reduce((a, b) => a + b, 0);
-    case 'mean':
-      return values.reduce((a, b) => a + b, 0) / values.length;
-  }
-}
+// The worst of the values: the highest when higher is worse, the lowest when lower is worse.
+const worstOf = (values: number[], direction: 'high' | 'low'): number =>
+  values.reduce((a, b) => (direction === 'high' ? Math.max(a, b) : Math.min(a, b)));
 
 // The naive reference: ordered pair → the finite values of its rows.
 function reference(rows: DrawnRow[]) {
@@ -125,8 +116,9 @@ const keyOf = (edge: FlowEdge) => `${edge.source}>${edge.destination}`;
 describe('buildFlowModel (properties)', () => {
   it('puts every row into exactly one edge or one counted reason, and aggregates like the reference', () => {
     fc.assert(
-      fc.property(fc.array(edgeRow, { maxLength: 40 }), aggregation, (rows, agg) => {
-        const model = buildModel(rows, { spatialAggregation: agg });
+      fc.property(fc.array(edgeRow, { maxLength: 40 }), aggregation, worst, (rows, agg, direction) => {
+        // The cells' aggregation is drawn too: it must not change an edge.
+        const model = buildModel(rows, { spatialAggregation: agg, flowWorst: direction });
         const { pairs, counts } = reference(rows);
 
         expect(model.stats).toMatchObject({ ...counts, ambiguous: 0, edgeCount: pairs.size });
@@ -137,7 +129,7 @@ describe('buildFlowModel (properties)', () => {
         for (const edge of model.edges) {
           const values = pairs.get(keyOf(edge))!;
           // Unknown stays unknown: an edge is null exactly when none of its rows has a finite value.
-          expect(edge.value).toBe(values.length > 0 ? fold(values, agg) : null);
+          expect(edge.value).toBe(values.length > 0 ? worstOf(values, direction) : null);
           rowsInEdges += edge.rowCount;
         }
         expect(rowsInEdges + counts.missingLabel + counts.unmatched + counts.selfEdges).toBe(rows.length);

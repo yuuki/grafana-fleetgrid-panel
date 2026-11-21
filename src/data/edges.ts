@@ -8,12 +8,10 @@ import {
   HierarchyNode,
   LevelDef,
   NormalizedRow,
-  SpatialAggregation,
 } from '../types';
 import { MetricInfo, buildMetricInfos } from './display';
 import { pathKey } from './hierarchy';
 import { countFrameRows, normalizeFrames } from './normalize';
-import { aggregate } from './values';
 
 // Flow overlay data: one query (the edge query) returns a row per directed pair, and each row is
 // resolved to an edge between two hierarchy nodes (cells or groups). Everything here is a pure
@@ -51,7 +49,7 @@ export interface FlowEdge {
   /** pathKey of the hierarchy node the source and the destination resolved to. */
   source: string;
   destination: string;
-  /** Spatial aggregation of the rows of this ordered pair; null when none of them has a value. */
+  /** The worst value among the rows of this ordered pair; null when none of them has a value. */
   value: number | null;
   /** Number of edge-query rows aggregated into this edge. */
   rowCount: number;
@@ -192,7 +190,8 @@ function indexCell(index: EndpointIndex, cell: CellModel, endpoints: FlowEndpoin
 interface Bucket {
   source: string;
   destination: string;
-  values: number[];
+  /** The worst finite value seen so far; null while no row had one. */
+  value: number | null;
   rowCount: number;
   hops: Map<string, FlowHop>;
 }
@@ -303,13 +302,13 @@ function addRow(c: Collector, row: NormalizedRow): void {
   const key = `${source.key}\0${destination.key}`;
   let bucket = c.buckets.get(key);
   if (!bucket) {
-    bucket = { source: source.key, destination: destination.key, values: [], rowCount: 0, hops: new Map() };
+    bucket = { source: source.key, destination: destination.key, value: null, rowCount: 0, hops: new Map() };
     c.buckets.set(key, bucket);
   }
   bucket.rowCount++;
   // A row without a finite value still proves the pair exists; it adds no number (unknown is not 0).
   if (row.value !== null) {
-    bucket.values.push(row.value);
+    bucket.value = bucket.value === null ? row.value : worseValue(bucket.value, row.value, c.config.worst);
   }
   const hop = rowHop(c, row.labels);
   if (hop) {
@@ -334,16 +333,22 @@ function compareHops(a: FlowHop, b: FlowHop): number {
   return compareText(a.path, b.path) || compareOrder(a.order, b.order);
 }
 
+/** The worse of two values: the higher one when higher is worse, the lower one when lower is worse. */
+export function worseValue(a: number, b: number, worst: FlowWorstDirection): number {
+  return worst === 'high' ? Math.max(a, b) : Math.min(a, b);
+}
+
 /**
  * Edges between hierarchy nodes from normalized edge-query rows. Rows of the same ordered pair are one
- * edge whose value is their spatial aggregation; A→B and B→A are two edges. A pair whose two ends resolve
- * to the same node is a self-edge: it has no arc and is only counted.
+ * edge whose value is the worst of them (`config.worst`), so that one degraded row among healthy ones
+ * (one RNIC pair of a host pair) is what the edge shows. The cells' spatial aggregation is not used: a
+ * mean would dilute the degraded row and a maximum would hide it when lower is worse. A→B and B→A are two
+ * edges. A pair whose two ends resolve to the same node is a self-edge: it has no arc and is only counted.
  */
 export function collectFlowEdges(
   rows: NormalizedRow[],
   index: EndpointIndex,
-  config: FlowConfig,
-  agg: SpatialAggregation
+  config: FlowConfig
 ): { edges: FlowEdge[]; nodes: Map<string, FlowNode>; stats: FlowStats } {
   const c: Collector = {
     index,
@@ -370,12 +375,10 @@ export function collectFlowEdges(
   }
   const edges: FlowEdge[] = [];
   for (const bucket of c.buckets.values()) {
-    const value = bucket.values.length > 0 ? aggregate(bucket.values, agg) : null;
     edges.push({
       source: bucket.source,
       destination: bucket.destination,
-      // An aggregate can leave the finite range (a sum that overflows); that is unknown too.
-      value: value !== null && Number.isFinite(value) ? value : null,
+      value: bucket.value,
       rowCount: bucket.rowCount,
       hops: [...bucket.hops.values()].sort(compareHops),
     });
@@ -605,7 +608,7 @@ export function buildFlowModel(
   const labelFrames = flowLabelColumns(frames, flowLabelNames(config), MAX_FLOW_ROWS);
   const rows = normalizeFrames(labelFrames, options.reduceCalc || 'lastNotNull', MAX_FLOW_ROWS);
   const index = buildEndpointIndex(root, levels, config.endpoints);
-  const collected = collectFlowEdges(rows, index, config, options.spatialAggregation);
+  const collected = collectFlowEdges(rows, index, config);
   const stats: FlowStats = { ...collected.stats, totalRows: countFrameRows(labelFrames) };
   const edges = selectFlowEdges(collected.edges, config.worst, config.threshold);
   // Like the cells, the automatic color range follows the values that can be displayed. Passing a range

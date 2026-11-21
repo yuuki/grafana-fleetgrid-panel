@@ -233,7 +233,7 @@ DataFrame[] of the edge query
 | Row | One directed pair: a source, a destination, a value. Table frames and time-series frames are read as for cells; a range series is reduced with `reduceCalc`. |
 | Endpoint | `flowEndpoints` maps a hierarchy label to the edge query's source label and destination label. The endpoint's value is compared with the **raw** value of that hierarchy label on the cells (`CellModel.labelSets`). |
 | Level | An endpoint resolves at the deepest mapped hierarchy level: to a cell when that is the leaf level, otherwise to the group. All edges of a panel resolve at the same level. |
-| Edge | One per ordered pair of nodes. Several rows of a pair are aggregated with `spatialAggregation`. A→B and B→A are two edges. |
+| Edge | One per ordered pair of nodes. Its value is the worst of the rows of the pair (`flowWorst`). A→B and B→A are two edges. |
 | Value | `number`, or `null` when none of the rows has a finite value. `null` is "unknown": drawn dashed in a neutral color, never 0, and left out by a filter. |
 | Not drawn | A row without an endpoint label, with an endpoint that matches no node, or with one that matches several nodes; and a self-edge (both ends resolve to one node). All four are counted. The first three are reported in the warning banner, self-edges in the legend's tooltip. |
 
@@ -244,6 +244,10 @@ DataFrame[] of the edge query
 **Decision: match endpoints on raw label values, at the deepest mapped level, and never pick one of several matches.**
 *Alternatives:* compare extracted level keys; let the user choose the level separately; take the first match.
 *Rationale:* an extracted key such as a trailing number is unique only inside its parent (`node-a1` and `node-b1` both give `1`), while the raw host name is what the edge query reports. The mapped labels already say which level is meant, so a separate level option could only contradict them. Mapping `gpu` alone names a cell under every host; drawing the edge to the first of them would show a relation that does not exist, so such a row is counted as ambiguous instead. Several raw values that the extraction folds into one node (`node-a017`, `node-b017` → `017`) resolve to that node; an edge between them is a self-edge.
+
+**Decision: an edge's value is the worst of its rows, not the cells' spatial aggregation.**
+*Alternatives:* reuse `spatialAggregation` (the first implementation); a separate aggregation option for edges.
+*Rationale:* several rows per pair are the normal case when the data is finer than the level it is drawn at (RNIC pairs drawn between hosts). With the cells' default `max` and a metric where lower is worse, two healthy RNIC pairs hid a degraded one, in the filter and in the choice of the arcs to draw; with `mean`, one lossy row of eight was diluted below the filter. The overlay already knows which direction is worse, so it takes the worst row: a degraded row can then neither be hidden nor diluted, whatever the cells use. A metric that has to be added up over the rows (a byte rate) is summed in the query, where the grouping is explicit.
 
 **Decision: the label columns of the edge query are read as text.**
 *Rationale:* in a table frame a hop number or an ID is often a numeric column. `normalizeFrames` reads labels from string columns only and takes the first numeric column as the value, so a numeric hop column would become the value. Before normalization the columns named by the flow options are converted to strings, and an empty cell becomes "no label" rather than the text `null`.
@@ -331,7 +335,7 @@ A path is given as its hops: each edge row can carry a hop number (`flowOrderLab
 | Several paths | Told apart by the path name. Without `flowPathLabel` all numbered hops are one path. |
 | Hop number | A whole number from 0 (at most 9 digits). Any other value keeps the edge, drops the number and is counted in a warning. |
 | Gaps | Shown as they are. A missing number means the hop is absent, has an endpoint outside the grid, or is hidden by the filter. |
-| Same pair on several paths, or twice on one | One edge and one arc; its value aggregates all rows. The arc shows its first hop number (by path name, then by number) followed by `+`. |
+| Same pair on several paths, or twice on one | One edge and one arc; its value is the worst of all its rows. The arc shows its first hop number (by path name, then by number) followed by `+`. |
 | Overlapping numbers | Numbers claim squares of a coarse grid in path and hop order; a number whose squares are taken is not written. |
 
 **Decision: hops, not members.**

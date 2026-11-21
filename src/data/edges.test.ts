@@ -87,12 +87,8 @@ const A2 = hostKey('zone-a', '2');
 const B1 = hostKey('zone-b', '1');
 const B2 = hostKey('zone-b', '2');
 
-function collect(
-  rows: NormalizedRow[],
-  cfg: FlowConfig = config(),
-  agg: FleetGridOptions['spatialAggregation'] = 'max'
-) {
-  return collectFlowEdges(rows, buildEndpointIndex(hierarchy(), levels, cfg.endpoints), cfg, agg);
+function collect(rows: NormalizedRow[], cfg: FlowConfig = config()) {
+  return collectFlowEdges(rows, buildEndpointIndex(hierarchy(), levels, cfg.endpoints), cfg);
 }
 
 const pairs = (edges: FlowEdge[]) => edges.map((edge) => `${edge.source}>${edge.destination}=${edge.value}`);
@@ -188,12 +184,11 @@ describe('collectFlowEdges', () => {
     expect(pairs(edges).sort()).toEqual([`${A1}>${B1}=1`, `${B1}>${A1}=2`].sort());
   });
 
-  it('aggregates the rows of one ordered pair with the spatial aggregation', () => {
-    const rows = [edgeRow('node-a1', 'node-a2', 1), edgeRow('node-a1', 'node-a2', 3)];
-    expect(collect(rows).edges).toEqual([{ source: A1, destination: A2, value: 3, rowCount: 2, hops: [] }]);
-    expect(collect(rows, config(), 'mean').edges[0].value).toBe(2);
-    expect(collect(rows, config(), 'min').edges[0].value).toBe(1);
-    expect(collect(rows, config(), 'sum').edges[0].value).toBe(4);
+  it('gives an edge the worst value of the rows of its ordered pair', () => {
+    const rows = [edgeRow('node-a1', 'node-a2', 1), edgeRow('node-a1', 'node-a2', 3), edgeRow('node-a1', 'node-a2', 2)];
+    // Higher is worse: the highest row. Lower is worse: the lowest row.
+    expect(collect(rows).edges).toEqual([{ source: A1, destination: A2, value: 3, rowCount: 3, hops: [] }]);
+    expect(collect(rows, config({ worst: 'low' })).edges[0].value).toBe(1);
   });
 
   it('keeps an edge whose rows have no value as unknown, never as 0', () => {
@@ -339,6 +334,31 @@ describe('selectFlowEdges', () => {
 });
 
 describe('buildFlowModel', () => {
+  it('does not let healthy rows of a pair hide a degraded one, whatever the cells are aggregated with', () => {
+    // Three rows of one host pair, for example three RNIC pairs: two healthy (100) and one degraded (1).
+    const frame = edgeTable({
+      src_host: ['node-a1', 'node-a1', 'node-a1'],
+      dst_host: ['node-a2', 'node-a2', 'node-a2'],
+      rate: [100, 100, 1],
+    });
+    for (const spatialAggregation of ['max', 'mean', 'min', 'sum'] as const) {
+      const m = model([frame], { flowWorst: 'low', flowThreshold: 50, spatialAggregation });
+      expect(pairs(m.edges)).toEqual([`${A1}>${A2}=1`]);
+    }
+  });
+
+  it('does not dilute one lossy row among healthy ones below the filter', () => {
+    const frame = edgeTable({
+      src_host: Array(8).fill('node-a1'),
+      dst_host: Array(8).fill('node-a2'),
+      loss: [5, 0, 0, 0, 0, 0, 0, 0],
+    });
+    for (const spatialAggregation of ['max', 'mean', 'min', 'sum'] as const) {
+      const m = model([frame], { flowThreshold: 1, spatialAggregation });
+      expect(pairs(m.edges)).toEqual([`${A1}>${A2}=5`]);
+    }
+  });
+
   it('reads a table frame and takes a numeric hop column as a label, not as the value', () => {
     const frame = edgeTable({
       src_host: ['node-a1', 'node-a2'],

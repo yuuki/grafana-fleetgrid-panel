@@ -11,7 +11,7 @@ export function collectRefIds(rows: NormalizedRow[]): string[] {
   return seen;
 }
 
-export function aggregate(values: number[], agg: SpatialAggregation): number {
+function aggregate(values: number[], agg: SpatialAggregation): number {
   switch (agg) {
     case 'max':
       return Math.max(...values);
