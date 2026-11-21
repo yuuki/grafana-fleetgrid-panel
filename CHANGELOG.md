@@ -4,6 +4,9 @@
 
 - Add an optional flow overlay that draws the rows of one query (the edge query) as arcs between cells or groups, for pairwise metrics such as packet loss or round-trip time between hosts. Arcs take their color from the edge query's standard field config, show their direction with an arrowhead, can be limited to the edges worse than a number, and are emphasised for the hovered cell, whose tooltip lists its peers and its worst peer. Hop number and path labels show ordered paths such as a job's ring.
 - The overlay is off until an edge query is named under the new **Flow overlay** options (`flowRefId`, `flowEndpoints`, `flowShow`, `flowWorst`, `flowThreshold`, `flowOrderLabel`, `flowPathLabel`); existing dashboards are unchanged. At most 20,000 edge rows are read and 500 arcs drawn, worst first, and the panel says so when a limit applies. Edge rows that cannot be drawn are reported, and an edge without a value is drawn dashed instead of as 0.
+- Update the transitive `brace-expansion`, `postcss`, `postcss-selector-parser`, `qs`, `serialize-javascript` and `zod` dependencies to resolve their advisories.
+- Override versions that `@grafana/data`, `@grafana/runtime` and `@grafana/ui` 12.4 pin, to resolve their advisories: `dompurify` 3.4.17, `immutable` 5.1.10, `moment` 2.31.0, `uuid` 11.1.1, and `react-use` 17.6.1, which moves `js-cookie` to 3.0.8. The `@grafana/*` releases that allow the fixed `dompurify` and `moment` (13.2 and later) need React 19. The plugin bundle does not change, because Grafana provides these packages at runtime.
+- Record in `osv-scanner.toml` the advisories that cannot be fixed yet, with the reason for each, until 2027-02-20: `minimatch` and `glob` in the Jest toolchain, and `react-router` 6 in `@grafana/ui`.
 
 ## 0.4.1 - 2026-11-12
 
