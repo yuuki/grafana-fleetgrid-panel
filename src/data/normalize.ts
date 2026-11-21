@@ -99,6 +99,27 @@ export function countFrameRows(frames: DataFrame[]): number {
   return count;
 }
 
+/**
+ * Calls `visit` with the value of every row normalizeFrames returns for a frame, in the same order,
+ * without building the rows: `row` is the row number of a table frame, or the position of the series
+ * among the frame's numeric fields. The flow overlay is to rank the rows of an oversized result with it.
+ */
+export function forEachRowValue(
+  frame: DataFrame,
+  reduceCalc: string,
+  visit: (row: number, value: number | null) => void
+): void {
+  const numberFields = frame.fields.filter((f) => f.type === FieldType.number);
+  if (!isTableFrame(frame)) {
+    numberFields.forEach((field, index) => visit(index, reduceToValue(field, reduceCalc)));
+    return;
+  }
+  const valueField = numberFields[0];
+  for (let i = 0; valueField && i < frame.length; i++) {
+    visit(i, toFiniteNumberOrNull(valueField.values[i]));
+  }
+}
+
 function reduceToValue(field: Field, reduceCalc: string): number | null {
   const stats = reduceField({ field, reducers: [reduceCalc] });
   const v = stats[reduceCalc];
