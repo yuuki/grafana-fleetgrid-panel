@@ -44,10 +44,11 @@ interface CellGrid {
   order: Int32Array;
 }
 
-// Buckets per cell the grid may use. One bucket is one cell wide and high while the layout is dense;
-// a sparse layout (wide gaps, long label rows) gets larger buckets so the grid stays this small.
+// The most buckets the grid may have: four per cell, or 64 for a layout of a few cells. One bucket is
+// one cell wide and high while the layout is dense; a sparse layout (wide gaps, long label rows) gets
+// larger buckets, so the grid never grows beyond this.
 const BUCKETS_PER_CELL = 4;
-const MIN_BUCKETS = 64;
+const FEW_CELLS_BUCKETS = 64;
 
 const grids = new WeakMap<LayoutResult, CellGrid | null>();
 
@@ -72,7 +73,7 @@ function buildGrid(cells: LayoutCell[]): CellGrid | null {
   const spanY = maxY - minY;
   let bucketW = Math.max(maxW, 1);
   let bucketH = Math.max(maxH, 1);
-  const limit = Math.max(MIN_BUCKETS, BUCKETS_PER_CELL * cells.length);
+  const limit = Math.max(FEW_CELLS_BUCKETS, BUCKETS_PER_CELL * cells.length);
   const wanted = (Math.floor(spanX / bucketW) + 1) * (Math.floor(spanY / bucketH) + 1);
   if (![minX, minY, maxW, maxH, wanted].every(Number.isFinite)) {
     // No cells, or coordinates that are not finite numbers (or overflow): cellsInRect scans instead.
