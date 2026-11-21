@@ -241,6 +241,8 @@ max by (src_host, dst_host) (fabric_probe_loss_ratio)
 - The edge query is taken out of the cell pipeline. It does not create cells, is not offered in the metric selector, and is not part of the drilldown re-query.
 - Time-series frames and table frames are both read, as for cells. A range query is reduced with the panel's **Reduce calculation**. In a table, the first numeric column that is not one of the configured labels is the value.
 - Unit, decimals, color scheme and **Thresholds** of the arcs come from Grafana's standard field config. Use **Overrides → Fields returned by query** for the edge query to give it its own unit and thresholds.
+- Without Min/Max in the field config, the color range of the arcs is automatic. It spans every edge that has a value, **before the filter**, and includes the filter's number and, when higher is worse, 0. So a filter does not change the color of an edge, and a query that returns only its degraded pairs does not paint the least degraded one in the color of the healthy end. An automatic range is still relative to the data: for colors with a fixed meaning, set **Thresholds** or Min/Max for the edge query.
+- **Worse values are** does not change colors. For a metric where lower is worse, choose a color scheme or thresholds whose low end is the alarm color (for example `Red-Yellow-Green`); with `Green-Yellow-Red` a low value is green.
 - Frames are selected by their refId, so a transformation that merges the queries into one frame also removes the edge query.
 
 ### Matching endpoints to the grid

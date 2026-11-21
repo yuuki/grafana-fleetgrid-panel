@@ -575,7 +575,16 @@ function configWarnings(config: FlowConfig, levels: LevelDef[]): string[] {
     : [];
 }
 
-function edgeValueRange(edges: FlowEdge[]): { min: number; max: number } | undefined {
+/**
+ * The automatic color range of the arcs, used for an endpoint that the field config leaves open. It is
+ * built so that a filter cannot repaint a degraded edge in the color of the healthy end:
+ * - from every edge with a value, before the filter (the filter decides what is drawn, not what a color
+ *   means);
+ * - including the threshold, the boundary between drawn and not drawn;
+ * - including 0 when higher is worse and every value is above it, so that an edge query that returns
+ *   only its degraded pairs (`> 0` in the query) does not put the least degraded one at the healthy end.
+ */
+export function flowColorRange(edges: FlowEdge[], config: FlowConfig): { min: number; max: number } {
   let min = Infinity;
   let max = -Infinity;
   for (const edge of edges) {
@@ -584,7 +593,14 @@ function edgeValueRange(edges: FlowEdge[]): { min: number; max: number } | undef
       max = Math.max(max, edge.value);
     }
   }
-  return Number.isFinite(min) ? { min, max } : undefined;
+  if (!Number.isFinite(min)) {
+    return { min: 0, max: 1 };
+  }
+  if (config.threshold !== undefined) {
+    min = Math.min(min, config.threshold);
+    max = Math.max(max, config.threshold);
+  }
+  return { min: config.worst === 'high' ? Math.min(min, 0) : min, max };
 }
 
 /**
@@ -611,10 +627,10 @@ export function buildFlowModel(
   const collected = collectFlowEdges(rows, index, config);
   const stats: FlowStats = { ...collected.stats, totalRows: countFrameRows(labelFrames) };
   const edges = selectFlowEdges(collected.edges, config.worst, config.threshold);
-  // Like the cells, the automatic color range follows the values that can be displayed. Passing a range
-  // and a single frame also keeps buildMetricInfos from scanning every value of an oversized result.
+  // Passing a range and a single frame also keeps buildMetricInfos from scanning every value of an
+  // oversized result.
   const valueFrame = labelFrames.find((frame) => frame.fields.some((field) => field.type === FieldType.number));
-  const range = edgeValueRange(edges) ?? { min: 0, max: 1 };
+  const range = flowColorRange(collected.edges, config);
   const metricInfo = valueFrame
     ? buildMetricInfos([valueFrame], theme, timeZone, new Map([[valueFrame.refId ?? 'A', range]]))[0]
     : undefined;

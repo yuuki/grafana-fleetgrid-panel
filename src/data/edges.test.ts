@@ -1,4 +1,4 @@
-import { DataFrame, FieldType, ThresholdsMode, createTheme, toDataFrame } from '@grafana/data';
+import { DataFrame, FieldColorModeId, FieldType, ThresholdsMode, createTheme, toDataFrame } from '@grafana/data';
 import { DEFAULT_LEVEL, FleetGridOptions, HierarchyNode, LevelDef, NormalizedRow } from '../types';
 import { buildHierarchy, pathKey } from './hierarchy';
 import { attachCells } from './values';
@@ -434,6 +434,67 @@ describe('buildFlowModel', () => {
     expect(info.processor(5).color).toBe('#ff0000');
     expect(info.processor(0.5).color).toBe('#00ff00');
     expect(info.processor(5).suffix).toBe('%');
+  });
+
+  describe('automatic color range', () => {
+    // The continuous green-yellow-red scheme of the README's quick start, no Min/Max, no override.
+    const colored = (columns: Record<string, Array<string | number | null>>, config = {}) => {
+      const frame = edgeTable(columns);
+      const value = frame.fields.find((field) => field.type === FieldType.number)!;
+      value.config = { color: { mode: FieldColorModeId.ContinuousGrYlRd }, ...config };
+      return frame;
+    };
+    const colorOf = (m: ReturnType<typeof model>, value: number) => m.metricInfo!.processor(value).color;
+
+    it('does not change with the filter: a degraded edge keeps its color when the healthy ones are filtered out', () => {
+      const frame = colored({
+        src_host: ['node-a1', 'node-a2', 'node-b1'],
+        dst_host: ['node-a2', 'node-b1', 'node-b2'],
+        loss: [0, 5, 7],
+      });
+      const unfiltered = model([frame]);
+      const filtered = model([frame], { flowThreshold: 1 });
+      expect(pairs(filtered.edges)).toEqual([`${B1}>${B2}=7`, `${A2}>${B1}=5`]);
+      expect([filtered.metricInfo!.effectiveMin, filtered.metricInfo!.effectiveMax]).toEqual([0, 7]);
+      for (const value of [5, 7]) {
+        expect(colorOf(filtered, value)).toBe(colorOf(unfiltered, value));
+      }
+      // The worst edge has the color of the high end, not of the low end.
+      expect(colorOf(filtered, 7)).toBe(colorOf(filtered, filtered.metricInfo!.effectiveMax));
+      expect(colorOf(filtered, 7)).not.toBe(colorOf(filtered, filtered.metricInfo!.effectiveMin));
+    });
+
+    it('starts at 0 when higher is worse, so a query that returns only degraded pairs does not color one healthy', () => {
+      // The edge query filters in the data source (`> 0`): the only row is a degraded pair.
+      const m = model([colored({ src_host: ['node-a1'], dst_host: ['node-a2'], loss: [7] })]);
+      expect([m.metricInfo!.effectiveMin, m.metricInfo!.effectiveMax]).toEqual([0, 7]);
+      expect(colorOf(m, 7)).not.toBe(colorOf(m, 0));
+      // Values below 0 keep their own minimum.
+      const negative = model([
+        colored({ src_host: ['node-a1', 'node-a2'], dst_host: ['node-a2', 'node-b1'], loss: [-3, 7] }),
+      ]);
+      expect(negative.metricInfo!.effectiveMin).toBe(-3);
+    });
+
+    it('includes the threshold, the boundary between drawn and not drawn', () => {
+      const frame = colored({ src_host: ['node-a1'], dst_host: ['node-a2'], rate: [1] });
+      const low = model([frame], { flowWorst: 'low', flowThreshold: 50 });
+      expect([low.metricInfo!.effectiveMin, low.metricInfo!.effectiveMax]).toEqual([1, 50]);
+      // Lower is worse has no natural healthy end: without a threshold the range is the data's own.
+      const open = model(
+        [colored({ src_host: ['node-a1', 'node-a2'], dst_host: ['node-a2', 'node-b1'], rate: [20, 90] })],
+        {
+          flowWorst: 'low',
+        }
+      );
+      expect([open.metricInfo!.effectiveMin, open.metricInfo!.effectiveMax]).toEqual([20, 90]);
+    });
+
+    it('leaves an endpoint that the field config sets alone', () => {
+      const frame = colored({ src_host: ['node-a1'], dst_host: ['node-a2'], loss: [7] }, { min: 2, max: 100 });
+      const m = model([frame], { flowThreshold: 1 });
+      expect([m.metricInfo!.effectiveMin, m.metricInfo!.effectiveMax]).toEqual([2, 100]);
+    });
   });
 
   it('warns and draws nothing when the edge query returned no rows', () => {
