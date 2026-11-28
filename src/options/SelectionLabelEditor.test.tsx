@@ -39,12 +39,12 @@ describe('SelectionLabelEditor', () => {
 
   it('marks a label that is not a hierarchy level, which the panel replaces by the automatic choice', () => {
     render(<SelectionLabelEditor {...props('partition', jest.fn())} />);
-    expect(screen.getByText('Not a hierarchy label: chosen automatically')).toBeInTheDocument();
+    expect(screen.getByText('Not a hierarchy label: the copy buttons choose one, and nothing is synced')).toBeInTheDocument();
   });
 
   it('accepts a hierarchy label and an unset value without a remark', () => {
     const first = render(<SelectionLabelEditor {...props('host', jest.fn())} />);
-    expect(screen.queryByText('Not a hierarchy label: chosen automatically')).not.toBeInTheDocument();
+    expect(screen.queryByText('Not a hierarchy label: the copy buttons choose one, and nothing is synced')).not.toBeInTheDocument();
     first.unmount();
     // The editor context carries no panel options.
     render(<SelectionLabelEditor {...props(undefined, jest.fn(), { data: [] })} />);

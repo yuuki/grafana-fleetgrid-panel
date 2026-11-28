@@ -120,13 +120,14 @@ export const plugin = new PanelPlugin<FleetGridOptions>(FleetGridPanel).useField
       defaultValue: [],
     })
     // Cell selection itself (Shift+click, Shift+drag) has no switch: it changes nothing until Shift is
-    // held. These two options only say what a selection is exported as; both defaults write nothing.
+    // held. These two options only say what a selection is exported as; both defaults write nothing,
+    // and the sync needs both.
     .addCustomEditor({
       id: 'selectionLabel',
       path: 'selectionLabel',
       name: 'Selection label',
       description:
-        'Hierarchy label whose values are copied and synced for the selected cells. Empty picks the deepest level whose values are unique, such as host above gpu',
+        'Hierarchy label whose values are copied and synced for the selected cells. Empty: the copy buttons choose a label when a selection begins, and nothing is synced to a variable',
       category: ['Selection'],
       editor: SelectionLabelEditor,
       defaultValue: '',
@@ -135,7 +136,7 @@ export const plugin = new PanelPlugin<FleetGridOptions>(FleetGridPanel).useField
       path: 'selectionVariable',
       name: 'Sync selection to variable',
       description:
-        'Name of a dashboard variable that receives the selected label values, so other panels can filter by it. Empty disables the sync',
+        'Name of a multi-value or text box variable that is kept equal to the selected values of the selection label, so other panels can filter by it. Empty disables the sync',
       category: ['Selection'],
       defaultValue: '',
     })
