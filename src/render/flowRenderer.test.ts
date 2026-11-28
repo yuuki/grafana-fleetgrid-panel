@@ -236,6 +236,32 @@ describe('renderFlowLayer', () => {
     expect(types.indexOf('fill')).toBeGreaterThan(types.lastIndexOf('quadraticCurveTo'));
   });
 
+  it('draws an arc from its source to its destination, and points the arrowhead at the destination', () => {
+    // The first path with a line after its start is the arrowhead: its tip, then the two corners of its base.
+    const arrow = (events: CanvasEvent[]) => {
+      const tip = events.findIndex((e, i) => e.type === 'moveTo' && events[i + 1]?.type === 'lineTo');
+      return { tip: events[tip].props, base: events[tip + 1].props };
+    };
+    const curveOf = (events: CanvasEvent[]) => {
+      const curve = events.findIndex((e) => e.type === 'quadraticCurveTo');
+      return { start: events[curve - 1], curve: events[curve].props };
+    };
+    // a (centre 110, 310) is to the left of b (centre 510, 310).
+    const forward = draw({ edges: [edge('a', 'b', 2)] });
+    expect(curveOf(forward).start).toMatchObject({ type: 'moveTo', props: { x: 110, y: 310 } });
+    expect(curveOf(forward).curve).toMatchObject({ x: 510, y: 310 });
+    // Left of the direction of travel is up for a→b.
+    expect(curveOf(forward).curve.cpy as number).toBeLessThan(310);
+    expect(arrow(forward).tip.x as number).toBeGreaterThan(arrow(forward).base.x as number);
+
+    // The opposite edge is the opposite picture: it starts at b, bulges down and points to the left.
+    const backward = draw({ edges: [edge('b', 'a', 2)] });
+    expect(curveOf(backward).start).toMatchObject({ type: 'moveTo', props: { x: 510, y: 310 } });
+    expect(curveOf(backward).curve).toMatchObject({ x: 110, y: 310 });
+    expect(curveOf(backward).curve.cpy as number).toBeGreaterThan(310);
+    expect(arrow(backward).tip.x as number).toBeLessThan(arrow(backward).base.x as number);
+  });
+
   it('draws an edge without a value dashed in a neutral color, not on the color scale', () => {
     const neverCalled = jest.fn(() => '#123456');
     const events = draw({ edges: [edge('a', 'b', null)], colorOf: neverCalled });
