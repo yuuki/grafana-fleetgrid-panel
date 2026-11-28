@@ -3,7 +3,7 @@ import { StandardEditorProps } from '@grafana/data';
 import { Button, FieldValidationMessage, IconButton, InlineField, InlineFieldRow, Input } from '@grafana/ui';
 import { frameHasRefId, flowRefId } from '../data/edges';
 import { FleetGridOptions, FlowEndpointMapping } from '../types';
-import { collectRangeOverrideSuggestions } from './suggestions';
+import { collectLabelNames } from './suggestions';
 
 const EMPTY_MAPPING: FlowEndpointMapping = { level: '', source: '', destination: '' };
 // In Grafana's 8 px grid units. A label and an input fit the options pane on one row.
@@ -42,13 +42,10 @@ export const FlowEndpointsEditor: React.FC<Props> = ({ value, onChange, context 
   const mappings = Array.isArray(value) ? value.map(normalizeMapping) : [];
   const hierarchyLabels = [...new Set((context.options?.levels ?? []).map((level) => level.label))].filter(Boolean);
   const refId = flowRefId(context.options ?? {});
-  // Only the edge query's own labels are useful suggestions for the source and destination labels.
+  // Only the edge query's own labels are useful suggestions for the source and destination labels. Their
+  // names are read from the fields: an edge query can return very many rows, and no value is needed.
   const edgeLabels = React.useMemo(
-    () =>
-      Object.keys(
-        collectRangeOverrideSuggestions((context.data ?? []).filter((frame) => frameHasRefId(frame, refId)))
-          .valuesByLabel
-      ),
+    () => collectLabelNames((context.data ?? []).filter((frame) => frameHasRefId(frame, refId))),
     [context.data, refId]
   );
   const instanceId = React.useId().replace(/[^a-zA-Z0-9_-]/g, '-');

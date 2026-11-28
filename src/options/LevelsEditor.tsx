@@ -16,6 +16,7 @@ import { DEFAULT_LEVEL, ExtractPreset, LevelDef, LevelLayout, SortOrder } from '
 import { extractKey, naturalCompare } from '../data/hierarchy';
 import { isTableFrame } from '../data/normalize';
 import { normalizeGridColumns } from '../layout/layout';
+import { cellFrames } from './suggestions';
 
 export function detectLabelKeys(frames: DataFrame[]): string[] {
   const keys = new Set<string>();
@@ -84,7 +85,8 @@ const LAYOUT_OPTIONS: Array<ComboboxOption<LevelLayout>> = [
 
 export const LevelsEditor: React.FC<StandardEditorProps<LevelDef[]>> = ({ value, onChange, context }) => {
   const levels = value ?? [];
-  const frames = context.data ?? [];
+  // The edge query of the flow overlay has no labels of a cell: it is not offered here.
+  const frames = cellFrames(context.data, context.options);
   const labelOptions = detectLabelKeys(frames).map((k) => ({ value: k, label: k }));
 
   const update = (i: number, patch: Partial<LevelDef>) => {
