@@ -1091,3 +1091,84 @@ test('a panel without an edge query has no overlay canvas', async ({ gotoDashboa
   await expect(panel.locator.locator('canvas')).toHaveCount(1);
   await expect(panel.locator.getByTestId('flow-legend')).toHaveCount(0);
 });
+
+// Cell selection on the Flow Overlay panel: both features read the pointer. A Shift press selects and
+// hovers nothing while it lasts; a selection leaves the arcs as they are; the selection bar takes its
+// height from the grid's box, and the cell canvas and the two arc layers stay one size.
+test('Shift selects cells on a panel with a flow overlay and leaves the arcs as they are', async ({
+  gotoDashboardPage,
+  readProvisionedDashboard,
+}) => {
+  test.setTimeout(120_000);
+  const dashboard = await readProvisionedDashboard({ fileName: FILE });
+  const { panel, cells, rest, focus } = await openFlowPanel(gotoDashboardPage, dashboard.uid);
+  await expect.poll(() => hasArcs(rest)).toBe(true);
+  const page = cells.page();
+  const box = await cells.boundingBox();
+  if (!box) {
+    throw new Error('canvas has no bounding box');
+  }
+  const heights = () =>
+    Promise.all([cells, rest, focus].map((canvas) => canvas.evaluate((el) => el.getBoundingClientRect().height)));
+  const [cellsBefore, restBefore, focusBefore] = await heights();
+  expect([restBefore, focusBefore]).toEqual([cellsBefore, cellsBefore]);
+
+  // node-b1 is on the ring and node-b2 is its neighbour in the row; the points are in their first GPU cells.
+  const onRing = await findHostPoint(cells, panel, 'node-b1');
+  const neighbour = await findHostPoint(cells, panel, 'node-b2');
+  await hoverCanvas(cells, onRing);
+  await expect.poll(() => hasArcs(focus)).toBe(true);
+  await expect(rest).toHaveCSS('opacity', '0.22');
+
+  // The Shift press takes the pointer from the overlay: the tooltip and the focus end with the hover,
+  // and the arcs at rest are back at full opacity, for as long as the button is down.
+  await page.keyboard.down('Shift');
+  await page.mouse.move(box.x + onRing.x, box.y + onRing.y);
+  await page.mouse.down();
+  await expect(panel.getByRole('tooltip')).toHaveCount(0);
+  await expect.poll(() => hasArcs(focus)).toBe(false);
+  await expect(rest).toHaveCSS('opacity', '1');
+  await page.mouse.up();
+  await page.keyboard.up('Shift');
+  await expect(panel.getByTestId('selection-count')).toHaveText('1 cell selected');
+  await expect(panel.getByRole('button', { name: 'Close', exact: true })).toHaveCount(0);
+
+  // The bar took height from the grid's box. The three canvases lost it together, and the arcs are there.
+  const [cellsSelected, restSelected, focusSelected] = await heights();
+  expect(cellsSelected).toBeLessThan(cellsBefore);
+  expect([restSelected, focusSelected]).toEqual([cellsSelected, cellsSelected]);
+  await expect.poll(() => hasArcs(rest)).toBe(true);
+  await expect(panel.getByTestId('flow-legend-count')).toHaveText('10 edges');
+
+  // The selected cell is hovered like any other: its host's edges are in focus again.
+  await hoverCanvas(cells, onRing);
+  await expect(panel.getByRole('tooltip')).toContainText('Flows of host node-b1: 1 out, 1 in, 2 peers');
+  await expect.poll(() => hasArcs(focus)).toBe(true);
+  await hoverCanvas(cells, { x: 1, y: 1 });
+  await expect.poll(() => hasArcs(focus)).toBe(false);
+
+  // A Shift+drag over the arcs adds the cells under its rectangle. No arc is painted for it: the
+  // selection is drawn on the cell canvas.
+  const restPicture = await stableHash(rest);
+  await shiftDrag(cells, onRing, neighbour);
+  await expect(panel.getByTestId('selection-count')).toHaveText('3 cells selected');
+  await expect(panel.getByTestId('selection-label')).toHaveText('2 host values:');
+  await expect(panel.getByTestId('selection-band')).toBeHidden();
+  expect(await frameHash(rest)).toBe(restPicture);
+  await expect(rest).toHaveCSS('opacity', '1');
+
+  // The cohort comparison has a row for the cell query and none for the edge query.
+  await panel.getByTestId('selection-compare').click();
+  const comparison = page.getByTestId('cohort-comparison');
+  await expect(comparison).toBeVisible();
+  await expect(comparison.getByTestId('cohort-selected-A')).toHaveCount(1);
+  await expect(comparison.getByTestId('cohort-selected-E')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(comparison).toHaveCount(0);
+
+  // Clearing the selection gives the height back to all three canvases and leaves the arcs.
+  await panel.getByTestId('selection-clear').dispatchEvent('click');
+  await expect(panel.getByTestId('selection-bar')).toHaveCount(0);
+  await expect.poll(heights).toEqual([cellsBefore, cellsBefore, cellsBefore]);
+  await expect.poll(() => hasArcs(rest)).toBe(true);
+});
