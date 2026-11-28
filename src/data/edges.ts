@@ -571,6 +571,57 @@ class SmallestKeys {
   }
 }
 
+// One entry per row of the edge query, in the order of the result.
+interface RowKeys {
+  frameOf: Int32Array;
+  rowOf: Int32Array;
+  /** Rank key of each row: ascending is worst first; NaN marks a row without a value. */
+  keys: Float64Array;
+  count: number;
+  unknown: number;
+}
+
+function readRowKeys(frames: DataFrame[], reduceCalc: string, worst: FlowWorstDirection, total: number): RowKeys {
+  const read: RowKeys = {
+    frameOf: new Int32Array(total),
+    rowOf: new Int32Array(total),
+    keys: new Float64Array(total),
+    count: 0,
+    unknown: 0,
+  };
+  const sign = worst === 'high' ? -1 : 1;
+  frames.forEach((frame, frameIndex) =>
+    forEachRowValue(frame, reduceCalc, (row, value) => {
+      read.frameOf[read.count] = frameIndex;
+      read.rowOf[read.count] = row;
+      read.keys[read.count] = value === null ? NaN : sign * value;
+      read.unknown += value === null ? 1 : 0;
+      read.count++;
+    })
+  );
+  return read;
+}
+
+// The key of the least bad of the `size` worst rows, and how many rows are strictly worse than it.
+function worstCutoff(keys: Float64Array, count: number, size: number): { cutoff: number; below: number } {
+  if (size <= 0) {
+    return { cutoff: -Infinity, below: 0 };
+  }
+  const smallest = new SmallestKeys(size);
+  for (let i = 0; i < count; i++) {
+    // A NaN key (no value) fails the comparison and is never offered.
+    if (keys[i] < smallest.top()) {
+      smallest.offer(keys[i]);
+    }
+  }
+  const cutoff = smallest.top();
+  let below = 0;
+  for (let i = 0; i < count; i++) {
+    below += keys[i] < cutoff ? 1 : 0;
+  }
+  return { cutoff, below };
+}
+
 /**
  * The frames reduced to the `bound` rows that are resolved when the edge query returns more (`total`
  * rows): the worst rows by value, not the first ones, so that the worst edge is found wherever it is in
@@ -586,51 +637,23 @@ export function selectWorstRows(
   total: number,
   bound: number
 ): DataFrame[] {
-  const frameOf = new Int32Array(total);
-  const rowOf = new Int32Array(total);
-  // Rank key of each row: ascending is worst first; NaN marks a row without a value.
-  const keys = new Float64Array(total);
-  let count = 0;
-  let unknown = 0;
-  frames.forEach((frame, frameIndex) =>
-    forEachRowValue(frame, reduceCalc, (row, value) => {
-      frameOf[count] = frameIndex;
-      rowOf[count] = row;
-      keys[count] = value === null ? NaN : worst === 'high' ? -value : value;
-      unknown += value === null ? 1 : 0;
-      count++;
-    })
-  );
+  const { frameOf, rowOf, keys, count, unknown } = readRowKeys(frames, reduceCalc, worst, total);
   const share = shareFlowBound(count - unknown, unknown, bound);
-  // The key of the least bad row that is kept, and how many rows are strictly worse than it.
-  let cutoff = -Infinity;
-  let below = 0;
-  if (share.valued > 0) {
-    const smallest = new SmallestKeys(share.valued);
-    for (let i = 0; i < count; i++) {
-      // A NaN key (no value) fails the comparison and is never offered.
-      if (keys[i] < smallest.top()) {
-        smallest.offer(keys[i]);
-      }
-    }
-    cutoff = smallest.top();
-    for (let i = 0; i < count; i++) {
-      below += keys[i] < cutoff ? 1 : 0;
-    }
-  }
+  const { cutoff, below } = worstCutoff(keys, count, share.valued);
   let ties = share.valued - below;
   let unknownLeft = share.unknown;
   const picked = new Map<number, number[]>();
   for (let i = 0; i < count; i++) {
     const key = keys[i];
     const take = Number.isNaN(key) ? unknownLeft-- > 0 : key < cutoff || (key === cutoff && ties-- > 0);
-    if (take) {
-      const rows = picked.get(frameOf[i]);
-      if (rows) {
-        rows.push(rowOf[i]);
-      } else {
-        picked.set(frameOf[i], [rowOf[i]]);
-      }
+    if (!take) {
+      continue;
+    }
+    const rows = picked.get(frameOf[i]);
+    if (rows) {
+      rows.push(rowOf[i]);
+    } else {
+      picked.set(frameOf[i], [rowOf[i]]);
     }
   }
   return [...picked].map(([frameIndex, rows]) => pickRows(frames[frameIndex], rows));
