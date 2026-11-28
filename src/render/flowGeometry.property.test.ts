@@ -136,7 +136,11 @@ describe('flowArc (properties)', () => {
           const point = flowArcPoint(arc, i / 64);
           expect(inside(a, point) || inside(b, point)).toBe(false);
         }
-        expect(Math.hypot(arc.x1 - arc.x0, arc.y1 - arc.y0)).toBeGreaterThanOrEqual(12 - 1e-6);
+        // It is long enough to be seen: at least 12 px from one end over its middle to the other end.
+        const middle = flowArcPoint(arc, 0.5);
+        const visible =
+          Math.hypot(middle.x - arc.x0, middle.y - arc.y0) + Math.hypot(arc.x1 - middle.x, arc.y1 - middle.y);
+        expect(visible).toBeGreaterThanOrEqual(12 - 1e-6);
         expect(Math.hypot(arc.nx, arc.ny)).toBeCloseTo(1);
       }),
       propertyParams()

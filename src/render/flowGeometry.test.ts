@@ -233,6 +233,44 @@ describe('flowArc between the frames of two groups', () => {
     expect(flowArcPoint(column, 0.5).x).toBeCloseTo(626, 3);
   });
 
+  it('arches over two neighbouring frames in the margin when the canvas has no room elsewhere', () => {
+    // Two zones side by side that fill the canvas but for the 18 px of their labels above them.
+    const a = rect(0, 18, 220, 220);
+    const b = rect(224, 18, 220, 220);
+    const arc = flowArc(a, b, 444, 240, 'frame')!;
+    // From the top of one frame to the top of the other, 6 px above them: inside the label row.
+    expect([arc.y0, arc.y1]).toEqual([expect.closeTo(18, 3), expect.closeTo(18, 3)]);
+    expect(flowArcPoint(arc, 0.5).y).toBeCloseTo(12, 3);
+    // The other direction has only 2 px under the frames: it stays the arc between the centres.
+    const back = flowArc(b, a, 444, 240, 'frame')!;
+    expect([back.x0, back.y0]).toEqual([334, 128]);
+    for (let i = 0; i <= 20; i++) {
+      expect(flowArcPoint(back, i / 20).y).toBeLessThanOrEqual(240);
+    }
+  });
+
+  it('starts where the arc leaves both frames for the last time, also when it passes a corner of the other frame first', () => {
+    // A tall narrow group and a short one that touch, in a narrow canvas: the arc leaves the first
+    // through the side they share, crosses a corner of the second, leaves it and comes back to its centre.
+    const a = { x: 0, y: 0, w: 6, h: 33.7 };
+    const b = { x: 6, y: 0, w: 13.8, h: 22.9 };
+    const arc = flowArc(a, b, 46, 682, 'frame')!;
+    for (const p of samples(arc)) {
+      expect(inside(a, p.x, p.y) || inside(b, p.x, p.y)).toBe(false);
+    }
+    expect(onBorder(b, arc.x0, arc.y0)).toBe(true);
+    expect(onBorder(b, arc.x1, arc.y1)).toBe(true);
+  });
+
+  it('finds the border exactly when the arc runs almost straight along one axis', () => {
+    // The centres differ by a rounding error in x: the y coordinate of the arc is then almost linear.
+    const a = { x: 1.375566327510569e-12, y: 0, w: 6.000000000000009, h: 6 };
+    const b = { x: 0, y: 22, w: 6, h: 6 };
+    const arc = flowArc(a, b, 2000, 260, 'frame')!;
+    expect(arc.y0).toBeCloseTo(6, 9);
+    expect(arc.y1).toBeCloseTo(22, 9);
+  });
+
   it('keeps the arc between the centres when the part between the frames would be too short to see', () => {
     // Two neighbouring groups in a panel as high as they are: the arc cannot arch over them.
     const a = rect(0, 0, 26, 26);
