@@ -316,18 +316,46 @@ describe('FleetGridPanel variable sync', () => {
       expect(valueOf()).toEqual(['node-b009']);
     });
 
-    it('says so and puts the old value back when Grafana does not keep the write', () => {
+    it('says how much is left when Grafana drops a part of the selection, and Clear puts the old value back', () => {
+      // A query variable whose options are the hosts of zone-a: at a refresh it drops node-b001.
+      mockGrafana.variables = [{ name: 'hosts', type: 'query', multi: true, current: { value: '$__all' } }];
+      const view = render(<FleetGridPanel {...makeProps(frames(), synced())} />);
+      ui.shiftClick(CELL.a1);
+      ui.shiftClick(CELL.b1);
+      settle();
+      expect(ui.sync()).toBe('→ $hosts');
+
+      setByHand(['node-a001']); // Grafana, at the refresh
+      const next = makeProps(frames(), synced());
+      next.data.request.requestId = 'Q2';
+      view.rerender(<FleetGridPanel {...next} />);
+      wait(VERIFY_INTERVAL_MS);
+      expect(ui.sync()).toBe('$hosts holds only 1 of the 2 selected values');
+      settle();
+      expect(mockGrafana.writes).toHaveLength(1);
+
+      // No selected host stays behind in the variable.
+      ui.clear();
+      settle();
+      expect(valueOf()).toBe('$__all');
+      expect(mockGrafana.writes).toEqual([{ 'var-hosts': ['node-a001', 'node-b001'] }, { 'var-hosts': '$__all' }]);
+    });
+
+    it('says so and writes nothing more when Grafana makes something else of the write', () => {
       mockGrafana.variables = [{ name: 'hosts', type: 'query', multi: true, current: { value: ['node-a001'] } }];
-      // Grafana turns a value it does not allow into its first option.
-      mockGrafana.apply = (variable, value) => {
-        variable.current = { value: JSON.stringify(value) === '["node-a001"]' ? value : ['node-a000'] };
+      // Grafana turns the written value into its first option.
+      mockGrafana.apply = (variable) => {
+        variable.current = { value: ['node-a000'] };
       };
       render(<FleetGridPanel {...makeProps(frames(), synced())} />);
       ui.shiftClick(CELL.b1);
       wait(SYNC_DELAY_MS + CONFIRM_MS + VERIFY_INTERVAL_MS);
       expect(ui.sync()).toBe('Grafana did not keep the selection in $hosts');
-      expect(valueOf()).toEqual(['node-a001']);
-      expect(mockGrafana.writes).toEqual([{ 'var-hosts': ['node-b001'] }, { 'var-hosts': ['node-a001'] }]);
+      // The value is not the panel's, so the panel writes nothing over it, also not at Clear.
+      ui.clear();
+      settle();
+      expect(valueOf()).toEqual(['node-a000']);
+      expect(mockGrafana.writes).toEqual([{ 'var-hosts': ['node-b001'] }]);
     });
   });
 

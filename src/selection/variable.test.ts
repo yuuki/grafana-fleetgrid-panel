@@ -360,25 +360,176 @@ describe('VariableSync', () => {
       expect(sync.status('hosts', p).state).toBe('synced');
     });
 
-    it('says "rejected" and puts the old value back when Grafana does not keep the write', () => {
+    it('says "rejected" and writes nothing more when Grafana makes something else of the write', () => {
       const { sync, state, writes, valueOf } = fakeGrafana();
-      // Grafana takes the write and turns it into something else, as it does for a value that is
-      // not allowed.
-      state.apply = (variable, value) => {
-        variable.current = { value: sameVariableValue(value, ['node-a001']) ? value : ['node-zzz'] };
+      // Grafana takes the write and turns it into a value that was not written.
+      state.apply = (variable) => {
+        variable.current = { value: ['node-zzz'] };
       };
       const p = panel();
       sync.claim('query_hosts', p, ['node-b001']);
       state.now += CONFIRM_MS;
       sync.verify();
       expect(sync.status('query_hosts', p)).toEqual({ state: 'rejected', name: 'query_hosts' });
-      // Neither the selection nor what the user had: the value from before the write goes back.
-      expect(valueOf('query_hosts')).toEqual(['node-a001']);
-      expect(writes).toEqual([{ 'var-query_hosts': ['node-b001'] }, { 'var-query_hosts': ['node-a001'] }]);
-      // And it stays that way.
+      // The value is not the sync's, so nothing is written over it.
+      expect(valueOf('query_hosts')).toEqual(['node-zzz']);
+      expect(writes).toEqual([{ 'var-query_hosts': ['node-b001'] }]);
+      // And it stays that way: at the next read-back, at a data update, and at Clear.
       sync.verify();
       sync.claim('query_hosts', p, ['node-b001']);
-      expect(writes).toHaveLength(2);
+      sync.claim('query_hosts', p, []);
+      expect(valueOf('query_hosts')).toEqual(['node-zzz']);
+      expect(writes).toHaveLength(1);
+    });
+
+    it('does not overwrite a value that the user picked while the write was not yet read back', () => {
+      const { sync, state, writes, valueOf, set } = fakeGrafana();
+      state.apply = () => {}; // Grafana never shows the written value
+      const p = panel();
+      sync.claim('hosts', p, ['node-a001']);
+      state.now += 1000;
+      sync.verify();
+      set('hosts', ['node-b777']); // the user, with the variable picker
+      state.now += CONFIRM_MS;
+      sync.verify();
+      expect(sync.status('hosts', p)).toEqual({ state: 'rejected', name: 'hosts' });
+      expect(valueOf('hosts')).toEqual(['node-b777']);
+      sync.claim('hosts', p, []);
+      expect(valueOf('hosts')).toEqual(['node-b777']);
+      expect(writes).toEqual([{ 'var-hosts': ['node-a001'] }]);
+    });
+
+    describe('a variable that lost a part of the selection', () => {
+      // A query variable whose options are the hosts of zone-a only: at a dashboard refresh Grafana
+      // drops the selected hosts that are not among them.
+      const synced = () => {
+        const grafana = fakeGrafana();
+        const p = panel();
+        grafana.sync.claim('hosts', p, ['node-a001', 'node-b001']);
+        grafana.sync.verify();
+        expect(grafana.sync.status('hosts', p).state).toBe('synced');
+        return { ...grafana, p };
+      };
+
+      it('says how much the variable still holds, and does not write the selection again', () => {
+        const { sync, writes, set, p } = synced();
+        set('hosts', ['node-a001']); // Grafana, at the refresh
+        sync.verify();
+        expect(sync.status('hosts', p)).toEqual({ state: 'partial', name: 'hosts', kept: 1, of: 2 });
+        // The data update that follows states the same values again.
+        sync.claim('hosts', p, ['node-a001', 'node-b001']);
+        sync.verify();
+        expect(writes).toHaveLength(1);
+        expect(sync.status('hosts', p).state).toBe('partial');
+      });
+
+      it('puts the original value back at Clear, so that no selected value stays behind', () => {
+        const { sync, writes, valueOf, set, p } = synced();
+        set('hosts', ['node-a001']);
+        sync.verify();
+        sync.claim('hosts', p, []);
+        expect(valueOf('hosts')).toBe('$__all');
+        expect(writes).toEqual([{ 'var-hosts': ['node-a001', 'node-b001'] }, { 'var-hosts': '$__all' }]);
+      });
+
+      it('puts the original value back when the part was not noticed before Clear', () => {
+        const { sync, valueOf, set, p } = synced();
+        set('hosts', ['node-a001']);
+        sync.claim('hosts', p, []);
+        expect(valueOf('hosts')).toBe('$__all');
+      });
+
+      it('keeps the original value as the one to put back when the selection changes', () => {
+        const { sync, valueOf, set, p } = synced();
+        set('hosts', ['node-a001']);
+        sync.verify();
+        sync.claim('hosts', p, ['node-a002']);
+        sync.verify();
+        expect(sync.status('hosts', p).state).toBe('synced');
+        sync.claim('hosts', p, []);
+        // Not `node-a001`, which is what was left of the first selection.
+        expect(valueOf('hosts')).toBe('$__all');
+      });
+
+      it('says "synced" again when the variable holds all values again', () => {
+        const { sync, set, p } = synced();
+        set('hosts', ['node-b001']);
+        sync.verify();
+        expect(sync.status('hosts', p).state).toBe('partial');
+        set('hosts', ['node-b001', 'node-a001']);
+        sync.verify();
+        expect(sync.status('hosts', p)).toEqual({ state: 'synced', name: 'hosts', others: 0 });
+      });
+
+      it('treats a variable that holds none of the values as a part too', () => {
+        const { sync, valueOf, set, p } = synced();
+        set('hosts', []);
+        sync.verify();
+        expect(sync.status('hosts', p)).toEqual({ state: 'partial', name: 'hosts', kept: 0, of: 2 });
+        sync.claim('hosts', p, []);
+        expect(valueOf('hosts')).toBe('$__all');
+      });
+
+      it('gives the variable up as soon as it holds one value that was not written', () => {
+        const { sync, writes, valueOf, set, p } = synced();
+        set('hosts', ['node-a001']);
+        sync.verify();
+        set('hosts', ['node-a001', 'node-b009']); // the user adds a host
+        sync.verify();
+        expect(sync.status('hosts', p)).toEqual({ state: 'changed', name: 'hosts' });
+        sync.claim('hosts', p, []);
+        expect(valueOf('hosts')).toEqual(['node-a001', 'node-b009']);
+        expect(writes).toHaveLength(1);
+      });
+
+      it('recognizes a part when Grafana drops values at the write itself', () => {
+        const { sync, state, valueOf } = fakeGrafana();
+        // Grafana keeps "All" and, of a list, the hosts of zone-a.
+        state.apply = (variable, value) => {
+          variable.current = {
+            value: Array.isArray(value) ? value.filter((item) => item.startsWith('node-a')) : value,
+          };
+        };
+        const p = panel();
+        sync.claim('hosts', p, ['node-a001', 'node-b001']);
+        sync.verify();
+        // Grafana may not have applied the write yet: no verdict.
+        expect(sync.status('hosts', p).state).toBe('writing');
+        state.now += CONFIRM_MS;
+        sync.verify();
+        expect(sync.status('hosts', p)).toEqual({ state: 'partial', name: 'hosts', kept: 1, of: 2 });
+        sync.claim('hosts', p, []);
+        expect(valueOf('hosts')).toBe('$__all');
+      });
+
+      it('holds the part of two panels together and restores after the last one', () => {
+        const { sync, valueOf, set, p } = synced();
+        const q = panel();
+        sync.claim('hosts', q, ['node-c001']);
+        sync.verify();
+        set('hosts', ['node-a001', 'node-c001']); // Grafana drops node-b001
+        sync.verify();
+        expect(sync.status('hosts', q)).toEqual({ state: 'partial', name: 'hosts', kept: 2, of: 3 });
+        sync.claim('hosts', p, []);
+        sync.verify();
+        expect(valueOf('hosts')).toEqual(['node-c001']);
+        expect(sync.status('hosts', q)).toEqual({ state: 'synced', name: 'hosts', others: 0 });
+        sync.claim('hosts', q, []);
+        expect(valueOf('hosts')).toBe('$__all');
+      });
+
+      it('never takes a text box for holding a part: its expression is the written one or not', () => {
+        const { sync, writes, valueOf, set } = fakeGrafana();
+        const p = panel();
+        sync.claim('host_regex', p, ['node-a001', 'node-a002']);
+        sync.verify();
+        set('host_regex', '^(node-a001)$');
+        sync.verify();
+        expect(sync.status('host_regex', p)).toEqual({ state: 'changed', name: 'host_regex' });
+        sync.claim('host_regex', p, []);
+        expect(valueOf('host_regex')).toBe('^(node-a001)$');
+        expect(writes).toHaveLength(1);
+      });
     });
 
     it('leaves a variable alone that the user changed by hand, and takes that value as the one to restore', () => {
@@ -542,6 +693,13 @@ describe('syncMessage', () => {
     }
     expect(syncMessage({ state: 'changed', name: 'hosts' })?.text).toBe(
       '$hosts was changed and no longer holds the selection'
+    );
+    expect(syncMessage({ state: 'partial', name: 'hosts', kept: 1, of: 2 })).toEqual({
+      text: '$hosts holds only 1 of the 2 selected values',
+      problem: true,
+    });
+    expect(syncMessage({ state: 'partial', name: 'hosts', kept: 0, of: 2 })?.text).toBe(
+      '$hosts holds none of the selected values'
     );
     expect(syncMessage({ state: 'single', name: 'hosts' })?.text).toContain('takes one value');
     expect(syncMessage({ state: 'noLabel', name: 'hosts' })?.text).toBe('Set "Selection label" to sync to $hosts');

@@ -32,9 +32,11 @@ export type SyncStatus =
   | { state: 'writing'; name: string }
   /** Read back: the variable holds the selection. `others` panels have a selection in it too. */
   | { state: 'synced'; name: string; others: number }
-  /** The variable held the selection and now holds something else. */
+  /** A multi-value variable holds `kept` of the `of` written values and nothing else. */
+  | { state: 'partial'; name: string; kept: number; of: number }
+  /** The variable held the selection and now holds something that was not written. */
   | { state: 'changed'; name: string }
-  /** Grafana did not keep the value that was written. */
+  /** Grafana never showed the value that was written, and the variable holds something else. */
   | { state: 'rejected'; name: string }
   | { state: 'missing'; name: string }
   | { state: 'unsupported'; name: string; type: string }
@@ -153,6 +155,33 @@ export function sameVariableValue(a: VariableValue | undefined, b: VariableValue
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+const asList = (value: VariableValue): string[] => (Array.isArray(value) ? value : [value]);
+
+/**
+ * How many distinct values a multi-value variable holds, when each of them is one of the `written`
+ * values; undefined when it holds any other value. A text box holds one expression, which is the
+ * written one (1) or not (undefined).
+ *
+ * A variable can lose a part of what was written: Grafana drops the values that are not among the
+ * options of a query variable when it reads the options again, and a user can untick a value. What
+ * is left still came from the selection.
+ */
+export function writtenValuesHeld(
+  value: VariableValue | undefined,
+  written: VariableValue,
+  multi: boolean
+): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!multi) {
+    return sameVariableValue(value, written) ? 1 : undefined;
+  }
+  const all = new Set(asList(written));
+  const held = new Set(asList(value));
+  return [...held].every((item) => all.has(item)) ? held.size : undefined;
+}
+
 // Whether a value can be written back later. Grafana drops an empty list from the URL and keeps what
 // the variable holds, so a multi-value variable without a value cannot be restored. A text box can
 // be empty.
@@ -199,8 +228,12 @@ interface Entry {
  * - A status is "synced" only after the variable has been read back and holds what was written.
  *   `verify()` reads it back again and again, because Grafana can change a variable at any time: a
  *   refresh re-validates a query variable against its options, and a user can pick another value.
- * - A variable that holds something else than what was written is no longer the sync's. It is not
- *   written again until a selection changes, and it is not "restored" when the selections end.
+ * - A multi-value variable that holds a part of what was written, and nothing else, is still the
+ *   sync's: the values in it came from the selection. It is not written again until a selection
+ *   changes, and it gets its original value back when the selections end.
+ * - A variable that holds a value that was not written is no longer the sync's. It is not written
+ *   again until a selection changes, and it is not "restored" when the selections end. So the sync
+ *   never replaces a value that somebody else put into the variable, except with a new selection.
  * - A write happens only when the union of the claims differs from the last write. The claims hold
  *   the values remembered when the cells were selected, so no data update changes them, including
  *   the update that the panel's own write causes when its query uses the variable.
@@ -339,14 +372,18 @@ export class VariableSync {
     return length > MAX_URL_CHARS ? { state: 'tooLarge', name, length } : undefined;
   }
 
-  // Whether the variable is still the sync's: it holds what was written, or the write is so recent
-  // that Grafana may not have applied it yet.
+  // Whether Grafana may not have applied the write yet.
+  private pending(hold: Hold): boolean {
+    return !hold.confirmed && this.runtime.now() - hold.writtenAt < CONFIRM_MS;
+  }
+
+  // Whether the variable is still the sync's: it holds what was written or a part of it, or the write
+  // is so recent that Grafana may not have applied it yet.
   private holds(hold: Hold, target: VariableTarget): boolean {
     if (hold.path !== this.runtime.path() || target.status !== 'ok') {
       return false;
     }
-    const pending = !hold.confirmed && this.runtime.now() - hold.writtenAt < CONFIRM_MS;
-    return pending || sameVariableValue(target.value, hold.written);
+    return this.pending(hold) || writtenValuesHeld(target.value, hold.written, target.multi) !== undefined;
   }
 
   // Ends the hold on the variable and puts its original value back if the variable is still the sync's.
@@ -378,21 +415,21 @@ export class VariableSync {
       entry.status = { state: 'synced', name, others: 0 };
       return;
     }
-    if (!hold.confirmed && this.runtime.now() - hold.writtenAt < CONFIRM_MS) {
+    if (this.pending(hold)) {
       return;
     }
+    const kept = writtenValuesHeld(target.value, hold.written, target.multi);
+    if (kept !== undefined) {
+      // A part of the selection is gone and nothing was added. The variable stays the sync's, so
+      // that the values left in it do not stay behind when the selections end.
+      entry.status = { state: 'partial', name, kept, of: new Set(asList(hold.written)).size };
+      return;
+    }
+    // The variable holds a value that the sync did not write: a user picked it, or Grafana made it
+    // of the write. It is theirs now. Nothing is written over it, not even the original value: a
+    // write that was never read back cannot be told from a choice that a user made just after it.
     entry.hold = undefined;
-    if (hold.confirmed) {
-      // It held the selection and somebody, or Grafana, changed it. It is theirs now.
-      entry.status = { state: 'changed', name };
-      return;
-    }
-    // Grafana never showed the written value. What it made of the write is neither the selection nor
-    // what the user had before, so the original value goes back.
-    if (!sameVariableValue(target.value, hold.original)) {
-      this.runtime.setQuery({ [`var-${name}`]: hold.original });
-    }
-    entry.status = { state: 'rejected', name };
+    entry.status = { state: hold.confirmed ? 'changed' : 'rejected', name };
   }
 }
 
@@ -405,6 +442,14 @@ export function syncMessage(status: SyncStatus): { text: string; problem: boolea
       const others = status.others === 1 ? ' (with 1 other panel)' : ` (with ${status.others} other panels)`;
       return { text: `→ $${status.name}${status.others > 0 ? others : ''}`, problem: false };
     }
+    case 'partial':
+      return {
+        text:
+          status.kept === 0
+            ? `$${status.name} holds none of the selected values`
+            : `$${status.name} holds only ${status.kept} of the ${status.of} selected values`,
+        problem: true,
+      };
     case 'changed':
       return { text: `$${status.name} was changed and no longer holds the selection`, problem: true };
     case 'rejected':
