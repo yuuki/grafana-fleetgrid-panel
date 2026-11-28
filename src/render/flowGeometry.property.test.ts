@@ -1,6 +1,7 @@
 import fc from 'fast-check';
 import {
   FLOW_APEX_MARGIN,
+  FlowAttach,
   FlowRect,
   MIN_FLOW_BULGE,
   flowArc,
@@ -24,7 +25,11 @@ const rect: fc.Arbitrary<FlowRect> = fc.record({
   h: fc.double({ min: 6, max: 40, noNaN: true }),
 });
 
+const attach = fc.constantFrom<FlowAttach>('centre', 'frame');
 const centre = (r: FlowRect) => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
+// The frames of two groups of one level do not overlap.
+const apart = (a: FlowRect, b: FlowRect) =>
+  a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
 const distinct = (a: FlowRect, b: FlowRect) => Math.hypot(centre(a).x - centre(b).x, centre(a).y - centre(b).y) > 1;
 
 describe('flowArc (properties)', () => {
@@ -74,9 +79,9 @@ describe('flowArc (properties)', () => {
 
   it('keeps every point of the arc on the canvas, on any canvas', () => {
     fc.assert(
-      fc.property(sized, ([width, height, a, b]) => {
+      fc.property(sized, attach, ([width, height, a, b], mode) => {
         fc.pre(distinct(a, b));
-        const arc = flowArc(a, b, width, height)!;
+        const arc = flowArc(a, b, width, height, mode)!;
         for (let i = 0; i <= 64; i++) {
           const point = flowArcPoint(arc, i / 64);
           expect(point.x).toBeGreaterThanOrEqual(-1e-6);
@@ -96,6 +101,43 @@ describe('flowArc (properties)', () => {
         const forward = flowArc(a, b, width, height)!;
         const backward = flowArc(b, a, width, height)!;
         expect(Math.hypot(forward.cx - backward.cx, forward.cy - backward.cy)).toBeGreaterThan(4);
+      }),
+      propertyParams()
+    );
+  });
+
+  it('keeps the two directions between two frames apart: they differ in an end or in the bulge', () => {
+    fc.assert(
+      fc.property(sized, ([width, height, a, b]) => {
+        fc.pre(distinct(a, b) && apart(a, b));
+        const forward = flowArc(a, b, width, height, 'frame')!;
+        const backward = flowArc(b, a, width, height, 'frame')!;
+        const far = Math.max(
+          Math.hypot(forward.x0 - backward.x1, forward.y0 - backward.y1),
+          Math.hypot(forward.x1 - backward.x0, forward.y1 - backward.y0),
+          Math.hypot(forward.cx - backward.cx, forward.cy - backward.cy)
+        );
+        expect(far).toBeGreaterThan(2);
+      }),
+      propertyParams()
+    );
+  });
+
+  it('never draws an arc between two frames across a cell of its own two groups', () => {
+    const inside = (r: FlowRect, p: { x: number; y: number }) =>
+      p.x > r.x + 1e-3 && p.x < r.x + r.w - 1e-3 && p.y > r.y + 1e-3 && p.y < r.y + r.h - 1e-3;
+    fc.assert(
+      fc.property(sized, ([width, height, a, b]) => {
+        fc.pre(distinct(a, b) && apart(a, b));
+        const arc = flowArc(a, b, width, height, 'frame')!;
+        // An arc that would be too short between the frames is the arc between the centres.
+        fc.pre(arc.x0 !== centre(a).x || arc.y0 !== centre(a).y);
+        for (let i = 0; i <= 64; i++) {
+          const point = flowArcPoint(arc, i / 64);
+          expect(inside(a, point) || inside(b, point)).toBe(false);
+        }
+        expect(Math.hypot(arc.x1 - arc.x0, arc.y1 - arc.y0)).toBeGreaterThanOrEqual(12 - 1e-6);
+        expect(Math.hypot(arc.nx, arc.ny)).toBeCloseTo(1);
       }),
       propertyParams()
     );

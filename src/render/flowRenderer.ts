@@ -19,6 +19,12 @@ export interface FlowRenderContext {
   /** The focus layer draws its arcs wider and outlines the cells or groups they connect. */
   emphasised: boolean;
   /**
+   * Whether the arcs run between groups of cells instead of between cells. An arc that ends at the
+   * centre of a group looks like an arc of the cell that happens to be there. So an arc between groups
+   * ends on the frames of its groups, and every layer outlines the groups its arcs connect.
+   */
+  groupLevel: boolean;
+  /**
    * Keep an allocated backing store while the layer has no arcs. The focus layer is emptied and filled
    * on every change of hover, and allocating a canvas each time costs more than clearing it. A layer
    * that does not retain its store (the resting layer, empty in hover mode) holds none while it is empty.
@@ -42,7 +48,8 @@ export const FLOW_DIM_OPACITY = 0.22;
 // Dash and gap of an edge without a value, in line widths.
 const DASH = 2.5;
 const EMPHASIS = 1.6;
-const OUTLINE_WIDTH = 1.5;
+const OUTLINE_WIDTH = 1.5; // px, around the nodes of the arcs in focus
+const REST_OUTLINE_WIDTH = 1; // px, around the groups of the arcs at rest
 const OUTLINE_GAP = 1; // px between a cell or group and its outline
 const BADGE_FONT_PX = 10;
 const BADGE_CELL = 14; // px; size of the squares used to keep hop numbers from overlapping
@@ -105,7 +112,7 @@ function shapesOf(rc: FlowRenderContext, width: number, height: number): Shape[]
     const edge = rc.edges[i];
     const from = rc.anchors.get(edge.source);
     const to = rc.anchors.get(edge.destination);
-    const arc = from && to ? flowArc(from, to, width, height) : null;
+    const arc = from && to ? flowArc(from, to, width, height, rc.groupLevel ? 'frame' : 'centre') : null;
     if (arc) {
       // Unknown is not a point on the color scale: a neutral color that reads in light and dark themes.
       shapes.push({ edge, arc, color: edge.value === null ? rc.theme.colors.text.secondary : rc.colorOf(edge) });
@@ -171,9 +178,12 @@ function fillArrows(ctx: CanvasRenderingContext2D, shapes: Shape[], arrowSize: n
 }
 
 // The focus layer outlines every cell or group its arcs connect: the hovered node and its peers. For
-// edges between groups the outline also shows that an arc belongs to the whole group, which its end
-// point at the group's centre cannot show.
+// edges between groups the outline is also the frame that the arcs end on, so the resting layer
+// outlines groups too, thinner and in the secondary text color, so that the outlines of the focus stand
+// out against them.
 function outlineEndpoints(ctx: CanvasRenderingContext2D, shapes: Shape[], rc: FlowRenderContext): void {
+  const lineWidth = rc.emphasised ? OUTLINE_WIDTH : REST_OUTLINE_WIDTH;
+  const color = rc.emphasised ? rc.theme.colors.text.primary : rc.theme.colors.text.secondary;
   const keys = new Set<string>();
   for (const shape of shapes) {
     keys.add(shape.edge.source);
@@ -188,8 +198,8 @@ function outlineEndpoints(ctx: CanvasRenderingContext2D, shapes: Shape[], rc: Fl
       ctx.strokeRect(rect.x - OUTLINE_GAP, rect.y - OUTLINE_GAP, rect.w + 2 * OUTLINE_GAP, rect.h + 2 * OUTLINE_GAP);
     }
   };
-  outline(OUTLINE_WIDTH + 2 * HALO, rc.theme.colors.background.primary, HALO_ALPHA);
-  outline(OUTLINE_WIDTH, rc.theme.colors.text.primary, 1);
+  outline(lineWidth + 2 * HALO, rc.theme.colors.background.primary, HALO_ALPHA);
+  outline(lineWidth, color, 1);
 }
 
 /** The hop number written on an arc: its first numbered hop, with a "+" when the edge carries more hops. */
@@ -299,7 +309,7 @@ export function renderFlowLayer(canvas: HTMLCanvasElement, rc: FlowRenderContext
   const background = rc.theme.colors.background.primary;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  if (rc.emphasised) {
+  if (rc.emphasised || rc.groupLevel) {
     outlineEndpoints(ctx, shapes, rc);
   }
   strokeArcs(ctx, shapes, lineWidth, background);

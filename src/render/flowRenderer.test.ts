@@ -52,6 +52,7 @@ const context = (over: Partial<FlowRenderContext>): FlowRenderContext => ({
   anchors,
   edges: [],
   emphasised: false,
+  groupLevel: false,
   retain: false,
   colorOf,
   theme,
@@ -86,6 +87,35 @@ function strokes(events: CanvasEvent[]): Array<{ color: unknown; width: unknown;
     }
   }
   return painted;
+}
+
+// The distinct stroke styles of the rectangles that are outlined before the first event of type `until`.
+function strokesBefore(events: CanvasEvent[], until: string): Array<{ color: unknown; width: unknown }> {
+  const styles: Array<{ color: unknown; width: unknown }> = [];
+  const state: { color: unknown; width: unknown } = { color: undefined, width: undefined };
+  for (const e of events) {
+    if (e.type === until) {
+      break;
+    }
+    if (e.type === 'strokeStyle') {
+      state.color = e.props.value;
+    } else if (e.type === 'lineWidth') {
+      state.width = e.props.value;
+    } else if (e.type === 'strokeRect') {
+      const last = styles[styles.length - 1];
+      if (!last || last.color !== state.color || last.width !== state.width) {
+        styles.push({ ...state });
+      }
+    }
+  }
+  return styles;
+}
+
+// A color as a canvas reports it after it was set as a stroke style.
+function asCanvasColor(color: string): unknown {
+  const ctx = document.createElement('canvas').getContext('2d')!;
+  ctx.strokeStyle = color;
+  return ctx.strokeStyle;
 }
 
 const LINE = flowLineWidth(layout.cellSize);
@@ -251,8 +281,38 @@ describe('renderFlowLayer', () => {
     );
     const types = events.map((e) => e.type);
     expect(types.lastIndexOf('strokeRect')).toBeLessThan(types.indexOf('quadraticCurveTo'));
-    // The resting layer has no outlines.
+    // The resting layer has no outlines while the arcs run between cells.
     expect(count(draw({ edges: [edge('a', 'b', 2)] }), 'strokeRect')).toBe(0);
+  });
+
+  it('outlines the groups that the arcs at rest connect, so an arc does not read as the cell under its end', () => {
+    // A group of 2 × 2 cells: its centre, where the arc ends, is not the centre of any of its cells.
+    const groups = new Map(anchors);
+    groups.set('a', { x: 100, y: 300, w: 41, h: 41 });
+    const events = draw({ anchors: groups, edges: [edge('a', 'b', 2), edge('a', 'c', 1)], groupLevel: true });
+    const rects = events.filter((e) => e.type === 'strokeRect').map((e) => e.props);
+    // Three groups, each outlined once over a halo, whatever the number of arcs that end there.
+    expect(rects).toHaveLength(6);
+    expect(rects.slice(3)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ x: 99, y: 299, width: 43, height: 43 }),
+        expect.objectContaining({ x: 499, y: 299, width: 22, height: 22 }),
+        expect.objectContaining({ x: 799, y: 299, width: 22, height: 22 }),
+      ])
+    );
+    // Under the arcs, thinner than the outlines of the focus and in the secondary text color.
+    const types = events.map((e) => e.type);
+    expect(types.lastIndexOf('strokeRect')).toBeLessThan(types.indexOf('quadraticCurveTo'));
+    const outlineStyle = (list: CanvasEvent[]) => strokesBefore(list, 'quadraticCurveTo');
+    expect(outlineStyle(events)).toEqual([
+      { color: BACKGROUND, width: 3 },
+      { color: NEUTRAL, width: 1 },
+    ]);
+    const focused = draw({ anchors: groups, edges: [edge('a', 'b', 2)], groupLevel: true, emphasised: true });
+    expect(outlineStyle(focused)).toEqual([
+      { color: BACKGROUND, width: 3.5 },
+      { color: asCanvasColor(theme.colors.text.primary), width: 1.5 },
+    ]);
   });
 
   it('writes the hop number beside the arrowhead', () => {
