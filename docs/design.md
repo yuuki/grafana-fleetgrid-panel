@@ -189,6 +189,7 @@ The **Color scale overrides** editor supports add/remove/reorder and multiple ma
 - id `yuuk1-fleetgrid-panel`, name `FleetGrid`, `grafanaDependency: ">=11.6.0"`.
 - Scaffold: `@grafana/create-plugin@7.0.5` (pinned). **Rationale:** reproducibility of regeneration, and 7.0.5 builds against `@grafana/* ^12.x` — closer to the supported minimum (11.6) than newer scaffolds targeting 13.x, reducing the risk of accidentally depending on 13-only APIs.
 - The pinned scaffold conflicts with the floating `@grafana/tsconfig@2.2.0` (`moduleResolution: "bundler"` vs. the scaffold's ts-node `module: "commonjs"` → TS5095). Fixed by overriding `moduleResolution: "nodenext"` in the ts-node block of the **root** `tsconfig.json` (mirroring upstream create-plugin 7.x), because `.config/` is tool-managed and must not be edited.
+- The Playwright tests in `tests/` are type-checked and linted with the source. The root `tsconfig.json` widens the scaffold's `rootDir` and `include` (which cover only `src/`), and the root `eslint.config.mjs` selects `tests/**/*.ts`: the scaffold's `./tests/**/*` entry ends in a wildcard, so ESLint applies it only to files that another entry already selects, and no entry did.
 - `jest-canvas-mock` is imported from the root `jest-setup.js` **after** `.config/jest-setup` — the scaffold's setup (run in `setupFilesAfterEnv`) overwrites `getContext`, so the plan's original `setupFiles` placement produced a silently non-functional mock. Load order is the constraint; a comment in the file records it.
 
 ## 12. Testing strategy
