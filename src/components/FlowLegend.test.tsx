@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { createTheme } from '@grafana/data';
 import { MetricInfo } from '../data/display';
 import { FlowEdge, FlowModel, MAX_FLOW_ARCS } from '../data/edges';
-import { FlowLegend, flowLegendSummary, formatFlowValue } from './FlowLegend';
+import { FlowLegend, flowLegendSummary, flowWorseEnd, formatFlowValue } from './FlowLegend';
 
 const theme = createTheme();
 jest.mock('@grafana/ui', () => ({
@@ -49,6 +49,7 @@ const model = (
     endpoints: [{ level: 'host', source: 'src_host', destination: 'dst_host' }],
     incompleteEndpoints: 0,
     show: 'always',
+    restArcs: 500,
     worst: 'high',
     threshold: undefined,
     orderLabel: '',
@@ -69,6 +70,8 @@ const model = (
     unmatched: 0,
     ambiguous: 0,
     selfEdges: 0,
+    excludedWorst: null,
+    selfWorst: null,
     invalidOrder: 0,
     edgeCount: list.length,
     noValue: list.filter((e) => e.value === null).length,
@@ -76,6 +79,7 @@ const model = (
     ...stats,
   },
   warnings: [],
+  error: null,
   metricInfo,
   ...over,
 });
@@ -160,16 +164,34 @@ describe('flowLegendSummary', () => {
     expect(flowLegendSummary(model(edges(2))).notes).toEqual([]);
   });
 
-  it('lists what was read and what was left out', () => {
+  it('says in its visible text how many rows have no arc, and the worst value among them', () => {
+    // Two rows match no cell, one has no endpoint label; three rows start and end at the same host.
+    const stats = { unmatched: 2, missingLabel: 1, excludedWorst: 4.5, selfEdges: 3, selfWorst: 2 };
+    const m = model(edges(2), {}, stats);
+    expect(flowLegendSummary(m).notes).toEqual([
+      '3 rows left out, worst 4.5%',
+      '3 rows within one host not drawn, worst 2%',
+    ]);
+    // Between cells, and for a single row.
+    const cells = model(edges(2), { groupLevel: false }, { selfEdges: 1, selfWorst: 0 });
+    expect(flowLegendSummary(cells).notes).toEqual(['1 row within one cell not drawn, worst 0%']);
+    // None of the rows has a value: there is no worst value to give, and none is made up.
+    const unknown = model(edges(2), {}, { ambiguous: 1, selfEdges: 2 });
+    expect(flowLegendSummary(unknown).notes).toEqual(['1 row left out', '2 rows within one host not drawn']);
+    expect(flowLegendSummary(model(edges(2))).notes).toEqual([]);
+  });
+
+  it('gives the rows that were read in its tooltip', () => {
     const m = model(edges(2), {}, { totalRows: 50000, readRows: 20000, selfEdges: 3, unmatched: 2 });
     expect(flowLegendSummary(m).details).toEqual([
       'Edge query E: 20000 of 50000 rows used',
-      '3 rows start and end at the same group (not drawn)',
-      '2 rows left out (see the warning)',
+      'Rows are left out when an end has no label or matches no cell or group (see the warning)',
     ]);
-    expect(flowLegendSummary({ ...m, groupLevel: false }).details[1]).toBe(
-      '3 rows start and end at the same cell (not drawn)'
-    );
+  });
+
+  it('names the worse end of the color scale', () => {
+    expect(flowWorseEnd(model(edges(2)))).toBe('higher is worse');
+    expect(flowWorseEnd(withConfig(model(edges(2)), { worst: 'low' }))).toBe('lower is worse');
   });
 });
 
@@ -187,7 +209,9 @@ describe('FlowLegend', () => {
     const legend = screen.getByTestId('flow-legend');
     expect(legend).toHaveTextContent('Flows');
     expect(screen.getByTestId('flow-legend-scale')).toHaveTextContent('loss');
-    expect(screen.getByLabelText('loss flow color scale, Auto, 0% to 5%')).toBeInTheDocument();
+    expect(screen.getByLabelText('loss flow color scale, Auto, 0% to 5%, higher is worse')).toBeInTheDocument();
+    // In words, because the color scheme is the user's: a scale can have green at its worse end.
+    expect(screen.getByTestId('flow-legend-worse')).toHaveTextContent('higher is worse');
     expect(screen.getByTestId('flow-legend-gradient')).toBeInTheDocument();
     expect(screen.getByTestId('flow-legend-count')).toHaveTextContent('2 edges');
     expect(legend).toHaveAttribute('title', 'Edge query E: 2 of 2 rows used');
@@ -217,5 +241,22 @@ describe('FlowLegend', () => {
     expect(note).toHaveTextContent(`${MAX_FLOW_ARCS / 2} of 300 edges without a value drawn`);
     expect(note).toHaveStyle({ overflowWrap: 'anywhere' });
     expect(screen.getByTestId('flow-legend')).toHaveStyle({ flexWrap: 'wrap' });
+  });
+
+  it('writes the rows that have no arc as visible notes, with the worst value among them', () => {
+    render(
+      <FlowLegend model={model(edges(2), {}, { unmatched: 2, excludedWorst: 4.5, selfEdges: 1, selfWorst: 2 })} />
+    );
+    expect(screen.getAllByTestId('flow-legend-note').map((note) => note.textContent)).toEqual([
+      '2 rows left out, worst 4.5%',
+      '1 row within one host not drawn, worst 2%',
+    ]);
+  });
+
+  it('says why nothing can be drawn in place of the count', () => {
+    render(<FlowLegend model={model([], { error: 'no query "Z"' })} />);
+    expect(screen.getByTestId('flow-legend-error')).toHaveTextContent('no query "Z"');
+    expect(screen.getByTestId('flow-legend-error')).toHaveStyle({ color: theme.colors.warning.text });
+    expect(screen.queryByTestId('flow-legend-count')).not.toBeInTheDocument();
   });
 });

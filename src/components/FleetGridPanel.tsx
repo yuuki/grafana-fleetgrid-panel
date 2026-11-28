@@ -255,7 +255,7 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
     () => buildModel(cellSeries, options, theme, timeZone, targetRefIds),
     [cellSeries, options, theme, timeZone, targetRefIds]
   );
-  const flowModel = useFlowModel(data.series, options, cellModel.root, theme, timeZone);
+  const flowModel = useFlowModel(data, options, cellModel.root, theme, timeZone);
   const model = useMemo(() => withFlowWarnings(cellModel, flowModel), [cellModel, flowModel]);
   const effectiveSelection = useMemo(
     () => selectedCategories.filter((value) => model.category?.colorByValue.has(value) ?? false),
@@ -348,7 +348,8 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
     viewportW: visibleWidth(visibleBounds, width),
     viewportH,
     theme,
-    focusCandidates: [hover, popover],
+    hovered: hover,
+    pinned: popover,
   });
   const flowLegend = useMemo(() => <FlowLegend model={flowModel} />, [flowModel]);
 

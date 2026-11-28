@@ -22,8 +22,16 @@ import { countFrameRows, forEachRowValue, isTableFrame, normalizeFrames } from '
  * the fleet. Of a larger result only the value of each row is read, to find the worst MAX_FLOW_ROWS.
  */
 export const MAX_FLOW_ROWS = 20000;
-/** Hard bound on the arcs drawn at once. It applies to the resting set and to a focus set alike. */
+/**
+ * Hard bound on the arcs drawn at once. It is the bound of a focus set, and the most that the resting set
+ * can be set to.
+ */
 export const MAX_FLOW_ARCS = 500;
+/**
+ * Arcs drawn at rest unless the option says otherwise. A few hundred arcs bury the cells under them and
+ * each other, so the worst edge is no easier to find than without the overlay (docs/design.md §15).
+ */
+export const DEFAULT_FLOW_REST_ARCS = 100;
 
 const EXAMPLE_LIMIT = 3;
 // A hop number is a non-negative integer of at most 9 digits, so it is always a safe integer.
@@ -36,11 +44,19 @@ export interface FlowConfig {
   /** Number of stored mappings that are not complete. Any of them stops the overlay: see configWarnings. */
   incompleteEndpoints: number;
   show: FlowShowMode;
+  /** The most arcs drawn while nothing is in focus: 1 to MAX_FLOW_ARCS. */
+  restArcs: number;
   worst: FlowWorstDirection;
   threshold: number | undefined;
   orderLabel: string;
   pathLabel: string;
 }
+
+/**
+ * Whether the edge query ran. `missing`: the panel's request has no visible query with the refId (it
+ * does not exist or is hidden). `unknown`: there is no frame and no request to tell from.
+ */
+export type FlowQueryState = 'found' | 'missing' | 'unknown';
 
 /** One membership of an edge in a path: the path's name ('' without a path label) and the hop number, if any. */
 export interface FlowHop {
@@ -76,6 +92,12 @@ export interface FlowStats {
   unmatched: number;
   ambiguous: number;
   selfEdges: number;
+  /**
+   * The worst value among the rows left out for one of the three reasons above, and among the self-edges;
+   * null when none of them has a value. A degraded row that cannot be drawn is still reported.
+   */
+  excludedWorst: number | null;
+  selfWorst: number | null;
   /** Rows whose hop-number label is not a non-negative integer. The edge is kept without a hop number. */
   invalidOrder: number;
   /** Distinct ordered pairs before the threshold filter, and how many of them have no value. */
@@ -105,15 +127,22 @@ export interface FlowModel {
   byPath: Map<string, number[]>;
   stats: FlowStats;
   warnings: string[];
+  /**
+   * Why nothing can be drawn, in a few words, or null. The warning says the same at length; this text is
+   * for the legend, which stays readable in a panel that is too narrow for the warning banner.
+   */
+  error: string | null;
   /** Standard field config of the edge query (unit, thresholds, color scheme). Absent without a numeric field. */
   metricInfo?: MetricInfo;
 }
 
 const isBlank = (value: unknown): boolean => typeof value !== 'string' || value.trim() === '';
+// A name typed into an option, without the spaces around it: 'E ' names query E.
+const trimmed = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 
 /** refId of the edge query, or '' when the overlay is off. */
 export function flowRefId(options: Pick<FleetGridOptions, 'flowRefId'>): string {
-  return isBlank(options.flowRefId) ? '' : (options.flowRefId as string);
+  return trimmed(options.flowRefId);
 }
 
 /** Whether a frame belongs to the query `refId` (a frame without a refId counts as 'A', as in normalizeFrames). */
@@ -126,17 +155,26 @@ export function resolveFlowConfig(options: FleetGridOptions): FlowConfig | null 
     return null;
   }
   const stored = Array.isArray(options.flowEndpoints) ? options.flowEndpoints : [];
-  const endpoints = stored.filter((m) => m && !isBlank(m.level) && !isBlank(m.source) && !isBlank(m.destination));
+  // The hierarchy label is compared as it is stored in the levels; the names of the edge query's labels
+  // are typed in and lose the spaces around them.
+  const endpoints = stored
+    .filter((m) => m && !isBlank(m.level) && !isBlank(m.source) && !isBlank(m.destination))
+    .map((m) => ({ level: m.level, source: m.source.trim(), destination: m.destination.trim() }));
   const threshold = options.flowThreshold;
+  const restArcs = options.flowRestArcs;
   return {
     refId,
     endpoints,
     incompleteEndpoints: stored.length - endpoints.length,
     show: options.flowShow === 'hover' ? 'hover' : 'always',
+    restArcs:
+      typeof restArcs === 'number' && Number.isFinite(restArcs)
+        ? Math.min(MAX_FLOW_ARCS, Math.max(1, Math.round(restArcs)))
+        : DEFAULT_FLOW_REST_ARCS,
     worst: options.flowWorst === 'low' ? 'low' : 'high',
     threshold: typeof threshold === 'number' && Number.isFinite(threshold) ? threshold : undefined,
-    orderLabel: isBlank(options.flowOrderLabel) ? '' : (options.flowOrderLabel as string),
-    pathLabel: isBlank(options.flowPathLabel) ? '' : (options.flowPathLabel as string),
+    orderLabel: trimmed(options.flowOrderLabel),
+    pathLabel: trimmed(options.flowPathLabel),
   };
 }
 
@@ -287,6 +325,14 @@ function rowHop(c: Collector, labels: Record<string, string>): FlowHop | null {
   return named || order !== null ? { path: named ? path : '', order } : null;
 }
 
+// The worse of a value seen so far (null: none yet) and the value of one more row (null: it has none).
+function worseSoFar(seen: number | null, value: number | null, worst: FlowWorstDirection): number | null {
+  if (value === null) {
+    return seen;
+  }
+  return seen === null ? value : worseValue(seen, value, worst);
+}
+
 function addRow(c: Collector, row: NormalizedRow): void {
   const source = resolveEndpoint(c, row.labels, c.sourceLabels);
   const destination = resolveEndpoint(c, row.labels, c.destinationLabels);
@@ -298,10 +344,12 @@ function addRow(c: Collector, row: NormalizedRow): void {
     if (failure === 'unmatched') {
       recordUnmatched(c, row.labels, source === 'unmatched' ? c.sourceLabels : c.destinationLabels);
     }
+    c.stats.excludedWorst = worseSoFar(c.stats.excludedWorst, row.value, c.config.worst);
     return;
   }
   if (source.key === destination.key) {
     c.stats.selfEdges++;
+    c.stats.selfWorst = worseSoFar(c.stats.selfWorst, row.value, c.config.worst);
     return;
   }
   registerNode(c, source);
@@ -314,9 +362,7 @@ function addRow(c: Collector, row: NormalizedRow): void {
   }
   bucket.rowCount++;
   // A row without a finite value still proves the pair exists; it adds no number (unknown is not 0).
-  if (row.value !== null) {
-    bucket.value = bucket.value === null ? row.value : worseValue(bucket.value, row.value, c.config.worst);
-  }
+  bucket.value = worseSoFar(bucket.value, row.value, c.config.worst);
   const hop = rowHop(c, row.labels);
   if (hop) {
     bucket.hops.set(`${hop.path}\0${hop.order}`, hop);
@@ -371,6 +417,8 @@ export function collectFlowEdges(
       unmatched: 0,
       ambiguous: 0,
       selfEdges: 0,
+      excludedWorst: null,
+      selfWorst: null,
       invalidOrder: 0,
       edgeCount: 0,
       noValue: 0,
@@ -687,10 +735,29 @@ function excludedWarning(stats: FlowStats): string | null {
   return `Flow overlay: ${excluded}/${stats.readRows} edge rows were left out (${reasons.join(', ')}${examples})`;
 }
 
-function flowWarnings(config: FlowConfig, stats: FlowStats): string[] {
+// Why an edge query without rows is a problem, or null when it is not one. A query that ran and returned
+// no rows is the healthy state of a query that filters in the data source (`> 0`): it must not look like
+// a refId that names no query.
+function queryProblem(config: FlowConfig, query: FlowQueryState): { error: string; warning: string } | null {
+  if (query === 'missing') {
+    return {
+      error: `no query "${config.refId}"`,
+      warning: `Flow overlay: no query with the refId "${config.refId}" ran (it does not exist or is hidden)`,
+    };
+  }
+  if (query === 'unknown') {
+    return {
+      error: `no data for query "${config.refId}"`,
+      warning: `Flow overlay: query "${config.refId}" returned no data`,
+    };
+  }
+  return null;
+}
+
+function flowWarnings(config: FlowConfig, stats: FlowStats, problem: { warning: string } | null): string[] {
   const warnings: string[] = [];
-  if (stats.totalRows === 0) {
-    warnings.push(`Flow overlay: query "${config.refId}" returned no rows`);
+  if (problem) {
+    warnings.push(problem.warning);
   }
   if (stats.readRows < stats.totalRows) {
     warnings.push(
@@ -709,7 +776,7 @@ function flowWarnings(config: FlowConfig, stats: FlowStats): string[] {
   return warnings;
 }
 
-function emptyModel(config: FlowConfig, warnings: string[]): FlowModel {
+function emptyModel(config: FlowConfig, problem: { error: string; warning: string }): FlowModel {
   return {
     config,
     depth: 0,
@@ -727,30 +794,44 @@ function emptyModel(config: FlowConfig, warnings: string[]): FlowModel {
       unmatched: 0,
       ambiguous: 0,
       selfEdges: 0,
+      excludedWorst: null,
+      selfWorst: null,
       invalidOrder: 0,
       edgeCount: 0,
       noValue: 0,
       examples: [],
     },
-    warnings,
+    warnings: [problem.warning],
+    error: problem.error,
   };
 }
 
 // Why the endpoint mappings cannot be used, or nothing when they can. A mapping that is half filled in
 // or names no hierarchy label is not skipped: the mappings together say which level an endpoint resolves
 // to, so drawing with the rest would show the edges at a level the user did not ask for.
-function configWarnings(config: FlowConfig, levels: LevelDef[]): string[] {
+function configProblem(config: FlowConfig, levels: LevelDef[]): { error: string; warning: string } | null {
   if (config.incompleteEndpoints > 0) {
-    return ['Flow overlay: every endpoint mapping needs a hierarchy label, a source label and a destination label'];
+    return {
+      error: 'endpoint mapping incomplete',
+      warning: 'Flow overlay: every endpoint mapping needs a hierarchy label, a source label and a destination label',
+    };
   }
   if (config.endpoints.length === 0) {
-    return ['Flow overlay: map at least one hierarchy label to a source and a destination label of the edge query'];
+    return {
+      error: 'no endpoint mapping',
+      warning: 'Flow overlay: map at least one hierarchy label to a source and a destination label of the edge query',
+    };
   }
   const levelLabels = new Set(levels.map((level) => level.label));
   const unknown = config.endpoints.filter((m) => !levelLabels.has(m.level)).map((m) => `"${m.level}"`);
-  return unknown.length > 0
-    ? [`Flow overlay: endpoint mapping ${[...new Set(unknown)].join(', ')} is not a hierarchy label`]
-    : [];
+  if (unknown.length === 0) {
+    return null;
+  }
+  const names = [...new Set(unknown)].join(', ');
+  return {
+    error: `endpoint mapping ${names} is not a hierarchy label`,
+    warning: `Flow overlay: endpoint mapping ${names} is not a hierarchy label`,
+  };
 }
 
 /**
@@ -792,11 +873,12 @@ export function buildFlowModel(
   options: FleetGridOptions,
   config: FlowConfig,
   theme: GrafanaTheme2,
-  timeZone: string
+  timeZone: string,
+  query: FlowQueryState = frames.length > 0 ? 'found' : 'unknown'
 ): FlowModel {
   const levels = options.levels;
-  const invalid = configWarnings(config, levels);
-  if (invalid.length > 0) {
+  const invalid = configProblem(config, levels);
+  if (invalid) {
     return emptyModel(config, invalid);
   }
   const reduceCalc = options.reduceCalc || 'lastNotNull';
@@ -811,6 +893,7 @@ export function buildFlowModel(
   const index = buildEndpointIndex(root, levels, config.endpoints);
   const collected = collectFlowEdges(rows, index, config);
   const stats: FlowStats = { ...collected.stats, totalRows };
+  const problem = totalRows === 0 ? queryProblem(config, query) : null;
   const edges = selectFlowEdges(collected.edges, config.worst, config.threshold);
   // Passing a range and a single frame also keeps buildMetricInfos from scanning every value of an
   // oversized result.
@@ -829,7 +912,8 @@ export function buildFlowModel(
     nodes: collected.nodes,
     ...buildFlowIndex(edges),
     stats,
-    warnings: flowWarnings(config, stats),
+    warnings: flowWarnings(config, stats, problem),
+    error: problem?.error ?? null,
     metricInfo,
   };
 }
@@ -859,7 +943,7 @@ export function flowRestShare(model: FlowModel): { valued: number; unknown: numb
   if (model.config.show === 'hover') {
     return { valued: 0, unknown: 0 };
   }
-  return shareFlowBound(model.valuedCount, model.edges.length - model.valuedCount, MAX_FLOW_ARCS);
+  return shareFlowBound(model.valuedCount, model.edges.length - model.valuedCount, model.config.restArcs);
 }
 
 /** The arcs drawn while nothing is focused, worst first, then those without a value; none in hover mode. */

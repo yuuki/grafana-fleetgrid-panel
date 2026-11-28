@@ -3,6 +3,7 @@ import { DEFAULT_LEVEL, FleetGridOptions, HierarchyNode, LevelDef, NormalizedRow
 import { buildHierarchy, pathKey } from './hierarchy';
 import { attachCells } from './values';
 import {
+  DEFAULT_FLOW_REST_ARCS,
   FlowConfig,
   FlowEdge,
   MAX_FLOW_ARCS,
@@ -53,6 +54,7 @@ const config = (over: Partial<FlowConfig> = {}): FlowConfig => ({
   endpoints: [hostMapping],
   incompleteEndpoints: 0,
   show: 'always',
+  restArcs: 500,
   worst: 'high',
   threshold: undefined,
   orderLabel: '',
@@ -132,7 +134,29 @@ describe('resolveFlowConfig', () => {
       })
     );
     // The two unusable mappings are counted, so the model can refuse to draw with only the usable one.
-    expect(resolved).toEqual(config({ incompleteEndpoints: 2 }));
+    expect(resolved).toEqual(config({ incompleteEndpoints: 2, restArcs: DEFAULT_FLOW_REST_ARCS }));
+  });
+
+  it('limits the arcs at rest to 1 to 500 whole arcs', () => {
+    const restArcs = (value: unknown) => resolveFlowConfig(options({ flowRestArcs: value as number }))!.restArcs;
+    expect(DEFAULT_FLOW_REST_ARCS).toBe(100);
+    expect([restArcs(undefined), restArcs(Number.NaN), restArcs('40'), restArcs(null)]).toEqual([100, 100, 100, 100]);
+    expect([restArcs(40), restArcs(40.6), restArcs(0), restArcs(-5), restArcs(501)]).toEqual([40, 41, 1, 1, 500]);
+  });
+
+  it('takes the names without the spaces around them, so "E " names query E', () => {
+    expect(flowRefId({ flowRefId: ' E ' })).toBe('E');
+    const resolved = resolveFlowConfig(
+      options({
+        flowRefId: 'E ',
+        flowEndpoints: [{ level: 'host', source: ' src_host', destination: 'dst_host ' }],
+        flowOrderLabel: ' hop ',
+        flowPathLabel: 'job ',
+      })
+    )!;
+    expect(resolved.refId).toBe('E');
+    expect(resolved.endpoints).toEqual([hostMapping]);
+    expect([resolved.orderLabel, resolved.pathLabel]).toEqual(['hop', 'job']);
   });
 
   it('keeps the configured values', () => {
@@ -208,6 +232,29 @@ describe('collectFlowEdges', () => {
     expect(edges).toEqual([]);
     expect(stats.selfEdges).toBe(1);
     expect(nodes.size).toBe(0);
+  });
+
+  it('keeps the worst value among the rows it cannot draw, so a degraded row is not lost with them', () => {
+    const rows = [
+      edgeRow('node-a1', 'node-a1', 4), // within one host
+      edgeRow('node-a2', 'node-a2', 9),
+      edgeRow('node-b1', 'node-b1', null),
+      edgeRow('node-a1', 'node-x9', 7), // matches no cell
+      edgeRow('node-x8', 'node-a1', 3),
+      edgeRow('', 'node-a1', 30), // no endpoint label
+      edgeRow('node-a1', 'node-a2', 1),
+    ];
+    expect(collect(rows).stats).toMatchObject({ selfEdges: 3, selfWorst: 9, excludedWorst: 30 });
+    // The worse end follows the option.
+    expect(collect(rows, config({ worst: 'low' })).stats).toMatchObject({ selfWorst: 4, excludedWorst: 3 });
+    // Rows without a value add no number: unknown is not 0.
+    expect(collect([edgeRow('node-a1', 'node-a1', null), edgeRow('node-a1', 'node-x9', null)]).stats).toMatchObject({
+      selfEdges: 1,
+      selfWorst: null,
+      unmatched: 1,
+      excludedWorst: null,
+    });
+    expect(collect([edgeRow('node-a1', 'node-a2', 1)]).stats).toMatchObject({ selfWorst: null, excludedWorst: null });
   });
 
   it('counts rows whose endpoint matches nothing and keeps a few examples', () => {
@@ -499,10 +546,43 @@ describe('buildFlowModel', () => {
     });
   });
 
-  it('warns and draws nothing when the edge query returned no rows', () => {
-    const m = model([]);
-    expect(m.edges).toEqual([]);
-    expect(m.warnings).toEqual(['Flow overlay: query "E" returned no rows']);
+  it('does not warn when the edge query ran and returned no rows: nothing is degraded', () => {
+    // A query that filters in the data source ("> 0") returns nothing for a healthy fabric: an empty
+    // frame, or no frame at all while the request still lists the query.
+    const opts = options();
+    const cfg = resolveFlowConfig(opts)!;
+    const emptyFrame = model([edgeTable({ src_host: [], dst_host: [], loss: [] })]);
+    const noFrame = buildFlowModel([], hierarchy(), opts, cfg, theme, 'utc', 'found');
+    for (const m of [emptyFrame, noFrame]) {
+      expect(m.edges).toEqual([]);
+      expect(m.warnings).toEqual([]);
+      expect(m.error).toBeNull();
+    }
+  });
+
+  it('says that no query has the refId, which is not the same as a query without rows', () => {
+    const opts = options({ flowRefId: 'Z' });
+    const missing = buildFlowModel([], hierarchy(), opts, resolveFlowConfig(opts)!, theme, 'utc', 'missing');
+    expect(missing.warnings).toEqual([
+      'Flow overlay: no query with the refId "Z" ran (it does not exist or is hidden)',
+    ]);
+    expect(missing.error).toBe('no query "Z"');
+    // Without a frame and without a request to look the query up in, the model cannot tell and says so.
+    const unknown = model([]);
+    expect(unknown.warnings).toEqual(['Flow overlay: query "E" returned no data']);
+    expect(unknown.error).toBe('no data for query "E"');
+  });
+
+  it('gives the reason in a few words when the configuration cannot be used', () => {
+    const frame = edgeTable({ src_host: ['node-a1'], dst_host: ['node-a2'], loss: [5] });
+    expect(model([frame], { flowEndpoints: [] }).error).toBe('no endpoint mapping');
+    expect(model([frame], { flowEndpoints: [{ level: 'host', source: 'src_host', destination: '' }] }).error).toBe(
+      'endpoint mapping incomplete'
+    );
+    expect(
+      model([frame], { flowEndpoints: [{ level: 'rack', source: 'src_host', destination: 'dst_host' }] }).error
+    ).toBe('endpoint mapping "rack" is not a hierarchy label');
+    expect(model([frame]).error).toBeNull();
   });
 
   it('warns instead of guessing when no endpoint mapping can be used', () => {
@@ -687,7 +767,7 @@ describe('flowBaseEdges', () => {
       }
     }
     const loss = src.map((_, i) => (i >= 600 ? null : 0));
-    const opts = options({ levels: lv });
+    const opts = options({ levels: lv, flowRestArcs: 500 });
     const m = buildFlowModel(
       [edgeTable({ src_host: src, dst_host: dst, loss })],
       hierarchy(rows, lv),
@@ -703,14 +783,25 @@ describe('flowBaseEdges', () => {
     expect(flowRestShare(m)).toEqual({ valued: 480, unknown: 20 });
   });
 
-  it('draws at most MAX_FLOW_ARCS edges, the worst ones', () => {
+  it('draws the worst 100 edges at rest by default', () => {
     const m = meshModel(300, 5);
     expect(m.edges).toHaveLength(1500);
     const base = flowBaseEdges(m);
-    expect(base).toHaveLength(MAX_FLOW_ARCS);
-    expect(base).toEqual(m.edges.slice(0, MAX_FLOW_ARCS));
-    const worstLeftOut = m.edges[MAX_FLOW_ARCS].value!;
+    expect(base).toHaveLength(DEFAULT_FLOW_REST_ARCS);
+    expect(base).toEqual(m.edges.slice(0, 100));
+    const worstLeftOut = m.edges[100].value!;
     expect(Math.min(...base.map((edge) => edge.value!))).toBeGreaterThanOrEqual(worstLeftOut);
+  });
+
+  it('draws as many arcs at rest as the option says, and never more than MAX_FLOW_ARCS', () => {
+    expect(flowBaseEdges(meshModel(300, 5, { flowRestArcs: 20 }))).toHaveLength(20);
+    const most = meshModel(300, 5, { flowRestArcs: 500 });
+    expect(flowBaseEdges(most)).toEqual(most.edges.slice(0, MAX_FLOW_ARCS));
+    expect(flowBaseEdges(meshModel(300, 5, { flowRestArcs: 100000 }))).toHaveLength(MAX_FLOW_ARCS);
+    // A hovered cell is not limited by the option: it shows its own edges.
+    const few = meshModel(300, 5, { flowRestArcs: 1 });
+    expect(flowBaseEdges(few)).toHaveLength(1);
+    expect(flowFocusEdges(few, [pathKey(['node-a150'])])!.length).toBe(10);
   });
 
   it('draws nothing at rest in hover mode', () => {

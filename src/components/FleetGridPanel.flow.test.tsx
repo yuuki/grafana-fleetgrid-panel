@@ -56,7 +56,8 @@ const flowOptions: Partial<FleetGridOptions> = {
   flowEndpoints: [{ level: 'host', source: 'src_host', destination: 'dst_host' }],
 };
 
-const makeProps = (frames: unknown[], options: Partial<FleetGridOptions> = flowOptions): any => ({
+// `ran` lists the refIds of the queries that ran; by default every frame's query.
+const makeProps = (frames: unknown[], options: Partial<FleetGridOptions> = flowOptions, ran?: string[]): any => ({
   id: 1,
   width: 400,
   height: 300,
@@ -66,7 +67,10 @@ const makeProps = (frames: unknown[], options: Partial<FleetGridOptions> = flowO
     series: frames,
     state: LoadingState.Done,
     timeRange: getDefaultTimeRange(),
-    request: { requestId: 'Q1', targets: (frames as Array<{ refId: string }>).map((f) => ({ refId: f.refId })) },
+    request: {
+      requestId: 'Q1',
+      targets: (ran ?? (frames as Array<{ refId: string }>).map((f) => f.refId)).map((refId) => ({ refId })),
+    },
   },
   options: {
     levels: [{ ...DEFAULT_LEVEL, label: 'host' }],
@@ -150,10 +154,36 @@ describe('FleetGridPanel flow overlay', () => {
     expect(warning).toHaveAttribute('title', warning.textContent);
   });
 
-  it('says so when the named edge query returned nothing', () => {
-    render(<FleetGridPanel {...makeProps([cells()])} />);
-    expect(screen.getByRole('alert')).toHaveTextContent('Flow overlay: query "E" returned no rows');
-    expect(screen.getByTestId('flow-legend-count')).toHaveTextContent('no edges');
+  it('does not warn when the edge query ran and returned nothing: a healthy fabric is not a fault', () => {
+    // Query E ran (the request lists it) and returned no frame, or a frame without rows.
+    for (const frames of [[cells()], [cells(), edges([])]]) {
+      const { unmount } = render(<FleetGridPanel {...makeProps(frames, flowOptions, ['A', 'E'])} />);
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(screen.getByTestId('flow-legend-count')).toHaveTextContent('no edges');
+      expect(screen.queryByTestId('flow-legend-error')).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it('says so when no query has the refId of the edge query, in the banner and in the legend', () => {
+    // No query E at all, and a query E that is hidden and so did not run.
+    for (const targets of [[{ refId: 'A' }], [{ refId: 'A' }, { refId: 'E', hide: true }]]) {
+      const props = makeProps([cells()]);
+      props.data.request.targets = targets;
+      const { unmount } = render(<FleetGridPanel {...props} />);
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Flow overlay: no query with the refId "E" ran (it does not exist or is hidden)'
+      );
+      expect(screen.getByTestId('flow-legend-error')).toHaveTextContent('no query "E"');
+      unmount();
+    }
+  });
+
+  it('takes the refId without the spaces around it', () => {
+    render(<FleetGridPanel {...makeProps([cells(), edges(RING)], { ...flowOptions, flowRefId: 'E ' })} />);
+    expect(screen.getByTestId('flow-legend-count')).toHaveTextContent('3 edges');
+    // Query E is the edge query, so it is not a second cell metric.
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
   });
 
   it('adds the peers and the worst peer of the hovered cell to the tooltip', () => {
@@ -217,6 +247,36 @@ describe('FleetGridPanel flow overlay', () => {
     fireEvent.click(container(), { clientX: 10, clientY: 5 });
     expect(screen.getByLabelText('Close')).toBeInTheDocument();
     expect(arcsIn(focusLayer()!)).toBe(2);
+    fireEvent.mouseLeave(container());
+    expect(arcsIn(focusLayer()!)).toBe(2);
+  });
+
+  it('keeps that emphasis while the pointer is on a cell without edges, and gives it to a cell that has edges', () => {
+    // node-a1 has two edges, node-a2 and node-a3 one each, node-a4 none.
+    const star: Array<[string, string, number | null]> = [
+      ['node-a1', 'node-a2', 1],
+      ['node-a1', 'node-a3', 2],
+    ];
+    render(<FleetGridPanel {...makeProps([cells(), edges(star)])} />);
+    fireEvent.click(container(), { clientX: 10, clientY: 5 });
+    expect(screen.getByLabelText('Close')).toBeInTheDocument();
+    expect(arcsIn(focusLayer()!)).toBe(2);
+
+    // node-a4 has nothing to show: the edges of the popover's cell stay, and the rest stays dimmed.
+    hoverHost(3);
+    expect(screen.getByLabelText('Close')).toBeInTheDocument();
+    expect(arcsIn(focusLayer()!)).toBe(2);
+    expect(restLayer()).toHaveStyle({ opacity: '0.22' });
+    // The tooltip is node-a4's: it must not describe the edges of node-a1.
+    expect(screen.getByRole('tooltip')).toHaveTextContent('400');
+    expect(screen.queryByTestId('flow-tooltip')).not.toBeInTheDocument();
+
+    // node-a2 has an edge of its own: the pointer wins.
+    hoverHost(1);
+    expect(arcsIn(focusLayer()!)).toBe(1);
+    expect(screen.getByTestId('flow-tooltip')).toHaveTextContent('Flows: 0 out, 1 in, 1 peer');
+
+    // Off the grid, the popover's cell is in focus again.
     fireEvent.mouseLeave(container());
     expect(arcsIn(focusLayer()!)).toBe(2);
   });

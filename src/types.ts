@@ -52,6 +52,8 @@ export interface FlowOverlayOptions {
   flowEndpoints?: FlowEndpointMapping[];
   /** Draw the arcs all the time, or only those of the hovered cell. */
   flowShow?: FlowShowMode;
+  /** The most arcs drawn while no cell is hovered: the worst ones. Unset draws up to 100; at most 500. */
+  flowRestArcs?: number;
   /** Which end of the edge value is the worse one. Sets the filter direction and which edges win the draw bound. */
   flowWorst?: FlowWorstDirection;
   /** Draw only the edges strictly worse than this value. Unset draws every edge. */

@@ -4,6 +4,7 @@ import {
   FlowEdge,
   FlowModel,
   FlowNodeSummary,
+  FlowQueryState,
   buildFlowModel,
   flowBaseEdges,
   flowFocusEdges,
@@ -32,17 +33,19 @@ export interface FlowOverlayInput {
   viewportW: number;
   viewportH: number;
   theme: GrafanaTheme2;
+  /** The cell under the pointer. Its edges are in focus, and the tooltip describes them. */
+  hovered: { cell: CellModel } | null;
   /**
-   * The cells whose edges can be emphasised, most important first: the hovered cell, then the cell of
-   * the open popover. The first one that is set is in focus.
+   * The cell of the open drilldown popover. Its edges stay in focus while the pointer is elsewhere: off
+   * the grid, on the popover, or on a cell that has no edges of its own.
    */
-  focusCandidates: Array<{ cell: CellModel } | null>;
+  pinned: { cell: CellModel } | null;
 }
 
 export interface FlowOverlayState {
   /** Whether an edge query is named, so that the overlay canvases are to be mounted. */
   active: boolean;
-  /** The focused cell's edges for the tooltip, or null when it has none. */
+  /** The hovered cell's edges for the tooltip, or null when it has none. */
   summary: FlowNodeSummary | null;
   /** Whether arcs are in focus, so that the resting layer is to be dimmed. */
   focused: boolean;
@@ -124,27 +127,56 @@ export function withFlowWarnings(model: PanelModel, flow: FlowModel | null): Pan
 }
 
 /**
- * The flow model of the panel, or null when no edge query is named. `series` holds all frames of the
- * panel (the edge query's frames are picked by refId) and `root` the hierarchy built from the other
+ * Whether the query `refId` ran. A query that ran and returned nothing has no frame, so the panel's
+ * request decides: its targets that are not hidden are the queries that ran.
+ */
+export function flowQueryState(
+  frames: DataFrame[],
+  refId: string,
+  request: Pick<DataQueryRequest, 'targets'> | undefined
+): FlowQueryState {
+  if (frames.length > 0) {
+    return 'found';
+  }
+  if (!request) {
+    return 'unknown';
+  }
+  return (request.targets ?? []).some((target) => target.refId === refId && !target.hide) ? 'found' : 'missing';
+}
+
+/**
+ * The flow model of the panel, or null when no edge query is named. `data` is the panel's data with all
+ * its frames (the edge query's frames are picked by refId) and `root` the hierarchy built from the other
  * queries. It does not depend on the layout, so its warnings are known before the layout is computed.
  */
 export function useFlowModel(
-  series: DataFrame[],
+  data: Pick<PanelData, 'series' | 'request'>,
   options: FleetGridOptions,
   root: HierarchyNode,
   theme: GrafanaTheme2,
   timeZone: string
 ): FlowModel | null {
+  const { series, request } = data;
   const config = useMemo(() => resolveFlowConfig(options), [options]);
   const refId = config?.refId;
   const frames = useMemo(
     () => (refId === undefined ? NO_FRAMES : series.filter((frame) => frameHasRefId(frame, refId))),
     [series, refId]
   );
+  const query = refId === undefined ? 'unknown' : flowQueryState(frames, refId, request);
   return useMemo(
-    () => (config ? buildFlowModel(frames, root, options, config, theme, timeZone) : null),
-    [config, frames, root, options, theme, timeZone]
+    () => (config ? buildFlowModel(frames, root, options, config, theme, timeZone, query) : null),
+    [config, frames, root, options, theme, timeZone, query]
   );
+}
+
+// The key of a cell's node when that node has edges, otherwise null.
+function nodeWithEdges(model: FlowModel | null, target: { cell: CellModel } | null): string | null {
+  if (!model || !target) {
+    return null;
+  }
+  const key = flowNodeKey(model, target.cell);
+  return model.byNode.has(key) ? key : null;
 }
 
 /**
@@ -154,20 +186,23 @@ export function useFlowModel(
  * the cell pipeline again.
  */
 export function useFlowOverlay(input: FlowOverlayInput): FlowOverlayState {
-  const { model, restRef, focusRef, layout, viewportW, viewportH, theme, focusCandidates } = input;
-  const focusCell = focusCandidates.find((candidate) => candidate !== null)?.cell ?? null;
+  const { model, restRef, focusRef, layout, viewportW, viewportH, theme, hovered, pinned } = input;
   const depth = model?.depth ?? 0;
   const anchors = useMemo(() => (depth > 0 ? flowAnchors(layout, depth) : new Map()), [layout, depth]);
   const rest = useMemo(() => (model ? flowBaseEdges(model) : NO_EDGES), [model]);
   // The focus is keyed by the node, not by the cell: the cells of one group share their group's edges.
-  const focusKey = model && focusCell ? flowNodeKey(model, focusCell) : null;
+  // The hovered cell wins. A hovered cell without edges has nothing to show, so it does not take the
+  // focus away from the cell of the open popover.
+  const hoverKey = nodeWithEdges(model, hovered);
+  const focusKey = hoverKey ?? nodeWithEdges(model, pinned);
   const focus = useMemo(
     () => (model && focusKey !== null ? flowFocusEdges(model, [focusKey]) : null),
     [model, focusKey]
   );
+  // The tooltip belongs to the hovered cell, so its summary is never that of the popover's cell.
   const summary = useMemo(
-    () => (model && focusKey !== null ? summarizeFlowNode(model, focusKey) : null),
-    [model, focusKey]
+    () => (model && hoverKey !== null ? summarizeFlowNode(model, hoverKey) : null),
+    [model, hoverKey]
   );
   const colorCache = useRef<ColorCache>({ model: null, theme: null, colors: new Map() });
 

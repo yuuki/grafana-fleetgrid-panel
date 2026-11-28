@@ -1,7 +1,7 @@
 import { PanelPlugin } from '@grafana/data';
 import { FleetGridOptions, normalizeCategoryStyle } from './types';
 import { FleetGridPanel } from './components/FleetGridPanel';
-import { flowRefId } from './data/edges';
+import { DEFAULT_FLOW_REST_ARCS, MAX_FLOW_ARCS, flowRefId } from './data/edges';
 import { FlowEndpointsEditor } from './options/FlowEndpointsEditor';
 import { LevelsEditor } from './options/LevelsEditor';
 import { ReduceCalcEditor } from './options/ReduceCalcEditor';
@@ -154,6 +154,16 @@ export const plugin = new PanelPlugin<FleetGridOptions>(FleetGridPanel).useField
         ],
       },
       showIf: flowEnabled,
+    })
+    .addNumberInput({
+      path: 'flowRestArcs',
+      name: 'Arcs at rest',
+      description:
+        'The most arcs drawn while no cell is hovered: the worst ones. More than about a hundred hide the cells. A hovered cell always shows its own edges',
+      category: ['Flow overlay'],
+      defaultValue: DEFAULT_FLOW_REST_ARCS,
+      settings: { min: 1, max: MAX_FLOW_ARCS, integer: true },
+      showIf: (options) => flowEnabled(options) && options.flowShow !== 'hover',
     })
     .addRadio({
       path: 'flowWorst',
