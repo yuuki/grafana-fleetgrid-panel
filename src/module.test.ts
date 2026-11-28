@@ -1,3 +1,4 @@
+import { standardEditorsRegistry } from '@grafana/data';
 import { declareFitContentSupport, plugin } from './module';
 import { FleetGridOptions } from './types';
 
@@ -27,6 +28,23 @@ describe('categoryStyle migration', () => {
     expect(shouldMigrate({})).toBe(true);
     expect(shouldMigrate({ categoryStyle: 'strip' })).toBe(false);
     expect(shouldMigrate({ categoryStyle: 'border' })).toBe(false);
+  });
+});
+
+describe('selection options', () => {
+  it('default to an automatic label and no variable, so a new or existing panel writes nothing', () => {
+    // Grafana fills this registry at startup; reading the defaults only needs the editors to exist.
+    standardEditorsRegistry.setInit(() =>
+      ['radio', 'text', 'boolean', 'color', 'select'].map((id) => ({ id, name: id, editor: () => null }))
+    );
+    expect(plugin.defaults).toMatchObject({ selectionLabel: '', selectionVariable: '' });
+  });
+
+  it('are carried through the migration untouched', () => {
+    const out = migrate({ categoryStyle: 'topBar', selectionLabel: 'host', selectionVariable: 'hosts' });
+    expect(out).toMatchObject({ selectionLabel: 'host', selectionVariable: 'hosts' });
+    // A dashboard saved before the options existed gains no keys.
+    expect(migrate({ categoryStyle: 'strip' })).toEqual({ categoryStyle: 'strip' });
   });
 });
 

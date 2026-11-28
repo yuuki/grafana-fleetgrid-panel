@@ -1,4 +1,4 @@
-import { test, expect } from '@grafana/plugin-e2e';
+import { test, expect, type DashboardPage } from '@grafana/plugin-e2e';
 import type { Locator } from '@playwright/test';
 
 // The subject under test is provisioning/dashboards/fleetgrid.json (uid: fleetgrid-e2e).
@@ -671,4 +671,217 @@ test('query-B cell has no link and opens the popover instead of navigating', asy
   // No navigation occurred (URL unchanged, no link query)
   expect(page.url()).toBe(urlBefore);
   expect(page.url()).not.toContain('drilldown=celllink');
+});
+
+// ---------------------------------------------------------------------------------------------
+// Cell selection. The "Selection" panel (id 7) has two zones stacked: zone-a with node-a001..004
+// in one row and zone-b with node-b001..002, two GPU cells per host, and it syncs its selection to
+// the dashboard variable `selected_hosts`. node-a004 has no temperature (query B).
+
+interface SelectionPanel {
+  panel: Locator;
+  canvas: Locator;
+  /** A point inside each cell of zone-a's row of hosts, by `host/gpu`. */
+  cells: Record<string, { x: number; y: number }>;
+}
+
+async function openSelectionPanel(dashboardPage: DashboardPage): Promise<SelectionPanel> {
+  const panel = await dashboardPage.getPanelByTitle('Selection');
+  // Open the dedicated panel directly because Grafana does not mount dashboard rows below the viewport.
+  const page = panel.locator.page();
+  const panelUrl = new URL(page.url());
+  panelUrl.searchParams.set('viewPanel', '7');
+  await page.goto(panelUrl.toString());
+  await expect(panel.locator).toBeVisible();
+  const canvas = panel.locator.locator('canvas');
+  await expect(canvas).toBeVisible();
+  await expect.poll(() => isPainted(canvas)).toBe(true);
+
+  // The first cell from the top-left is node-a001/gpu0; the other cells of zone-a are on its row.
+  const first = await findCellPoint(canvas, panel.locator);
+  const box = await canvas.boundingBox();
+  if (!box) {
+    throw new Error('canvas has no bounding box');
+  }
+  const y = first.y + 6;
+  const cells: SelectionPanel['cells'] = {};
+  for (let x = 2; x <= box.width; x += 6) {
+    const path = await probePath(canvas, panel.locator, x, y);
+    const key = path && `${path.host}/${path.gpu}`;
+    if (path && key && path.zone === 'zone-a' && !cells[key]) {
+      // A few pixels inside the cell, away from its edge.
+      cells[key] = { x: x + 4, y };
+    }
+  }
+  expect(Object.keys(cells)).toEqual(
+    ['node-a001', 'node-a002', 'node-a003', 'node-a004'].flatMap((host) => [`${host}/gpu0`, `${host}/gpu1`])
+  );
+  return { panel: panel.locator, canvas, cells };
+}
+
+/** The y of the top edge of the cell at a point, found with the hover tooltip. */
+async function cellTop(canvas: Locator, panel: Locator, point: { x: number; y: number }): Promise<number> {
+  let top = point.y;
+  while (top > 0 && (await probePath(canvas, panel, point.x, top - 1))) {
+    top -= 1;
+  }
+  return top;
+}
+
+/** Presses Shift and the mouse button at one point of the canvas and releases both at another. */
+async function shiftDrag(canvas: Locator, from: { x: number; y: number }, to: { x: number; y: number }): Promise<void> {
+  const box = await canvas.boundingBox();
+  if (!box) {
+    throw new Error('canvas has no bounding box');
+  }
+  const page = canvas.page();
+  await page.keyboard.down('Shift');
+  await page.mouse.move(box.x + from.x, box.y + from.y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + to.x, box.y + to.y, { steps: 4 });
+  await page.mouse.up();
+  await page.keyboard.up('Shift');
+}
+
+test('Shift+click and Shift+drag select cells and leave the plain click alone', async ({
+  gotoDashboardPage,
+  readProvisionedDashboard,
+}) => {
+  test.setTimeout(90_000);
+  const dashboard = await readProvisionedDashboard({ fileName: FILE });
+  const { panel, canvas, cells } = await openSelectionPanel(await gotoDashboardPage({ uid: dashboard.uid }));
+  const count = panel.getByTestId('selection-count');
+  await expect(panel.getByTestId('selection-bar')).toHaveCount(0);
+  const unselected = await stableHash(canvas);
+
+  // Shift+click a cell: it is selected and ringed, and no drilldown popover opens.
+  await canvas.click({ position: cells['node-a001/gpu0'], modifiers: ['Shift'] });
+  await expect(count).toHaveText('1 cell selected');
+  await expect(panel.getByRole('button', { name: 'Close', exact: true })).toHaveCount(0);
+  await expect.poll(() => frameHash(canvas)).not.toBe(unselected);
+
+  // Shift+click the host label above it: the group of the host is completed, then removed as a whole.
+  const top = await cellTop(canvas, panel, cells['node-a001/gpu0']);
+  const hostLabel = { x: cells['node-a001/gpu0'].x, y: top - 8 };
+  await canvas.click({ position: hostLabel, modifiers: ['Shift'] });
+  await expect(count).toHaveText('2 cells selected');
+  await canvas.click({ position: hostLabel, modifiers: ['Shift'] });
+  await expect(panel.getByTestId('selection-bar')).toHaveCount(0);
+  await expect.poll(() => frameHash(canvas)).toBe(unselected);
+
+  // Shift+drag from the first cell of node-a001 into the second cell of node-a003: six cells, three hosts.
+  await shiftDrag(canvas, cells['node-a001/gpu0'], cells['node-a003/gpu1']);
+  await expect(count).toHaveText('6 cells selected');
+  await expect(panel.getByTestId('selection-label')).toHaveText('3 host values:');
+  // The rubber band is gone, and the page selected no text.
+  await expect(panel.getByTestId('selection-band')).toBeHidden();
+  expect(await canvas.page().evaluate(() => window.getSelection()?.toString())).toBe('');
+
+  // Shift+click a selected cell takes it out again.
+  await canvas.click({ position: cells['node-a002/gpu0'], modifiers: ['Shift'] });
+  await expect(count).toHaveText('5 cells selected');
+
+  // A plain click still opens the drilldown popover and does not change the selection.
+  await canvas.click({ position: cells['node-a004/gpu1'] });
+  await expect(panel.getByRole('button', { name: 'Close', exact: true })).toBeVisible();
+  await expect(count).toHaveText('5 cells selected');
+  await panel.getByRole('button', { name: 'Close', exact: true }).click();
+
+  // After a gesture the selection bar has the focus: Escape clears the selection and Grafana stays
+  // in the panel view, which the same key would otherwise leave.
+  await canvas.click({ position: cells['node-a002/gpu0'], modifiers: ['Shift'] });
+  await expect(count).toHaveText('6 cells selected');
+  await expect(panel.getByTestId('selection-bar')).toBeFocused();
+  await canvas.page().keyboard.press('Escape');
+  await expect(panel.getByTestId('selection-bar')).toHaveCount(0);
+  expect(canvas.page().url()).toContain('viewPanel');
+  await expect(canvas).toBeVisible();
+});
+
+test('copies the selected hosts as a regular expression, a list and a hostlist', async ({
+  gotoDashboardPage,
+  readProvisionedDashboard,
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  const dashboard = await readProvisionedDashboard({ fileName: FILE });
+  const { panel, canvas, cells } = await openSelectionPanel(await gotoDashboardPage({ uid: dashboard.uid }));
+  await shiftDrag(canvas, cells['node-a001/gpu0'], cells['node-a003/gpu1']);
+  await expect(panel.getByTestId('selection-count')).toHaveText('6 cells selected');
+
+  // The copy is asynchronous: poll the clipboard until it holds the text.
+  const clipboardAfter = (format: string) => {
+    return expect.poll(async () => {
+      await panel.getByTestId(`selection-copy-${format}`).click();
+      return canvas.page().evaluate(() => navigator.clipboard.readText());
+    });
+  };
+  await clipboardAfter('regex').toBe('^(node-a001|node-a002|node-a003)$');
+  await clipboardAfter('list').toBe('node-a001,node-a002,node-a003');
+  // The zero-padded width is kept: node-a[1-3] would be other hosts.
+  await clipboardAfter('hostlist').toBe('node-a[001-003]');
+});
+
+test('compares the selected cells with the others in the cohort drawer', async ({
+  gotoDashboardPage,
+  readProvisionedDashboard,
+}) => {
+  test.setTimeout(90_000);
+  const dashboard = await readProvisionedDashboard({ fileName: FILE });
+  const { panel, canvas, cells } = await openSelectionPanel(await gotoDashboardPage({ uid: dashboard.uid }));
+  await shiftDrag(canvas, cells['node-a001/gpu0'], cells['node-a003/gpu1']);
+  await panel.getByTestId('selection-compare').click();
+
+  // The drawer is rendered by Grafana outside the panel.
+  const page = canvas.page();
+  const comparison = page.getByTestId('cohort-comparison');
+  await expect(comparison).toBeVisible();
+  await expect(page.getByText('6 selected cells against 6 other cells')).toBeVisible();
+  const row = async (testId: string) => comparison.getByTestId(testId).getByRole('cell').allInnerTexts();
+  // Power: 100..150 W selected, 160..330 W in the other cells. Every selected cell is lower: δ = −1.
+  const selectedPower = await row('cohort-selected-A');
+  expect(selectedPower.slice(0, 3)).toEqual(['6', '0', '100 W']);
+  expect(selectedPower[3]).toBe('125 W');
+  expect(selectedPower[5]).toBe('150 W');
+  await expect(comparison.getByTestId('cohort-delta-A')).toHaveText('−1.00');
+  const otherPower = await row('cohort-rest-A');
+  expect([otherPower[0], otherPower[1], otherPower[2], otherPower[5]]).toEqual(['6', '0', '160 W', '330 W']);
+  // Temperature: node-a004 has none. Its two cells are counted as "no value", not as 0 °C.
+  const otherTemp = await row('cohort-rest-B');
+  expect([otherTemp[0], otherTemp[1], otherTemp[2], otherTemp[5]]).toEqual(['4', '2', '80 °C', '86 °C']);
+  await expect(comparison.getByTestId('cohort-delta-B')).toHaveText('−1.00');
+
+  // Escape closes the drawer and keeps the selection.
+  await page.keyboard.press('Escape');
+  await expect(comparison).toHaveCount(0);
+  await expect(panel.getByTestId('selection-count')).toHaveText('6 cells selected');
+});
+
+test('writes the selected hosts to the dashboard variable and restores it when the selection is cleared', async ({
+  gotoDashboardPage,
+  readProvisionedDashboard,
+}) => {
+  test.setTimeout(90_000);
+  const dashboard = await readProvisionedDashboard({ fileName: FILE });
+  const { panel, canvas, cells } = await openSelectionPanel(await gotoDashboardPage({ uid: dashboard.uid }));
+  const page = canvas.page();
+  const variable = () => new URL(page.url()).searchParams.getAll('var-selected_hosts');
+  await expect.poll(variable).toEqual(['$__all']);
+
+  await shiftDrag(canvas, cells['node-a001/gpu0'], cells['node-a003/gpu1']);
+  await expect(panel.getByTestId('selection-sync')).toHaveText('→ $selected_hosts');
+  await expect.poll(variable).toEqual(['node-a001', 'node-a002', 'node-a003']);
+
+  // Removing a host from the selection updates the variable.
+  await canvas.click({ position: cells['node-a002/gpu0'], modifiers: ['Shift'] });
+  await canvas.click({ position: cells['node-a002/gpu1'], modifiers: ['Shift'] });
+  await expect.poll(variable).toEqual(['node-a001', 'node-a003']);
+
+  // Clearing the selection puts back what the variable held before: All. Grafana 13 floats its
+  // "View panel" pane over the right side of the panel, so the click is dispatched to the button
+  // instead of aimed at its position.
+  await panel.getByTestId('selection-clear').dispatchEvent('click');
+  await expect(panel.getByTestId('selection-bar')).toHaveCount(0);
+  await expect.poll(variable).toEqual(['$__all']);
 });

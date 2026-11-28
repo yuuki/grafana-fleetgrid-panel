@@ -1,7 +1,7 @@
 import { DisplayValue, GrafanaTheme2 } from '@grafana/data';
 import { CategoryModel, primaryCategoryValue } from '../data/categories';
 import { MetricInfo, chooseCellText } from '../data/display';
-import { LayoutCell, LayoutLabel, LayoutResult } from '../layout/layout';
+import { LayoutCell, LayoutLabel, LayoutResult, pinnedTopLabel } from '../layout/layout';
 import { CategoryDecorationStyle, CellModel, DisplayMode } from '../types';
 import { cellRangeFor } from '../data/cellRange';
 import { splitRects } from './split';
@@ -18,6 +18,8 @@ export interface RenderContext {
   viewportH: number;
   category?: CategoryModel;
   categoryStyle: CategoryDecorationStyle;
+  /** Cells of the viewer's selection (Shift+click, Shift+drag). Each one gets a selection ring. */
+  selectedCells?: ReadonlySet<CellModel>;
   /** Category values that lock the highlight via legend clicks. */
   selectedCategoryValues?: string[];
   /** A single category value transiently highlighted while its legend chip is hovered. Overrides the click selection. */
@@ -121,10 +123,40 @@ function outlineBandsDev(g: CellGeom): { frame: number; moat: number } {
   return { frame, moat: Math.min(Math.round(2 * g.dpr), cap - frame) };
 }
 
-function ringBandsDev(g: CellGeom): { ring: number; sep: number } {
+interface RingBands {
+  ring: number;
+  sep: number;
+}
+
+function ringBandsDev(g: CellGeom): RingBands {
   const cap = bandCapDev(g);
   const ring = Math.min(Math.round(2 * g.dpr), cap);
   return { ring, sep: Math.min(Math.round(g.dpr), cap - ring) };
+}
+
+// The selection ring is half as thick as the highlight ring on cells below 14px, and has no separator
+// there: selected cells are selected to be compared, so their fill has to stay readable. A 6px cell
+// keeps 4px of fill inside a 1px ring, where the 2px highlight ring would leave 2px.
+function selectionBandsDev(g: CellGeom): RingBands {
+  const large = g.logicalW >= 14;
+  const cap = bandCapDev(g);
+  const ring = Math.min(Math.round((large ? 2 : 1) * g.dpr), cap);
+  return { ring, sep: large ? Math.min(Math.round(g.dpr), cap - ring) : 0 };
+}
+
+// The ring a cell gets, if any. Both rings hug the cell's outer edge, so a cell that is selected and
+// highlighted shows the selection ring: the category highlight still reads from the dimming of the other
+// cells, the selection has no other mark. `highlightColor` is set only on a cell that matches the highlight.
+function ringFor(
+  cell: CellModel,
+  g: CellGeom,
+  p: CellPass,
+  highlightColor: string | undefined
+): { bands: RingBands; color: string } | undefined {
+  if (p.rc.selectedCells?.has(cell)) {
+    return { bands: selectionBandsDev(g), color: p.selectionColor };
+  }
+  return highlightColor ? { bands: ringBandsDev(g), color: highlightColor } : undefined;
 }
 
 // The bottom strip only eats from the cell's lower edge, so its cap is the shortest row's visible fill.
@@ -187,11 +219,17 @@ function drawCategoryDecoration(
   }
 }
 
-// Highlight ring: a colored ring hugging the cell's outer edge with an inner background separator. Drawn
-// on matching cells during highlight (click selection and hover) regardless of the decoration style, so the
-// match is double-encoded (ring + un-dimmed) rather than relying on brightness alone.
-function drawCategoryRing(ctx: CanvasRenderingContext2D, g: CellGeom, color: string, bgColor: string): void {
-  const { ring, sep } = ringBandsDev(g);
+// Ring: a colored ring hugging the cell's outer edge with an inner background separator. Drawn in the
+// category color on matching cells during highlight (click selection and hover) regardless of the decoration
+// style, so the match is double-encoded (ring + un-dimmed) rather than relying on brightness alone, and in
+// the theme's maximum-contrast color on the cells of the viewer's selection.
+function drawCellRing(
+  ctx: CanvasRenderingContext2D,
+  g: CellGeom,
+  color: string,
+  bgColor: string,
+  { ring, sep }: RingBands
+): void {
   if (ring <= 0) {
     return;
   }
@@ -209,7 +247,7 @@ function textInsets(
   g: CellGeom,
   style: CategoryDecorationStyle,
   hasCategory: boolean,
-  ringed: boolean
+  ringBands: RingBands | undefined
 ): { x: number; top: number; bottom: number } {
   let x = 0;
   let top = 0;
@@ -225,9 +263,8 @@ function textInsets(
       bottom = Math.max(bottom, d);
     }
   }
-  if (ringed) {
-    const { ring, sep } = ringBandsDev(g);
-    const d = (ring + sep) / g.dpr;
+  if (ringBands) {
+    const d = (ringBands.ring + ringBands.sep) / g.dpr;
     x = Math.max(x, d);
     top = Math.max(top, d);
     bottom = Math.max(bottom, d);
@@ -278,6 +315,8 @@ interface CellPass {
   // A category is active and at least one value is highlighted, so non-matching cells are dimmed.
   highlighting: boolean;
   bgColor: string;
+  // Ring color of the selected cells: the theme's strongest text color, which no heatmap fill uses.
+  selectionColor: string;
 }
 
 function cellPass(rc: RenderContext, dpr: number): CellPass {
@@ -307,6 +346,7 @@ function cellPass(rc: RenderContext, dpr: number): CellPass {
     activeHighlight,
     highlighting: !!rc.category && activeHighlight.length > 0,
     bgColor: rc.theme.colors.background.primary,
+    selectionColor: rc.theme.colors.text.maxContrast,
   };
 }
 
@@ -418,16 +458,17 @@ function drawCell(ctx: CanvasRenderingContext2D, c: LayoutCell, p: CellPass): vo
     drawCategoryDecoration(ctx, g, categoryColor, rc.categoryStyle, bgColor);
   }
 
+  const ring = ringFor(c.cell, g, p, ringColor);
   if (!p.split && rc.showValues && display) {
     // Shrink the fit region by the decoration/ring safe insets so the value never sits under a band.
-    const insets = textInsets(g, rc.categoryStyle, !!categoryColor, matched && !!ringColor);
+    const insets = textInsets(g, rc.categoryStyle, !!categoryColor, ring?.bands);
     drawValueText(ctx, g, display, insets, rc.theme, rc.missingColor);
   }
   ctx.globalAlpha = 1;
 
-  // Draw the highlight ring last, at full alpha, so it sits above the fill/decoration/text of the matched cell.
-  if (matched && ringColor) {
-    drawCategoryRing(ctx, g, ringColor, bgColor);
+  // Draw the ring last, at full alpha, so it sits above the fill/decoration/text of the cell.
+  if (ring) {
+    drawCellRing(ctx, g, ring.color, bgColor, ring.bands);
   }
 }
 
@@ -448,11 +489,7 @@ function drawPinnedTopLabel(
   scrollTop: number,
   theme: GrafanaTheme2
 ): void {
-  if (scrollTop <= 0) {
-    return;
-  }
-  const tops = labels.filter((l) => l.depth === 1);
-  const current = [...tops].reverse().find((l) => l.y <= scrollTop);
+  const current = pinnedTopLabel(labels, scrollTop);
   if (!current) {
     return;
   }
