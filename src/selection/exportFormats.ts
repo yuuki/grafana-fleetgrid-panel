@@ -64,7 +64,8 @@ export function configuredSelectionLabel(configured: string | undefined, levels:
 // class it is an ordinary character.
 const REGEX_SPECIAL = /[\\^[.*+?()|{}$\n\r]/g;
 
-// The characters that have no form without a backslash.
+// The characters that are written with a backslash. A backslash and `^` have no other form; a line
+// break is written as its escape sequence, so that the expression stays on one line.
 const BACKSLASHED: Record<string, string> = { '\\': '\\\\', '^': '\\^', '\n': '\\n', '\r': '\\r' };
 
 /**
