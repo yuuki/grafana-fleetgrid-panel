@@ -1,9 +1,9 @@
 {
   "repository": "yuuki/grafana-fleetgrid-panel/complexity",
   "ref": "refs/heads/main",
-  "commit": "df93e20d5a4b913587deed2b44274671d07dd4a9",
+  "commit": "5dadcd983ff6d1179f46f62def85a19f70b38357",
   "base_ref": "refs/heads/main",
-  "timestamp": "2026-11-28T07:20:29.993893171Z",
+  "timestamp": "2026-11-28T07:30:35.481813859Z",
   "custom_metrics": [
     {
       "key": "code_complexity",
@@ -24,12 +24,12 @@
         {
           "key": "function_count",
           "name": "Function count",
-          "value": 377
+          "value": 601
         },
         {
           "key": "cognitive_sum",
           "name": "Cognitive: total",
-          "value": 728
+          "value": 1075
         },
         {
           "key": "cognitive_max",
@@ -49,7 +49,7 @@
         {
           "key": "cyclomatic_sum",
           "name": "Cyclomatic: total",
-          "value": 1105
+          "value": 1682
         },
         {
           "key": "cyclomatic_max",
