@@ -59,6 +59,26 @@ describe('SelectionBar', () => {
     expect(isDisabled(screen.getByTestId('selection-copy-list'))).toBe(false);
   });
 
+  it.each([['a\\d'], ['^a'], ['a"b']])(
+    'warns that the regular expression of %j needs escaping inside a quoted string',
+    (value) => {
+      render(<SelectionBar {...props({ values: ['node-a001', value] })} />);
+      const warning = screen.getByTestId('selection-regex-warning');
+      expect(warning).toHaveTextContent('Regex: a value contains \\ ^ or ", escape them inside a quoted string');
+      expect(warning).toHaveAttribute('title', expect.stringContaining('fails or matches other values'));
+      // The copy stays possible: the text is a correct regular expression.
+      expect(isDisabled(screen.getByTestId('selection-copy-regex'))).toBe(false);
+    }
+  );
+
+  it.each([['node-a001.example.com'], ['[fd00::1]:9100'], ['a\nb'], ['$__all'], ["a'b"]])(
+    'does not warn for %j, whose regular expression a quoted string reads as it is',
+    (value) => {
+      render(<SelectionBar {...props({ values: ['node-a001', value] })} />);
+      expect(screen.queryByTestId('selection-regex-warning')).not.toBeInTheDocument();
+    }
+  );
+
   it('disables every copy when the selected cells have no value for the label', () => {
     render(<SelectionBar {...props({ values: [] })} />);
     expect(screen.getByTestId('selection-label')).toHaveTextContent('0 host values:');

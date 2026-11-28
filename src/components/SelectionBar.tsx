@@ -4,7 +4,7 @@ import { CellModel } from '../types';
 import { MetricInfo } from '../data/display';
 import { copyText } from '../selection/clipboard';
 import { compactHostlist, isHostlistName } from '../selection/hostlist';
-import { toList, toRegex } from '../selection/exportFormats';
+import { needsQuoteEscaping, toList, toRegex } from '../selection/exportFormats';
 import { SyncStatus, syncMessage } from '../selection/variable';
 import { ResolvedSelection } from '../selection/selection';
 import { CohortDrawer } from './CohortDrawer';
@@ -52,6 +52,24 @@ function formatValues(format: CopyFormat, values: string[]): string | null {
 
 const plural = (count: number, noun: string): string => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
+const HOSTLIST_IMPOSSIBLE = 'Hostlist notation cannot express an empty value or one that contains , [ ] or white space';
+const REGEX_WARNING = 'Regex: a value contains \\ ^ or ", escape them inside a quoted string';
+const REGEX_WARNING_DETAIL =
+  'The copied text is correct as a regular expression. A value contains a backslash, ^ or a double quote, ' +
+  'so inside a quoted string (a PromQL or LogQL matcher, a shell argument) it needs the escaping of that string: ' +
+  'pasted as it is, it fails or matches other values.';
+
+function copyTooltip(
+  format: CopyFormat,
+  plain: string,
+  { hostlistPossible, regexNeedsEscaping }: { hostlistPossible: boolean; regexNeedsEscaping: boolean }
+): string {
+  if (format === 'hostlist' && !hostlistPossible) {
+    return HOSTLIST_IMPOSSIBLE;
+  }
+  return format === 'regex' && regexNeedsEscaping ? REGEX_WARNING_DETAIL : plain;
+}
+
 // The result of the last copy, with the values it was made of. It is shown only while the bar still
 // shows those values: after the selection changed, the text is no longer what the buttons copy.
 interface CopyOutcome {
@@ -85,6 +103,8 @@ export const SelectionBar: React.FC<SelectionBarProps> = ({
   const [comparing, setComparing] = useState(false);
   // Hostlist notation cannot express every value. The other formats can.
   const hostlistPossible = useMemo(() => values.every(isHostlistName), [values]);
+  // Inside a quoted string, the regular expression of such a value means something else.
+  const regexNeedsEscaping = useMemo(() => values.some(needsQuoteEscaping), [values]);
   const [outcome, setOutcome] = useState<CopyOutcome | undefined>(undefined);
   const current = outcome?.values === values ? outcome : undefined;
   const copied = current && current.failedText === undefined ? current.format : undefined;
@@ -157,11 +177,10 @@ export const SelectionBar: React.FC<SelectionBarProps> = ({
             disabled={unavailable}
             data-testid={`selection-copy-${id}`}
             aria-label={`Copy the ${label ?? 'label'} values as ${describe}`}
-            tooltip={
-              id === 'hostlist' && !hostlistPossible
-                ? 'Hostlist notation cannot express an empty value or one that contains , [ ] or white space'
-                : `Copy the ${label ?? 'label'} values as ${describe}`
-            }
+            tooltip={copyTooltip(id, `Copy the ${label ?? 'label'} values as ${describe}`, {
+              hostlistPossible,
+              regexNeedsEscaping,
+            })}
             onClick={() => {
               // The text is built here, not while rendering: a selection can hold thousands of values.
               const text = unavailable ? null : formatValues(id, values);
@@ -177,6 +196,15 @@ export const SelectionBar: React.FC<SelectionBarProps> = ({
       <Button size="sm" variant="secondary" fill="text" onClick={onClear} data-testid="selection-clear">
         Clear
       </Button>
+      {regexNeedsEscaping && (
+        <span
+          data-testid="selection-regex-warning"
+          title={REGEX_WARNING_DETAIL}
+          style={{ color: theme.colors.warning.text }}
+        >
+          {REGEX_WARNING}
+        </span>
+      )}
       {message && (
         <span
           data-testid="selection-sync"

@@ -60,18 +60,32 @@ export function configuredSelectionLabel(configured: string | undefined, levels:
   return name && selectionLabels(levels).includes(name) ? name : undefined;
 }
 
-const REGEX_SPECIAL = /[\\^[\].*+?()|{}$]/g;
+// What a regular expression reads as an operator, and the line breaks. `]` is not in it: outside a
+// class it is an ordinary character.
+const REGEX_SPECIAL = /[\\^[.*+?()|{}$\n\r]/g;
+
+// The characters that have no form without a backslash.
+const BACKSLASHED: Record<string, string> = { '\\': '\\\\', '^': '\\^', '\n': '\\n', '\r': '\\r' };
 
 /**
  * A regular expression that matches the value literally. A metacharacter is written as a
- * one-character class (`.` becomes `[.]`): a class needs no backslash, so the result can be pasted
- * into a double-quoted PromQL or LogQL string, where `\.` is an invalid escape sequence and the
- * expression would need `\\.`. Only the four characters that are special inside a class as well
- * (backslash, `^`, `[` and `]`) take a backslash.
+ * one-character class (`.` becomes `[.]`, `[` becomes `[[]`): a class needs no backslash, so the
+ * result can be pasted into a double-quoted PromQL or LogQL string, where `\.` is an invalid escape
+ * sequence and the expression would need `\\.`. A line break is written `\n` or `\r`, which such a
+ * string and the expression read alike. Only a backslash and `^` have no form without a backslash
+ * (see `needsQuoteEscaping`).
  */
 export function escapeRegexValue(value: string): string {
-  return value.replace(REGEX_SPECIAL, (char) => ('\\^[]'.includes(char) ? `\\${char}` : `[${char}]`));
+  return value.replace(REGEX_SPECIAL, (char) => BACKSLASHED[char] ?? `[${char}]`);
 }
+
+/**
+ * Whether the regular expression for this value changes its meaning, or ends the string, when it is
+ * pasted into a double-quoted string as it is: the expression holds `\\` or `\^`, which the string
+ * reads as an escape sequence, or a `"`. `^(a\\d)$` in a PromQL string is the expression `^(a\d)$`,
+ * which matches another host. The text that holds the expression has to escape it first.
+ */
+export const needsQuoteEscaping = (value: string): boolean => /[\\^"]/.test(value);
 
 /**
  * A regular expression that matches exactly the given values: `^(node-a1|node-a2)$`. The anchors make

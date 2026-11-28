@@ -1,4 +1,4 @@
-import { toRegex } from './exportFormats';
+import { needsQuoteEscaping, toRegex } from './exportFormats';
 
 /** What a dashboard variable holds, and what `var-<name>` is set to: one value or a list. */
 export type VariableValue = string | string[];
@@ -44,6 +44,8 @@ export type SyncStatus =
   | { state: 'unrestorable'; name: string }
   /** A selected value is Grafana's own token for "All". */
   | { state: 'reserved'; name: string }
+  /** A text box would get a regular expression that a quoted string reads differently. */
+  | { state: 'unquotable'; name: string }
   | { state: 'tooLarge'; name: string; length: number }
   | { state: 'failed'; name: string };
 
@@ -117,7 +119,9 @@ export function describeVariable(variables: VariableLike[], name: string): Varia
 /**
  * The value a variable gets for the selected label values. A multi-value variable gets the values
  * themselves: Grafana formats and escapes them for each query that uses the variable. A text box
- * gets one regular expression that matches exactly these values.
+ * gets one regular expression that matches exactly these values. Grafana puts it into a query as
+ * text, and whether a backslash in it is escaped on the way depends on the data source, so the sync
+ * writes only an expression that a quoted string reads as it is (`needsQuoteEscaping`).
  */
 export function variableValueFor(values: string[], multi: boolean): VariableValue {
   return multi ? values : toRegex(values);
@@ -326,6 +330,9 @@ export class VariableSync {
     if (multi && values.includes(ALL_VALUE)) {
       return { state: 'reserved', name };
     }
+    if (!multi && values.some(needsQuoteEscaping)) {
+      return { state: 'unquotable', name };
+    }
     const length = urlLength(name, next);
     return length > MAX_URL_CHARS ? { state: 'tooLarge', name, length } : undefined;
   }
@@ -418,6 +425,11 @@ export function syncMessage(status: SyncStatus): { text: string; problem: boolea
       return { text: `Variable "${status.name}" has no value to put back later: not synced`, problem: true };
     case 'reserved':
       return { text: `A selected value is ${ALL_VALUE}, which Grafana reads as All: not synced`, problem: true };
+    case 'unquotable':
+      return {
+        text: `A selected value contains \\ ^ or ", which the text box $${status.name} cannot pass to a query safely: not synced`,
+        problem: true,
+      };
     case 'tooLarge':
       return {
         text: `Selection too large for $${status.name} (${status.length} of ${MAX_URL_CHARS} URL characters)`,

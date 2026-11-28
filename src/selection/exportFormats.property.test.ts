@@ -1,5 +1,5 @@
 import fc from 'fast-check';
-import { toList, toRegex } from './exportFormats';
+import { needsQuoteEscaping, toList, toRegex } from './exportFormats';
 import { propertyParams } from '../testing/property';
 
 // The copied regular expression must select exactly the selected values, whatever characters they
@@ -7,7 +7,7 @@ import { propertyParams } from '../testing/property';
 // hosts that were not selected.
 
 // Label values made mostly of the characters that mean something in a regular expression.
-const special = fc.constantFrom(...'.*+?()[]{}|^$\\-/ab01'.split(''));
+const special = fc.constantFrom(...'.*+?()[]{}|^$\\-/ab01"\n\r\t'.split(''));
 const value = fc.oneof(
   fc.array(special, { maxLength: 8 }).map((chars) => chars.join('')),
   fc.string({ maxLength: 8 }),
@@ -32,6 +32,26 @@ describe('toRegex (properties)', () => {
           }
         }
       ),
+      propertyParams()
+    );
+  });
+
+  // The promise of the README: unless the bar warns, the copied text can stand between the double
+  // quotes of a PromQL or LogQL matcher as it is.
+  it('has no backslash, quote or line break that a quoted string would read differently', () => {
+    fc.assert(
+      fc.property(fc.array(value, { minLength: 1, maxLength: 8 }), (values) => {
+        fc.pre(!values.some(needsQuoteEscaping));
+        const text = toRegex(values);
+        // The only backslashes are those of \n and \r, which the string turns into the line break
+        // that the expression then matches literally.
+        expect(text.replace(/\\[nr]/g, '')).not.toMatch(/[\\"\n\r]/);
+        const regex = new RegExp(text.replace(/\\n/g, '\n').replace(/\\r/g, '\r'));
+        for (const v of values) {
+          expect(regex.test(v)).toBe(true);
+          expect(regex.test(`${v}x`)).toBe(values.includes(`${v}x`));
+        }
+      }),
       propertyParams()
     );
   });

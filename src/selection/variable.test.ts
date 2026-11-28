@@ -260,6 +260,38 @@ describe('VariableSync', () => {
       expect(valueOf('host_regex')).toBe('^([$]__all)$');
     });
 
+    // Grafana puts the text of a text box into the query string of the panel that uses it. Whether a
+    // backslash is escaped on the way depends on the data source: where it is not, `^(a\\d)$` arrives
+    // as the expression `^(a\d)$` and filters the other panel to hosts that were not selected.
+    it.each([['a\\d'], ['^a'], ['a"b']])(
+      'refuses to write %j to a text box, whose expression a quoted string would read differently',
+      (value) => {
+        const { sync, writes, valueOf } = fakeGrafana();
+        const p = panel();
+        sync.claim('host_regex', p, ['node-a001']);
+        sync.verify();
+        sync.claim('host_regex', p, ['node-a001', value]);
+        expect(sync.status('host_regex', p)).toEqual({ state: 'unquotable', name: 'host_regex' });
+        // The earlier selection is taken out of the text box again.
+        expect(valueOf('host_regex')).toBe('.*');
+        expect(writes).toHaveLength(2);
+        // A multi-value variable holds the value itself, and Grafana escapes it for each query.
+        sync.claim('hosts', p, ['node-a001', value]);
+        sync.verify();
+        expect(valueOf('hosts')).toEqual(['node-a001', value].sort());
+        expect(sync.status('hosts', p).state).toBe('synced');
+      }
+    );
+
+    it('writes brackets and line breaks to a text box in a form that a quoted string reads as it is', () => {
+      const { sync, valueOf } = fakeGrafana();
+      const p = panel();
+      sync.claim('host_regex', p, ['[fd00::1]:9100', 'a\nb']);
+      sync.verify();
+      expect(valueOf('host_regex')).toBe('^([[]fd00::1]:9100|a\\nb)$');
+      expect(sync.status('host_regex', p).state).toBe('synced');
+    });
+
     it('refuses a selection that is too large for the URL and restores the variable', () => {
       const { sync, writes, valueOf } = fakeGrafana();
       const p = panel();
@@ -503,6 +535,7 @@ describe('syncMessage', () => {
       'single',
       'unrestorable',
       'reserved',
+      'unquotable',
       'failed',
     ] as const) {
       expect(syncMessage({ state, name: 'hosts' })).toMatchObject({ problem: true });
