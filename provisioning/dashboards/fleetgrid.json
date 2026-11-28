@@ -675,7 +675,7 @@
         "missingColor": "rgb(70,70,70)",
         "spatialAggregation": "max",
         "reduceCalc": "lastNotNull",
-        "selectionLabel": "",
+        "selectionLabel": "host",
         "selectionVariable": "selected_hosts"
       },
       "targets": [

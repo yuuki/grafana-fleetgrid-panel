@@ -12,7 +12,7 @@ This repository contains a **Grafana plugin**. You must Read @./.config/AGENTS/i
 ## Compatibility contracts
 - Plugin ID and type (`src/plugin.json`): never change; its `grafanaDependency` is the support promise of README.md.
 - Panel option paths and values in dashboard JSON (`src/module.ts`, `src/types.ts`): a rename needs a migration in `setMigrationHandler`.
-- The panel semantics documented in README.md and `docs/design.md`; the E2E dashboard `provisioning/dashboards/fleetgrid.json` ↔ `tests/`.
+- The panel semantics documented in README.md and `docs/design.md`; the E2E dashboards `provisioning/dashboards/fleetgrid.json`, `selection-sync.json` ↔ `tests/`.
 - What a cell selection copies and writes to a dashboard variable (`src/selection/exportFormats.ts`, `hostlist.ts`, `variable.ts`): users paste it into commands and queries.
 - Release artifact `yuuk1-fleetgrid-panel-<version>.zip` (`release.yml`); the tag matches `version` in `package.json`.
 
