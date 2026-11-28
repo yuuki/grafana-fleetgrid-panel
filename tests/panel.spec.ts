@@ -528,6 +528,29 @@ test('clicking a cell opens the drilldown popover', async ({ gotoDashboardPage, 
   await expect(panel.locator.getByText('No time series').first()).toBeVisible();
 });
 
+test('Escape closes the drilldown popover, and in panel view it stays in the panel view', async ({
+  gotoDashboardPage,
+  readProvisionedDashboard,
+  page,
+}) => {
+  const dashboard = await readProvisionedDashboard({ fileName: FILE });
+  for (const queryParams of [undefined, new URLSearchParams({ viewPanel: 'panel-1' })]) {
+    const dashboardPage = await gotoDashboardPage({ uid: dashboard.uid, queryParams });
+    const panel = await dashboardPage.getPanelByTitle('FleetGrid');
+    const canvas = panel.locator.locator('canvas');
+    await expect(canvas).toBeVisible();
+    await canvas.click({ position: await findCellPoint(canvas, panel.locator) });
+    const close = panel.locator.getByRole('button', { name: 'Close' });
+    await expect(close).toBeVisible();
+    const url = page.url();
+    // Grafana's own Escape shortcut (leave the panel view, ...) must not take the key press first, or as well.
+    await page.keyboard.press('Escape');
+    await expect(close).toHaveCount(0);
+    await expect(canvas).toBeVisible();
+    expect(page.url()).toBe(url);
+  }
+});
+
 test('split mode shows the position legend instead of the selector', async ({
   gotoDashboardPage,
   readProvisionedDashboard,

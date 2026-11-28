@@ -663,6 +663,29 @@ describe('FleetGridPanel', () => {
     expect(screen.queryByLabelText('Close')).not.toBeInTheDocument();
   });
 
+  it('closes the popover on Escape before the Grafana shortcuts on document, which stop it, see it', () => {
+    // Grafana's keyboard shortcuts handle Escape on document (leave the panel view, ...) and stop its propagation there.
+    const grafanaShortcut = jest.fn((e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+      }
+    });
+    document.addEventListener('keydown', grafanaShortcut);
+    try {
+      render(<FleetGridPanel {...makeProps(clickable())} />);
+      fireEvent.click(containerOf(), { clientX: 10, clientY: 5 });
+      expect(screen.getByLabelText('Close')).toBeInTheDocument();
+      fireEvent.keyDown(document.body, { key: 'Escape' });
+      expect(screen.queryByLabelText('Close')).not.toBeInTheDocument();
+      expect(grafanaShortcut).not.toHaveBeenCalled();
+      // With no overlay open, Escape stays Grafana's
+      fireEvent.keyDown(document.body, { key: 'Escape' });
+      expect(grafanaShortcut).toHaveBeenCalledTimes(1);
+    } finally {
+      document.removeEventListener('keydown', grafanaShortcut);
+    }
+  });
+
   it('repositions an open drilldown popover within the resized visible bounds', () => {
     const props = makeProps(clickable());
     const { rerender } = render(<FleetGridPanel {...props} />);
