@@ -219,6 +219,8 @@ Clicking a cell resolves in this order:
 
 Select the cells that look wrong together, then compare them with the rest of the grid or act on their hosts. A selection is made with the Shift key and the primary button of a mouse or pen:
 
+![Eight selected cells, the selection bar, and another panel that shows only the four selected hosts](./src/img/fleetgrid-cell-selection.png)
+
 | Gesture                   | Effect                                                                                                                        |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | Shift+click a cell        | Selects the cell, or takes it out of the selection when it is selected                                                        |
