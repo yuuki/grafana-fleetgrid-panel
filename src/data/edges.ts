@@ -148,6 +148,17 @@ export function flowRefId(options: Pick<FleetGridOptions, 'flowRefId'>): string 
 /** Whether a frame belongs to the query `refId` (a frame without a refId counts as 'A', as in normalizeFrames). */
 export const frameHasRefId = (frame: DataFrame, refId: string): boolean => (frame.refId ?? 'A') === refId;
 
+/**
+ * The number of arcs at rest that an option value stands for: a whole number from 1 to MAX_FLOW_ARCS, or
+ * the default for anything that is not a finite number. The editor stores this number, and a value that
+ * was stored by hand is read through it.
+ */
+export function normalizeFlowRestArcs(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(MAX_FLOW_ARCS, Math.max(1, Math.round(value)))
+    : DEFAULT_FLOW_REST_ARCS;
+}
+
 /** Normalizes the persisted options. Returns null when the overlay is off (no edge query is named). */
 export function resolveFlowConfig(options: FleetGridOptions): FlowConfig | null {
   const refId = flowRefId(options);
@@ -161,16 +172,12 @@ export function resolveFlowConfig(options: FleetGridOptions): FlowConfig | null 
     .filter((m) => m && !isBlank(m.level) && !isBlank(m.source) && !isBlank(m.destination))
     .map((m) => ({ level: m.level, source: m.source.trim(), destination: m.destination.trim() }));
   const threshold = options.flowThreshold;
-  const restArcs = options.flowRestArcs;
   return {
     refId,
     endpoints,
     incompleteEndpoints: stored.length - endpoints.length,
     show: options.flowShow === 'hover' ? 'hover' : 'always',
-    restArcs:
-      typeof restArcs === 'number' && Number.isFinite(restArcs)
-        ? Math.min(MAX_FLOW_ARCS, Math.max(1, Math.round(restArcs)))
-        : DEFAULT_FLOW_REST_ARCS,
+    restArcs: normalizeFlowRestArcs(options.flowRestArcs),
     worst: options.flowWorst === 'low' ? 'low' : 'high',
     threshold: typeof threshold === 'number' && Number.isFinite(threshold) ? threshold : undefined,
     orderLabel: trimmed(options.flowOrderLabel),

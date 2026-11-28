@@ -84,7 +84,6 @@ describe('flow overlay options', () => {
   it('offers the number of arcs at rest, 100 by default and 500 at most, only while arcs are drawn at rest', () => {
     const item = items().find((entry) => entry.path === 'flowRestArcs')!;
     expect(item.defaultValue).toBe(100);
-    expect(item.settings).toMatchObject({ min: 1, max: 500, integer: true });
     expect(item.showIf!({ flowRefId: 'E', flowShow: 'always' } as FleetGridOptions)).toBe(true);
     expect(item.showIf!({ flowRefId: 'E', flowShow: 'hover' } as FleetGridOptions)).toBe(false);
   });

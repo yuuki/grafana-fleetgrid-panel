@@ -865,6 +865,11 @@ test('flow overlay draws as many arcs at rest as its option says', async ({
   await arcs.fill('3');
   await arcs.blur();
   await expect(count).toHaveText('3 of 10 edges drawn, worst first');
+  // A number over the limit is stored as the limit: the field shows what is stored.
+  await arcs.fill('1000');
+  await arcs.blur();
+  await expect(arcs).toHaveValue('500');
+  await expect(count).toHaveText('10 edges');
 });
 
 test('a panel without an edge query has no overlay canvas', async ({ gotoDashboardPage, readProvisionedDashboard }) => {
