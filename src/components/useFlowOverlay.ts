@@ -28,6 +28,8 @@ export interface FlowOverlayInput {
   restRef: React.RefObject<HTMLCanvasElement>;
   focusRef: React.RefObject<HTMLCanvasElement>;
   layout: LayoutResult;
+  /** Width and height of the visible area of the panel body. */
+  viewportW: number;
   viewportH: number;
   theme: GrafanaTheme2;
   /**
@@ -152,7 +154,7 @@ export function useFlowModel(
  * the cell pipeline again.
  */
 export function useFlowOverlay(input: FlowOverlayInput): FlowOverlayState {
-  const { model, restRef, focusRef, layout, viewportH, theme, focusCandidates } = input;
+  const { model, restRef, focusRef, layout, viewportW, viewportH, theme, focusCandidates } = input;
   const focusCell = focusCandidates.find((candidate) => candidate !== null)?.cell ?? null;
   const depth = model?.depth ?? 0;
   const anchors = useMemo(() => (depth > 0 ? flowAnchors(layout, depth) : new Map()), [layout, depth]);
@@ -176,8 +178,18 @@ export function useFlowOverlay(input: FlowOverlayInput): FlowOverlayState {
     }
     const colorOf = edgeColors(colorCache, model, theme);
     const edges = rest;
-    renderFlowLayer(canvas, { layout, viewportH, anchors, edges, emphasised: false, retain: false, colorOf, theme });
-  }, [restRef, model, layout, viewportH, anchors, rest, theme]);
+    renderFlowLayer(canvas, {
+      layout,
+      viewportW,
+      viewportH,
+      anchors,
+      edges,
+      emphasised: false,
+      retain: false,
+      colorOf,
+      theme,
+    });
+  }, [restRef, model, layout, viewportW, viewportH, anchors, rest, theme]);
 
   useEffect(() => {
     const canvas = focusRef.current;
@@ -186,8 +198,18 @@ export function useFlowOverlay(input: FlowOverlayInput): FlowOverlayState {
     }
     const colorOf = edgeColors(colorCache, model, theme);
     const edges = focus ?? NO_EDGES;
-    renderFlowLayer(canvas, { layout, viewportH, anchors, edges, emphasised: true, retain: true, colorOf, theme });
-  }, [focusRef, model, layout, viewportH, anchors, focus, theme]);
+    renderFlowLayer(canvas, {
+      layout,
+      viewportW,
+      viewportH,
+      anchors,
+      edges,
+      emphasised: true,
+      retain: true,
+      colorOf,
+      theme,
+    });
+  }, [focusRef, model, layout, viewportW, viewportH, anchors, focus, theme]);
 
   return { active: model !== null, summary, focused: focus !== null };
 }

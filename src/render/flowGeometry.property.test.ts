@@ -1,10 +1,18 @@
 import fc from 'fast-check';
-import { FlowRect, flowArc, flowArcPoint, flowArrowHead } from './flowGeometry';
+import {
+  FLOW_APEX_MARGIN,
+  FlowRect,
+  MIN_FLOW_BULGE,
+  flowArc,
+  flowArcPoint,
+  flowArrowHead,
+  flowBadgePoint,
+} from './flowGeometry';
 import { propertyParams } from '../testing/property';
 
 // Geometric invariants of an arc for any two rectangles on any canvas: it joins the two centres, its
-// two directions never share a curve, it stays on the canvas whenever one side allows it, and its
-// arrowhead points along the direction of travel.
+// two directions never share a curve, every point of it is on the canvas, and its arrowhead points
+// along the direction of travel.
 
 const WIDTH = 1200;
 const HEIGHT = 800;
@@ -18,7 +26,6 @@ const rect: fc.Arbitrary<FlowRect> = fc.record({
 
 const centre = (r: FlowRect) => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
 const distinct = (a: FlowRect, b: FlowRect) => Math.hypot(centre(a).x - centre(b).x, centre(a).y - centre(b).y) > 1;
-const onCanvas = (p: { x: number; y: number }) => p.x >= 0 && p.y >= 0 && p.x <= WIDTH && p.y <= HEIGHT;
 
 describe('flowArc (properties)', () => {
   it('joins the centres with finite coordinates and a unit normal', () => {
@@ -49,16 +56,65 @@ describe('flowArc (properties)', () => {
     );
   });
 
-  it('keeps the apex on the canvas whenever one of the two sides fits', () => {
+  // Any canvas, also one that is narrower or lower than the bulge the arc would like to have.
+  const sized = fc
+    .record({
+      width: fc.double({ min: 46, max: 2 * WIDTH, noNaN: true }),
+      height: fc.double({ min: 46, max: 2 * HEIGHT, noNaN: true }),
+    })
+    .chain(({ width, height }) => {
+      const inCanvas = fc.record({
+        x: fc.double({ min: 0, max: width - 40, noNaN: true }),
+        y: fc.double({ min: 0, max: height - 40, noNaN: true }),
+        w: fc.double({ min: 6, max: 40, noNaN: true }),
+        h: fc.double({ min: 6, max: 40, noNaN: true }),
+      });
+      return fc.tuple(fc.constant(width), fc.constant(height), inCanvas, inCanvas);
+    });
+
+  it('keeps every point of the arc on the canvas, on any canvas', () => {
     fc.assert(
-      fc.property(rect, rect, (a, b) => {
+      fc.property(sized, ([width, height, a, b]) => {
         fc.pre(distinct(a, b));
-        const arc = flowArc(a, b, WIDTH, HEIGHT)!;
-        const unbounded = flowArc(a, b, Infinity, Infinity)!;
-        const flipped = arc.nx !== unbounded.nx || arc.ny !== unbounded.ny;
-        if (flipped || onCanvas(flowArcPoint(unbounded, 0.5))) {
-          expect(onCanvas(flowArcPoint(arc, 0.5))).toBe(true);
+        const arc = flowArc(a, b, width, height)!;
+        for (let i = 0; i <= 64; i++) {
+          const point = flowArcPoint(arc, i / 64);
+          expect(point.x).toBeGreaterThanOrEqual(-1e-6);
+          expect(point.y).toBeGreaterThanOrEqual(-1e-6);
+          expect(point.x).toBeLessThanOrEqual(width + 1e-6);
+          expect(point.y).toBeLessThanOrEqual(height + 1e-6);
         }
+      }),
+      propertyParams()
+    );
+  });
+
+  it('keeps the two directions apart on any canvas, also one without room for the bulge', () => {
+    fc.assert(
+      fc.property(sized, ([width, height, a, b]) => {
+        fc.pre(distinct(a, b));
+        const forward = flowArc(a, b, width, height)!;
+        const backward = flowArc(b, a, width, height)!;
+        expect(Math.hypot(forward.cx - backward.cx, forward.cy - backward.cy)).toBeGreaterThan(4);
+      }),
+      propertyParams()
+    );
+  });
+
+  it('keeps the arrowhead and the hop number clear of the canvas edge whenever the arc is curved by choice', () => {
+    // Only an arc of at most MIN_FLOW_BULGE can have been pushed into the margin (see flowArc).
+    fc.assert(
+      fc.property(sized, ([width, height, a, b]) => {
+        fc.pre(distinct(a, b));
+        const arc = flowArc(a, b, width, height)!;
+        const bulge = Math.hypot(arc.cx - (arc.x0 + arc.x1) / 2, arc.cy - (arc.y0 + arc.y1) / 2);
+        fc.pre(bulge > MIN_FLOW_BULGE + 1e-6);
+        // The hop number is written up to FLOW_APEX_MARGIN beyond the apex, on the side of the bulge.
+        const beyond = flowBadgePoint(arc, FLOW_APEX_MARGIN);
+        expect(beyond.x).toBeGreaterThanOrEqual(-1e-6);
+        expect(beyond.y).toBeGreaterThanOrEqual(-1e-6);
+        expect(beyond.x).toBeLessThanOrEqual(width + 1e-6);
+        expect(beyond.y).toBeLessThanOrEqual(height + 1e-6);
       }),
       propertyParams()
     );

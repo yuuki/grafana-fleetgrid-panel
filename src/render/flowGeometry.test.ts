@@ -1,6 +1,15 @@
 import { LayoutResult } from '../layout/layout';
 import { pathKey } from '../data/hierarchy';
-import { FlowRect, flowAnchors, flowArc, flowArcPoint, flowArrowHead, flowBadgePoint, flowBulge } from './flowGeometry';
+import {
+  FLOW_APEX_MARGIN,
+  FlowRect,
+  flowAnchors,
+  flowArc,
+  flowArcPoint,
+  flowArrowHead,
+  flowBadgePoint,
+  flowBulge,
+} from './flowGeometry';
 
 const cell = (x: number, y: number, path: string[]) => ({
   x,
@@ -119,9 +128,37 @@ describe('flowArc', () => {
     expect(forward.cy).toBeGreaterThan(backward.cy + 10);
   });
 
-  it('keeps the left side when neither side fits', () => {
-    const arc = flowArc(rect(0, 0), rect(200, 0), 210, 10)!;
-    expect(arc.ny).toBe(-1);
+  it('bulges only as far as fits when neither side has room, so its middle stays on the canvas', () => {
+    // A canvas as high as the row has no room on either side. The two directions still do not share a
+    // line: each bulges by the smallest bulge to its own side, and stays on the canvas.
+    const flat = flowArc(rect(0, 0), rect(200, 0), 210, 10)!;
+    expect(flowArcPoint(flat, 0.5)).toEqual({ x: 105, y: 1 });
+    expect(flowArcPoint(flowArc(rect(200, 0), rect(0, 0), 210, 10)!, 0.5)).toEqual({ x: 105, y: 9 });
+    // A long vertical edge in a canvas 68 px wide (zones stacked in one column): the full bulge would
+    // put the middle of the arc, with the arrowhead and the hop number, outside the canvas.
+    const from = { x: 2, y: 34, w: 13, h: 13 };
+    const to = { x: 53, y: 2990, w: 13, h: 13 };
+    const narrow = flowArc(from, to, 68, 3026)!;
+    for (let i = 0; i <= 100; i++) {
+      const point = flowArcPoint(narrow, i / 100);
+      expect(point.x).toBeGreaterThanOrEqual(0);
+      expect(point.x).toBeLessThanOrEqual(68);
+    }
+    const apex = flowArcPoint(narrow, 0.5);
+    // The hop number is written beyond the apex, along the arc's normal: that far the canvas goes on.
+    expect(flowBadgePoint(narrow, FLOW_APEX_MARGIN).x).toBeLessThanOrEqual(68 + 1e-9);
+    expect(apex.x).toBeLessThan(68 - FLOW_APEX_MARGIN + 0.01);
+    // It still bulges as far as the canvas allows, rather than not at all.
+    expect(Math.abs(apex.x - (from.x + to.x + 13) / 2)).toBeGreaterThan(5);
+  });
+
+  it('uses the full bulge again when the canvas is as wide as the panel', () => {
+    const from = { x: 2, y: 34, w: 13, h: 13 };
+    const to = { x: 53, y: 2990, w: 13, h: 13 };
+    const wide = flowArc(from, to, 1550, 3026)!;
+    const length = Math.hypot(51, 2956);
+    expect(Math.hypot(wide.cx - 34, wide.cy - 1518.5)).toBeCloseTo(flowBulge(length));
+    expect(flowArcPoint(wide, 0.5).x).toBeGreaterThan(68);
   });
 
   it('has no arc between two rectangles with the same centre', () => {

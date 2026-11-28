@@ -34,7 +34,8 @@ export interface FlowArc {
 // different lengths over the same row of cells nest instead of covering each other.
 const BULGE_GAIN = 0.35;
 const BULGE_SCALE = 500;
-const MIN_BULGE = 8;
+/** The bulge of the shortest arcs, in px: neighbouring cells still get a visible curve. */
+export const MIN_FLOW_BULGE = 8;
 // An arc that had to be flipped to the other side bulges more than the arc of the opposite direction,
 // which already occupies that side, so the two do not coincide.
 const FLIP_GAIN = 1.6;
@@ -63,17 +64,64 @@ export function flowAnchors(layout: LayoutResult, depth: number): Map<string, Fl
 }
 
 export function flowBulge(length: number): number {
-  return Math.max(MIN_BULGE, (BULGE_GAIN * length) / (1 + length / BULGE_SCALE));
+  return Math.max(MIN_FLOW_BULGE, (BULGE_GAIN * length) / (1 + length / BULGE_SCALE));
 }
 
-const inside = (x: number, y: number, width: number, height: number): boolean =>
-  x >= 0 && y >= 0 && x <= width && y <= height;
+/**
+ * Distance that the apex of an arc keeps from the edge of the canvas, measured along the line through
+ * the apex on which the arrowhead and the hop number sit, when the canvas has room for it. It is large
+ * enough for the hop number, which is written beyond the arrowhead.
+ */
+export const FLOW_APEX_MARGIN = 24;
+
+// The largest bulge towards one edge of the canvas. d0 and d1 are the distances of the arc's two ends
+// from that edge and k (> 0) is the part of the unit normal that points at it.
+// - The apex is at (d0 + d1) / 2 - k × bulge / 2 from the edge; it keeps `margin` along the normal.
+// - The point of the arc at t is at (1 - t) d0 + t d1 - 2 t (1 - t) k × bulge from the edge. That is not
+//   negative for any t exactly when bulge <= (√d0 + √d1)² / (2 k), so the whole arc is on the canvas,
+//   not only its apex (an arc with one end at the edge leaves the canvas near that end first).
+function edgeRoom(d0: number, d1: number, k: number, margin: number): number {
+  const a = Math.max(0, d0);
+  const b = Math.max(0, d1);
+  const root = Math.sqrt(a) + Math.sqrt(b);
+  return Math.min((a + b) / k - 2 * margin, (root * root) / (2 * k));
+}
+
+interface Chord {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+// The largest bulge to the side of the unit normal (nx, ny) with which the whole arc stays on the canvas
+// and its apex keeps `margin` from the edge. Only the edges that the normal points at limit it.
+function sideRoom(c: Chord, nx: number, ny: number, width: number, height: number, margin: number): number {
+  let room = Infinity;
+  if (nx < 0) {
+    room = Math.min(room, edgeRoom(c.x0, c.x1, -nx, margin));
+  } else if (nx > 0) {
+    room = Math.min(room, edgeRoom(width - c.x0, width - c.x1, nx, margin));
+  }
+  if (ny < 0) {
+    room = Math.min(room, edgeRoom(c.y0, c.y1, -ny, margin));
+  } else if (ny > 0) {
+    room = Math.min(room, edgeRoom(height - c.y0, height - c.y1, ny, margin));
+  }
+  return Math.max(0, room);
+}
 
 /**
- * The arc from the centre of `from` to the centre of `to`. It bulges to the left of the direction of
- * travel, so A→B and B→A are two separate curves. When the arc's apex would leave the canvas (width ×
- * height) and the other side fits, it bulges to the right instead, by FLIP_GAIN more. Returns null when
- * the two centres coincide.
+ * The arc from the centre of `from` to the centre of `to` on a canvas of width × height. It bulges to the
+ * left of the direction of travel, so A→B and B→A are two separate curves. The whole arc stays on the
+ * canvas, and its apex, where the arrowhead and the hop number are, keeps FLOW_APEX_MARGIN from the edge:
+ * - when its own side has no room for the bulge and the other side has room for a bulge that is
+ *   FLIP_GAIN larger, it bulges to that side instead, outside the arc of the opposite direction, which
+ *   is already there;
+ * - otherwise it stays on its own side and bulges only as far as fits there, down to a straight line;
+ * - when that leaves both directions nearly straight (a canvas with no room on either side), each may
+ *   bulge by MIN_FLOW_BULGE into the margin, as far as the canvas goes, so the two do not coincide.
+ * Returns null when the two centres coincide.
  */
 export function flowArc(from: FlowRect, to: FlowRect, width: number, height: number): FlowArc | null {
   const x0 = from.x + from.w / 2;
@@ -86,21 +134,26 @@ export function flowArc(from: FlowRect, to: FlowRect, width: number, height: num
   if (!(length > 0)) {
     return null;
   }
-  const mx = (x0 + x1) / 2;
-  const my = (y0 + y1) / 2;
+  const chord = { x0, y0, x1, y1 };
   // Left of the direction of travel in canvas coordinates (y grows downwards).
   let nx = dy / length;
   let ny = -dx / length;
-  let bulge = flowBulge(length);
-  // The apex of a quadratic Bézier is halfway between the chord's midpoint and the control point.
-  const fitsLeft = inside(mx + (nx * bulge) / 2, my + (ny * bulge) / 2, width, height);
-  const flipped = bulge * FLIP_GAIN;
-  if (!fitsLeft && inside(mx - (nx * flipped) / 2, my - (ny * flipped) / 2, width, height)) {
-    nx = -nx;
-    ny = -ny;
-    bulge = flipped;
+  const wanted = flowBulge(length);
+  const own = sideRoom(chord, nx, ny, width, height, FLOW_APEX_MARGIN);
+  let bulge = wanted;
+  if (own < wanted) {
+    const other = sideRoom(chord, -nx, -ny, width, height, FLOW_APEX_MARGIN);
+    if (other >= wanted * FLIP_GAIN) {
+      nx = -nx;
+      ny = -ny;
+      bulge = wanted * FLIP_GAIN;
+    } else if (own < MIN_FLOW_BULGE && other < MIN_FLOW_BULGE) {
+      bulge = Math.max(own, Math.min(MIN_FLOW_BULGE, sideRoom(chord, nx, ny, width, height, 0)));
+    } else {
+      bulge = own;
+    }
   }
-  return { x0, y0, cx: mx + nx * bulge, cy: my + ny * bulge, x1, y1, nx, ny };
+  return { x0, y0, cx: (x0 + x1) / 2 + nx * bulge, cy: (y0 + y1) / 2 + ny * bulge, x1, y1, nx, ny };
 }
 
 /** The point of the arc at parameter t in [0, 1]. */

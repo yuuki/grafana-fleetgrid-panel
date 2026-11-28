@@ -2,7 +2,14 @@ import { createTheme } from '@grafana/data';
 import { FlowEdge } from '../data/edges';
 import { LayoutResult } from '../layout/layout';
 import { FlowRect } from './flowGeometry';
-import { FlowRenderContext, flowArrowSize, flowBadgeText, flowLineWidth, renderFlowLayer } from './flowRenderer';
+import {
+  FlowRenderContext,
+  flowArrowSize,
+  flowBadgeText,
+  flowLayerSize,
+  flowLineWidth,
+  renderFlowLayer,
+} from './flowRenderer';
 import { renderCanvas } from './renderer';
 
 const theme = createTheme();
@@ -40,6 +47,7 @@ const colorOf = (e: FlowEdge) => (e.value! >= 1 ? '#ff0000' : '#00ff00');
 
 const context = (over: Partial<FlowRenderContext>): FlowRenderContext => ({
   layout,
+  viewportW: 1000,
   viewportH: 600,
   anchors,
   edges: [],
@@ -93,7 +101,7 @@ describe('flowLineWidth', () => {
 });
 
 describe('renderFlowLayer', () => {
-  it('sizes its canvas exactly like the cell canvas, so both share one coordinate system', () => {
+  it('sizes its canvas like the cell canvas when the grid fills the panel', () => {
     const tall: LayoutResult = { ...layout, contentWidth: 333.5, contentHeight: 120.5 };
     const cells = document.createElement('canvas');
     const layer = document.createElement('canvas');
@@ -109,9 +117,29 @@ describe('renderFlowLayer', () => {
       viewportH: 300,
       categoryStyle: 'strip',
     });
-    renderFlowLayer(layer, context({ layout: tall, viewportH: 300, edges: [edge('a', 'b', 1)] }));
+    renderFlowLayer(layer, context({ layout: tall, viewportW: 333.5, viewportH: 300, edges: [edge('a', 'b', 1)] }));
     expect([layer.width, layer.height]).toEqual([cells.width, cells.height]);
     expect([layer.style.width, layer.style.height]).toEqual([cells.style.width, cells.style.height]);
+  });
+
+  it('is as wide as the panel when the grid is narrower, so arcs have room beside the grid', () => {
+    // One column of zones in a wide panel: the grid is 68 px wide, the panel 1550 px.
+    const narrow: LayoutResult = { ...layout, contentWidth: 68, contentHeight: 3026 };
+    expect(flowLayerSize({ layout: narrow, viewportW: 1550, viewportH: 400 })).toEqual({ width: 1550, height: 3026 });
+    const layer = document.createElement('canvas');
+    const column = new Map<string, FlowRect>([
+      ['a', { x: 2, y: 34, w: 13, h: 13 }],
+      ['b', { x: 53, y: 2990, w: 13, h: 13 }],
+    ]);
+    renderFlowLayer(
+      layer,
+      context({ layout: narrow, viewportW: 1550, viewportH: 400, anchors: column, edges: [edge('a', 'b', 1)] })
+    );
+    expect([layer.width, layer.style.width]).toEqual([1550, '1550px']);
+    // The arc bulges into the free area: its control point is right of the grid, on the canvas.
+    const curve = eventsOf(layer).find((e) => e.type === 'quadraticCurveTo')!;
+    expect(curve.props.cpx).toBeGreaterThan(68);
+    expect(curve.props.cpx).toBeLessThan(1550);
   });
 
   it('clears instead of resizing when the size did not change', () => {
@@ -235,6 +263,30 @@ describe('renderFlowLayer', () => {
     expect(texts).toEqual(['1', '2']);
     // Each number has a background-colored outline so it reads on any cell color.
     expect(count(events, 'strokeText')).toBe(2);
+  });
+
+  it('moves a hop number back onto the canvas where the arc has no room for it', () => {
+    // One row of cells in a panel that is as high as the row, and one column in a panel as wide as it.
+    const row: LayoutResult = { ...layout, cellSize: 12, contentWidth: 300, contentHeight: 12 };
+    const column: LayoutResult = { ...layout, cellSize: 12, contentWidth: 12, contentHeight: 300 };
+    const cases = [
+      { layout: row, viewportW: 300, viewportH: 12, to: { x: 288, y: 0, w: 12, h: 12 } },
+      { layout: column, viewportW: 12, viewportH: 300, to: { x: 0, y: 288, w: 12, h: 12 } },
+    ];
+    for (const { to, ...size } of cases) {
+      const tight = new Map<string, FlowRect>([
+        ['a', { x: 0, y: 0, w: 12, h: 12 }],
+        ['b', to],
+      ]);
+      const events = draw({ ...size, anchors: tight, edges: [edge('a', 'b', 2, [{ path: 'ring-a', order: 7 }])] });
+      const texts = events.filter((e) => e.type === 'fillText').map((e) => e.props);
+      expect(texts.map((t) => t.text)).toEqual(['7']);
+      // The text is centred on (x, y) and 10 px high: its centre keeps half its size from every edge.
+      expect(texts[0].x as number).toBeGreaterThanOrEqual(4);
+      expect(texts[0].x as number).toBeLessThanOrEqual(size.viewportW - 4);
+      expect(texts[0].y as number).toBeGreaterThanOrEqual(6);
+      expect(texts[0].y as number).toBeLessThanOrEqual(size.viewportH - 6);
+    }
   });
 
   it('writes no number for an edge without a hop number', () => {

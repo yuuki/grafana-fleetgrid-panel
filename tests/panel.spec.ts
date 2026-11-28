@@ -733,14 +733,22 @@ test('flow overlay draws the edge query as arcs on its own canvas', async ({
   await expect(rest).toBeVisible();
   await expect.poll(() => hasArcs(rest)).toBe(true);
   expect(await hasArcs(focus)).toBe(false);
-  // Both canvases share one coordinate system: same backing store and same CSS box.
-  const size = (canvas: Locator) =>
+  // The arc canvas starts at the cell canvas's origin, so both share one coordinate system. It also
+  // covers the part of the panel beside the grid: arcs bulge into it instead of being cut at the grid.
+  const box = (canvas: Locator) =>
     canvas.evaluate((el) => {
       const c = el as HTMLCanvasElement;
       const r = c.getBoundingClientRect();
-      return [c.width, c.height, r.left, r.top, r.width, r.height];
+      const container = c.parentElement!;
+      return { left: r.left, top: r.top, width: r.width, height: r.height, visible: container.clientWidth };
     });
-  expect(await size(rest)).toEqual(await size(cells));
+  const restBox = await box(rest);
+  const cellBox = await box(cells);
+  expect([restBox.left, restBox.top]).toEqual([cellBox.left, cellBox.top]);
+  expect(restBox.height).toBeGreaterThanOrEqual(cellBox.height);
+  expect(restBox.width).toBe(Math.max(cellBox.width, restBox.visible));
+  // It never makes the panel scroll sideways.
+  expect(await rest.evaluate((el) => el.parentElement!.scrollWidth <= el.parentElement!.clientWidth)).toBe(true);
 
   // 13 rows: 10 edges (two rows of one pair are aggregated), 1 row to a host that is no cell, 1 self-edge.
   await expect(panel.getByTestId('flow-legend-count')).toHaveText('10 edges');

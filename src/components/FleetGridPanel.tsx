@@ -40,6 +40,13 @@ const measureVisibleBounds = (el: HTMLElement): VisibleBounds => {
   return { minX, minY, maxX: minX + el.clientWidth, maxY: minY + el.clientHeight };
 };
 
+// The width that the scroll container shows: the panel's width without a vertical scrollbar. Before the
+// first measurement it is the panel's width.
+const visibleWidth = (bounds: VisibleBounds, width: number): number => {
+  const measured = bounds.maxX - bounds.minX;
+  return measured > 0 ? Math.min(width, measured) : width;
+};
+
 const sameVisibleBounds = (a: VisibleBounds, b: VisibleBounds): boolean =>
   a.minX === b.minX && a.minY === b.minY && a.maxX === b.maxX && a.maxY === b.maxY;
 
@@ -338,6 +345,7 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
     restRef: flowRestRef,
     focusRef: flowFocusRef,
     layout,
+    viewportW: visibleWidth(visibleBounds, width),
     viewportH,
     theme,
     focusCandidates: [hover, popover],

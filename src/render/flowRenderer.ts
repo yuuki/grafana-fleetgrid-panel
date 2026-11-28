@@ -1,7 +1,7 @@
 import { GrafanaTheme2 } from '@grafana/data';
 import { FlowEdge } from '../data/edges';
 import { LayoutResult } from '../layout/layout';
-import { FlowArc, FlowRect, flowArc, flowArrowHead, flowBadgePoint } from './flowGeometry';
+import { FlowArc, FlowPoint, FlowRect, flowArc, flowArrowHead, flowBadgePoint } from './flowGeometry';
 
 // The flow overlay's draw pass. Arcs are painted on canvases of their own, stacked on the cell canvas:
 // one layer for the arcs at rest and one for the arcs in focus. A change of focus (hover) paints the
@@ -9,6 +9,8 @@ import { FlowArc, FlowRect, flowArc, flowArrowHead, flowBadgePoint } from './flo
 
 export interface FlowRenderContext {
   layout: LayoutResult;
+  /** Width and height of the visible area of the panel body. */
+  viewportW: number;
   viewportH: number;
   /** Rectangle of each hierarchy node that can be an endpoint (see flowAnchors). */
   anchors: Map<string, FlowRect>;
@@ -54,12 +56,24 @@ export function flowArrowSize(lineWidth: number): number {
   return Math.min(11, Math.max(6, lineWidth * 3.2));
 }
 
-// A layer must have exactly the cell canvas's size (prepareCanvas in renderer.ts) so that all canvases
-// share one coordinate system. Unlike the cell canvas it keeps its backing store while the size is
+// The size of a layer in CSS px. A layer starts at the cell canvas's origin, so both share one
+// coordinate system. It is as high as the cell canvas, and as wide as the wider of the cell canvas and
+// the panel: a grid that is narrower than its panel (one column of zones, for example) leaves the arcs
+// no room to bulge inside the grid, and an arc that is cut at the canvas edge loses its arrowhead.
+export function flowLayerSize(rc: Pick<FlowRenderContext, 'layout' | 'viewportW' | 'viewportH'>): {
+  width: number;
+  height: number;
+} {
+  return {
+    width: Math.max(rc.layout.contentWidth, rc.viewportW),
+    height: Math.max(rc.layout.contentHeight, rc.viewportH),
+  };
+}
+
+// Sizes and clears a layer. Unlike the cell canvas it keeps its backing store while the size is
 // unchanged. Returns null when there is nothing to paint on.
 function prepareLayer(canvas: HTMLCanvasElement, rc: FlowRenderContext, dpr: number): CanvasRenderingContext2D | null {
-  const cssW = rc.layout.contentWidth;
-  const cssH = Math.max(rc.layout.contentHeight, rc.viewportH);
+  const { width: cssW, height: cssH } = flowLayerSize(rc);
   const fullWidth = Math.round(cssW * dpr);
   const fullHeight = Math.round(cssH * dpr);
   const allocated = canvas.width === fullWidth && canvas.height === fullHeight;
@@ -206,10 +220,26 @@ function badgesOf(shapes: Shape[]): Badge[] {
   return badges.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0) || a.order - b.order);
 }
 
+// Half the width and half the height of a hop number, in px.
+const badgeHalfW = (text: string): number => (text.length * BADGE_FONT_PX * 0.62) / 2 + 1;
+const BADGE_HALF_H = BADGE_FONT_PX / 2 + 1;
+
+// Where a hop number is written: beside the arrowhead, on the side the arc bulges to. An arc keeps room
+// for it there (FLOW_APEX_MARGIN) unless the canvas has no room on either side of the arc; the number
+// is then moved back onto the canvas.
+function badgePoint(arc: FlowArc, distance: number, text: string, width: number, height: number): FlowPoint {
+  const at = flowBadgePoint(arc, distance);
+  const halfW = badgeHalfW(text);
+  return {
+    x: Math.max(halfW, Math.min(width - halfW, at.x)),
+    y: Math.max(BADGE_HALF_H, Math.min(height - BADGE_HALF_H, at.y)),
+  };
+}
+
 // The squares of a coarse grid that a hop number written at (x, y) covers.
 function badgeSquares(x: number, y: number, text: string): string[] {
-  const halfW = (text.length * BADGE_FONT_PX * 0.62) / 2 + 1;
-  const halfH = BADGE_FONT_PX / 2 + 1;
+  const halfW = badgeHalfW(text);
+  const halfH = BADGE_HALF_H;
   const squares: string[] = [];
   for (let gx = Math.floor((x - halfW) / BADGE_CELL); gx <= Math.floor((x + halfW) / BADGE_CELL); gx++) {
     for (let gy = Math.floor((y - halfH) / BADGE_CELL); gy <= Math.floor((y + halfH) / BADGE_CELL); gy++) {
@@ -221,7 +251,13 @@ function badgeSquares(x: number, y: number, text: string): string[] {
 
 // Hop numbers, lowest first, each claiming its squares; a number whose squares are taken is not
 // written. That keeps the numbers legible where many short hops meet, in one pass.
-function drawBadges(ctx: CanvasRenderingContext2D, shapes: Shape[], arrowSize: number, theme: GrafanaTheme2): void {
+function drawBadges(
+  ctx: CanvasRenderingContext2D,
+  shapes: Shape[],
+  arrowSize: number,
+  size: { width: number; height: number },
+  theme: GrafanaTheme2
+): void {
   const badges = badgesOf(shapes);
   if (badges.length === 0) {
     return;
@@ -234,7 +270,7 @@ function drawBadges(ctx: CanvasRenderingContext2D, shapes: Shape[], arrowSize: n
   ctx.fillStyle = theme.colors.text.primary;
   const taken = new Set<string>();
   for (const { shape, text } of badges) {
-    const at = flowBadgePoint(shape.arc, arrowSize / 2 + BADGE_FONT_PX * 0.8);
+    const at = badgePoint(shape.arc, arrowSize / 2 + BADGE_FONT_PX * 0.8, text, size.width, size.height);
     const squares = badgeSquares(at.x, at.y, text);
     if (squares.some((square) => taken.has(square))) {
       continue;
@@ -256,7 +292,8 @@ export function renderFlowLayer(canvas: HTMLCanvasElement, rc: FlowRenderContext
   if (!ctx || rc.edges.length === 0) {
     return;
   }
-  const shapes = shapesOf(rc, rc.layout.contentWidth, Math.max(rc.layout.contentHeight, rc.viewportH));
+  const size = flowLayerSize(rc);
+  const shapes = shapesOf(rc, size.width, size.height);
   const lineWidth = flowLineWidth(rc.layout.cellSize) * (rc.emphasised ? EMPHASIS : 1);
   const arrowSize = flowArrowSize(lineWidth);
   const background = rc.theme.colors.background.primary;
@@ -267,5 +304,5 @@ export function renderFlowLayer(canvas: HTMLCanvasElement, rc: FlowRenderContext
   }
   strokeArcs(ctx, shapes, lineWidth, background);
   fillArrows(ctx, shapes, arrowSize, background);
-  drawBadges(ctx, shapes, arrowSize, rc.theme);
+  drawBadges(ctx, shapes, arrowSize, size, rc.theme);
 }

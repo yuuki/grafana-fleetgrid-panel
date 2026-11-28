@@ -118,7 +118,10 @@ describe('FleetGridPanel flow overlay', () => {
     expect(restLayer()).toBeInTheDocument();
     expect(restLayer()).toHaveStyle({ position: 'absolute', pointerEvents: 'none', opacity: '1' });
     expect(focusLayer()).toHaveStyle({ position: 'absolute', pointerEvents: 'none' });
-    expect([restLayer()!.width, restLayer()!.height]).toEqual([cellCanvas().width, cellCanvas().height]);
+    // The layers start at the cell canvas's origin and are as high as it. The grid (163 px) is narrower
+    // than the panel (400 px), so they are as wide as the panel: arcs have room beside the grid.
+    expect(restLayer()!.height).toBe(cellCanvas().height);
+    expect([cellCanvas().width, restLayer()!.width]).toEqual([163, 400]);
     // One cell metric is left, so there is no selector, and no row of the edge query became a cell.
     expect(screen.queryByRole('radio')).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
