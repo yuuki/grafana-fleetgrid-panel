@@ -326,6 +326,7 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
   // Cell selection (Shift+click, Shift+drag): viewer-local state, like the metric and category selections.
   const hideHover = useCallback(() => setHover(null), []);
   const {
+    selection: selectionState,
     resolved: cellSelection,
     selectedSet: selectedCells,
     gestures: selectionGestures,
@@ -334,10 +335,10 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
     clear: clearSelection,
   } = useCellSelection(model.root, layout, options.levels, hideHover);
   const selectionExport = useSelectionExport(
+    selectionState,
     cellSelection,
     options.selectionLabel,
     options.selectionVariable,
-    model.root,
     options.levels
   );
   // The selection bar appears under the grid. The layout above ignores it on purpose: the cells stay

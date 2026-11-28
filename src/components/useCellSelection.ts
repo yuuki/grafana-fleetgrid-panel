@@ -2,16 +2,19 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { CellModel, HierarchyNode, LevelDef } from '../types';
 import { LayoutResult } from '../layout/layout';
 import { cellsInRect, hitTest, labelAt, Rect, rectFromPoints } from '../render/hitTest';
+import { defaultSelectionLabel } from '../selection/exportFormats';
 import {
   addCells,
   CellSelection,
-  EMPTY_SELECTION,
   groupCells,
   indexCells,
+  NO_SELECTION,
   resolveSelection,
   ResolvedSelection,
+  SelectionState,
   toggleCell,
   toggleGroup,
+  withCells,
 } from '../selection/selection';
 
 /** Distance in CSS px a Shift press travels before it is a rectangle drag and no longer a click. */
@@ -54,6 +57,8 @@ export interface SelectionGestures {
 }
 
 export interface CellSelectionApi {
+  /** The selected cells with what was remembered of each, and the label chosen when the selection began. */
+  selection: SelectionState;
   /** The selection split into present selected cells and the rest; undefined while nothing is selected. */
   resolved: ResolvedSelection | undefined;
   /** The selected cells of the current data, for the renderer; undefined while nothing is selected. */
@@ -84,7 +89,7 @@ export function useCellSelection(
   levels: LevelDef[],
   onGestureStart: () => void
 ): CellSelectionApi {
-  const [selection, setSelection] = useState<CellSelection>(EMPTY_SELECTION);
+  const [selection, setSelectionState] = useState<SelectionState>(NO_SELECTION);
   const gesture = useRef<Gesture | null>(null);
   const swallowClick = useRef(false);
   // Counts finished gestures. It is state so that every gesture renders once, even one that selects
@@ -99,15 +104,23 @@ export function useCellSelection(
   useEffect(() => {
     if (selectionLevels.current !== levelsKey) {
       selectionLevels.current = levelsKey;
-      setSelection(EMPTY_SELECTION);
+      setSelectionState(NO_SELECTION);
     }
   }, [levelsKey]);
 
   // Indexing every cell by key costs a pass over the grid, so it waits until something is selected.
   const resolved = useMemo(
-    () => (selection.size === 0 ? undefined : resolveSelection(indexCells(root), selection)),
+    () => (selection.cells.size === 0 ? undefined : resolveSelection(indexCells(root), selection.cells)),
     [root, selection]
   );
+
+  // Applies a change of the selected cells. The label for the copy formats is chosen from the grid as
+  // it is now, and only when this change begins a selection.
+  const setSelection = (change: (cells: CellSelection) => CellSelection) => {
+    setSelectionState((previous) =>
+      withCells(previous, change(previous.cells), () => defaultSelectionLabel(root, levels))
+    );
+  };
 
   const moveBand = (container: HTMLElement) => {
     const current = gesture.current;
@@ -133,7 +146,7 @@ export function useCellSelection(
     }
   };
 
-  const clear = useCallback(() => setSelection(EMPTY_SELECTION), []);
+  const clear = useCallback(() => setSelectionState(NO_SELECTION), []);
 
   // Ends the press without selecting anything.
   const abort = useCallback(() => {
@@ -271,16 +284,16 @@ export function useCellSelection(
     onKeyDown: (event, overlayOpen) => {
       // A portal (the comparison drawer) bubbles its events here through React, not through the DOM.
       const inside = event.target instanceof Node && event.currentTarget.contains(event.target);
-      if (event.key !== 'Escape' || selection.size === 0 || overlayOpen || !inside) {
+      if (event.key !== 'Escape' || selection.cells.size === 0 || overlayOpen || !inside) {
         return;
       }
       // This key press is used up: Grafana must not also leave the panel view.
       event.stopPropagation();
-      setSelection(EMPTY_SELECTION);
+      setSelectionState(NO_SELECTION);
     },
   };
 
-  return { resolved, selectedSet: resolved?.selectedSet, gestures, bandRef, barRef, clear };
+  return { selection, resolved, selectedSet: resolved?.selectedSet, gestures, bandRef, barRef, clear };
 }
 
 /** Height of the selection bar on one line, used where the real height cannot be measured (jsdom). */

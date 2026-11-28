@@ -12,6 +12,7 @@ const props = (over: Partial<SelectionBarProps> = {}): SelectionBarProps => ({
   missingCount: 0,
   label: 'host',
   values: ['node-a001', 'node-a002'],
+  valuesFromMissing: 0,
   sync: { state: 'off' },
   refIds: ['A'],
   metricInfos: [],
@@ -91,6 +92,14 @@ describe('SelectionBar', () => {
     render(<SelectionBar {...props({ label: undefined, values: [], sync: { state: 'missing', name: 'hosts' } })} />);
     expect(screen.queryByTestId('selection-label')).not.toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('Variable "hosts" is not in this dashboard');
+  });
+
+  it('says how many of the values come only from cells that left the data', () => {
+    render(<SelectionBar {...props({ missingCount: 1, valuesFromMissing: 1 })} />);
+    expect(screen.getByRole('status')).toHaveTextContent('2 cells selected (+1 not in the current data)');
+    expect(screen.getByTestId('selection-label')).toHaveTextContent(
+      '2 host values (1 from cells not in the current data):'
+    );
   });
 
   it('counts one cell in the singular', () => {

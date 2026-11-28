@@ -19,9 +19,11 @@ export interface SelectionBarProps {
   rest: CellModel[];
   /** Selected cells that are not in the current data: they stay selected, but have no value and no labels now. */
   missingCount: number;
-  /** The label the selection is exported by, and its distinct values over the selected cells. */
+  /** The label the selection is exported by, and the distinct values the selected cells had for it. */
   label: string | undefined;
   values: string[];
+  /** How many of the values come only from cells that are not in the current data. */
+  valuesFromMissing: number;
   sync: SyncStatus;
   /** Every query of the panel and the display information of those that returned data, for the comparison. */
   refIds: string[];
@@ -63,6 +65,7 @@ export const SelectionBar: React.FC<SelectionBarProps> = ({
   missingCount,
   label,
   values,
+  valuesFromMissing,
   sync,
   refIds,
   metricInfos,
@@ -134,7 +137,8 @@ export const SelectionBar: React.FC<SelectionBarProps> = ({
       </Button>
       {label !== undefined && (
         <span style={{ color: theme.colors.text.secondary }} data-testid="selection-label">
-          {`${plural(values.length, `${label} value`)}:`}
+          {plural(values.length, `${label} value`)}
+          {valuesFromMissing > 0 && ` (${valuesFromMissing} from cells not in the current data)`}:
         </span>
       )}
       {FORMATS.map(({ id, name, describe }) => {
@@ -246,6 +250,7 @@ export const SelectionFooter = React.memo(function SelectionFooter({
       missingCount={selection.missing}
       label={exported.label}
       values={exported.values}
+      valuesFromMissing={exported.fromMissing}
       sync={exported.sync}
       refIds={refIds}
       metricInfos={metricInfos}

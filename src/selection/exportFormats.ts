@@ -1,6 +1,5 @@
 import { CellModel, HierarchyNode, LevelDef } from '../types';
 import { pathKey } from '../data/hierarchy';
-import { compareNatural } from './hostlist';
 
 /** The labels a selection can be exported by: the hierarchy levels' labels, top level first. */
 export function selectionLabels(levels: LevelDef[]): string[] {
@@ -8,10 +7,14 @@ export function selectionLabels(levels: LevelDef[]): string[] {
 }
 
 /**
- * The label a selection is exported by when the panel names none: the label of the deepest hierarchy
+ * The label a selection is copied by when the panel names none: the label of the deepest hierarchy
  * level whose values are unique in the grid, each value belonging to one group only. With zone → host
  * → gpu that is `host`: `gpu0` exists under every host and says nothing without it, while a host name
  * identifies its group. The top level always qualifies: each of its values is its own group.
+ *
+ * The answer depends on the data that is on screen (one host alone makes `gpu` unique), so the panel
+ * asks once, when a selection begins, and keeps the answer for the life of that selection. The
+ * variable sync does not use it at all: what other panels are filtered by is named in the options.
  */
 export function defaultSelectionLabel(root: HierarchyNode, levels: LevelDef[]): string | undefined {
   const cells: CellModel[] = [];
@@ -49,33 +52,12 @@ export function defaultSelectionLabel(root: HierarchyNode, levels: LevelDef[]): 
 }
 
 /**
- * The label to export by: the configured one when it is a hierarchy level's label (cells keep only
- * those), the automatic choice otherwise.
+ * The configured selection label when it names a hierarchy level, undefined otherwise. Cells keep
+ * only the labels of the hierarchy levels, so no other label can be exported.
  */
-export function resolveSelectionLabel(
-  configured: string | undefined,
-  root: HierarchyNode,
-  levels: LevelDef[]
-): string | undefined {
+export function configuredSelectionLabel(configured: string | undefined, levels: LevelDef[]): string | undefined {
   const name = configured?.trim();
-  return name && selectionLabels(levels).includes(name) ? name : defaultSelectionLabel(root, levels);
-}
-
-/**
- * The distinct values the cells have for a label, in natural order. A cell that merges several series
- * (`node-a017` and `node-b017` under the key `017`) contributes each of their values.
- */
-export function labelValues(cells: CellModel[], label: string): string[] {
-  const values = new Set<string>();
-  for (const cell of cells) {
-    for (const labels of cell.labelSets ?? [cell.labels]) {
-      const value = labels[label];
-      if (value !== undefined) {
-        values.add(value);
-      }
-    }
-  }
-  return [...values].sort(compareNatural);
+  return name && selectionLabels(levels).includes(name) ? name : undefined;
 }
 
 const REGEX_SPECIAL = /[\\^[\].*+?()|{}$]/g;

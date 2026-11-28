@@ -1,12 +1,10 @@
-import { CellModel, DEFAULT_LEVEL, HierarchyNode, LevelDef, NormalizedRow } from '../types';
+import { DEFAULT_LEVEL, HierarchyNode, LevelDef, NormalizedRow } from '../types';
 import { buildHierarchy } from '../data/hierarchy';
 import { attachCells } from '../data/values';
-import { indexCells } from './selection';
 import {
+  configuredSelectionLabel,
   defaultSelectionLabel,
   escapeRegexValue,
-  labelValues,
-  resolveSelectionLabel,
   selectionLabels,
   toList,
   toRegex,
@@ -14,14 +12,11 @@ import {
 
 const level = (label: string, over: Partial<LevelDef> = {}): LevelDef => ({ ...DEFAULT_LEVEL, label, ...over });
 
-function build(
-  levels: LevelDef[],
-  labelSets: Array<Record<string, string>>
-): { root: HierarchyNode; cells: CellModel[] } {
+function build(levels: LevelDef[], labelSets: Array<Record<string, string>>): { root: HierarchyNode } {
   const rows: NormalizedRow[] = labelSets.map((labels) => ({ labels, value: 1, refId: 'A' }));
   const { root } = buildHierarchy(rows, levels);
   attachCells(root, rows, levels, 'max');
-  return { root, cells: [...indexCells(root).values()] };
+  return { root };
 }
 
 const gpuRows = [
@@ -65,41 +60,23 @@ describe('selection label', () => {
     expect(defaultSelectionLabel({ key: '', path: [], children: [] }, [level('')])).toBeUndefined();
   });
 
-  it('uses the configured label when it is a hierarchy label, the default otherwise', () => {
+  it('depends on the data on screen: one host alone makes gpu unique, and a host name in two zones makes zone the answer', () => {
+    // This is why the panel asks once per selection and never for the variable sync.
     const levels = [level('zone'), level('host'), level('gpu')];
-    const { root } = build(levels, gpuRows);
-    expect(resolveSelectionLabel('zone', root, levels)).toBe('zone');
-    expect(resolveSelectionLabel(' gpu ', root, levels)).toBe('gpu');
-    expect(resolveSelectionLabel('', root, levels)).toBe('host');
-    expect(resolveSelectionLabel(undefined, root, levels)).toBe('host');
+    const oneHost = gpuRows.filter((row) => row.host === 'node-a001');
+    expect(defaultSelectionLabel(build(levels, oneHost).root, levels)).toBe('gpu');
+    const sameNameTwice = [...gpuRows, { zone: 'zone-b', host: 'node-a001', gpu: 'gpu0' }];
+    expect(defaultSelectionLabel(build(levels, sameNameTwice).root, levels)).toBe('zone');
+  });
+
+  it('takes a configured label only when it names a hierarchy level', () => {
+    const levels = [level('zone'), level('host'), level('gpu')];
+    expect(configuredSelectionLabel('zone', levels)).toBe('zone');
+    expect(configuredSelectionLabel(' gpu ', levels)).toBe('gpu');
+    expect(configuredSelectionLabel('', levels)).toBeUndefined();
+    expect(configuredSelectionLabel(undefined, levels)).toBeUndefined();
     // Cells do not keep a label that is not a hierarchy level.
-    expect(resolveSelectionLabel('partition', root, levels)).toBe('host');
-  });
-});
-
-describe('labelValues', () => {
-  it('lists the distinct values of the cells in natural order', () => {
-    const levels = [level('zone'), level('host'), level('gpu')];
-    const { cells } = build(levels, [
-      { zone: 'zone-a', host: 'node-a10', gpu: 'gpu0' },
-      { zone: 'zone-a', host: 'node-a2', gpu: 'gpu0' },
-      { zone: 'zone-a', host: 'node-a2', gpu: 'gpu1' },
-    ]);
-    expect(labelValues(cells, 'host')).toEqual(['node-a2', 'node-a10']);
-    expect(labelValues(cells, 'gpu')).toEqual(['gpu0', 'gpu1']);
-    expect(labelValues(cells, 'partition')).toEqual([]);
-    expect(labelValues([], 'host')).toEqual([]);
-  });
-
-  it('includes every source value of a cell that merges several series', () => {
-    const levels = [level('host', { extract: 'trailingNumber' })];
-    const { cells } = build(levels, [{ host: 'node-a017' }, { host: 'node-b017' }]);
-    expect(cells).toHaveLength(1);
-    expect(labelValues(cells, 'host')).toEqual(['node-a017', 'node-b017']);
-  });
-
-  it('reads the representative labels of a cell that has no label sets', () => {
-    expect(labelValues([{ path: ['x'], labels: { host: 'node-a1' }, values: new Map() }], 'host')).toEqual(['node-a1']);
+    expect(configuredSelectionLabel('partition', levels)).toBeUndefined();
   });
 });
 
