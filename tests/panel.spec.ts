@@ -398,9 +398,9 @@ test('hover tooltip lists every metric with its configured unit', async ({
   const point = await findCellPoint(canvas, panel.locator);
   const hit = await readPath(canvas, panel.locator, point.x, point.y);
   expect(hit).not.toBeNull();
-  expect(hit.text).toMatch(/zone:\s*zone-a\s+host:\s*node-a\d+\s+gpu:\s*gpu\d/i);
-  expect(hit.text).toContain('partition: a');
-  expect(hit.text).not.toMatch(/zone-a\s*\/\s*\d+\s*\/\s*gpu\d/i);
+  expect(hit!.text).toMatch(/zone:\s*zone-a\s+host:\s*node-a\d+\s+gpu:\s*gpu\d/i);
+  expect(hit!.text).toContain('partition: a');
+  expect(hit!.text).not.toMatch(/zone-a\s*\/\s*\d+\s*\/\s*gpu\d/i);
   const multiPoint = await findCellPointMatching(
     canvas,
     panel.locator,
@@ -410,8 +410,8 @@ test('hover tooltip lists every metric with its configured unit', async ({
   expect(multiHit).not.toBeNull();
   expect(multiHit!.text).toContain('partition: a, b');
   // Query A = watt, query B = celsius (override). Both appear in the tooltip with units.
-  expect(hit.text).toMatch(/\d+(\.\d+)?\s*W\b/);
-  expect(hit.text).toContain('°C');
+  expect(hit!.text).toMatch(/\d+(\.\d+)?\s*W\b/);
+  expect(hit!.text).toContain('°C');
 });
 
 test('shows categorical legend and paints distinct category top bars', async ({

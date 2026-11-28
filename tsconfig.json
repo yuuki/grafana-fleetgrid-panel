@@ -1,5 +1,12 @@
 {
   "extends": "./.config/tsconfig.json",
+  // The scaffold's .config/tsconfig.json checks only src/ (rootDir and include). Widen both
+  // here so `npm run typecheck` also covers the Playwright E2E tests in tests/. "include"
+  // replaces the scaffold's list, so its .config/types entry is repeated.
+  "compilerOptions": {
+    "rootDir": "."
+  },
+  "include": ["src", ".config/types", "tests"],
   // ts-node compiles .config/webpack/webpack.config.ts. The scaffold's
   // .config/tsconfig.json ts-node block sets module:commonjs but no moduleResolution,
   // so @grafana/tsconfig@2.2.0's moduleResolution:bundler leaks in and TypeScript rejects
