@@ -19,9 +19,9 @@ export interface FlowRenderContext {
   /** The focus layer draws its arcs wider and outlines the cells or groups they connect. */
   emphasised: boolean;
   /**
-   * Whether the arcs run between groups of cells instead of between cells. An arc that ends at the
-   * centre of a group looks like an arc of the cell that happens to be there. So an arc between groups
-   * ends on the frames of its groups, and every layer outlines the groups its arcs connect.
+   * Whether the arcs run between groups of cells instead of between cells. An arc ends at the centre of
+   * its group, where a cell happens to be. So every layer outlines the groups its arcs connect and
+   * closes each arc with a hub at the group's centre: a mark of the group, in the color of its outline.
    */
   groupLevel: boolean;
   /**
@@ -112,7 +112,7 @@ function shapesOf(rc: FlowRenderContext, width: number, height: number): Shape[]
     const edge = rc.edges[i];
     const from = rc.anchors.get(edge.source);
     const to = rc.anchors.get(edge.destination);
-    const arc = from && to ? flowArc(from, to, width, height, rc.groupLevel ? 'frame' : 'centre') : null;
+    const arc = from && to ? flowArc(from, to, width, height) : null;
     if (arc) {
       // Unknown is not a point on the color scale: a neutral color that reads in light and dark themes.
       shapes.push({ edge, arc, color: edge.value === null ? rc.theme.colors.text.secondary : rc.colorOf(edge) });
@@ -177,18 +177,28 @@ function fillArrows(ctx: CanvasRenderingContext2D, shapes: Shape[], arrowSize: n
   }
 }
 
-// The focus layer outlines every cell or group its arcs connect: the hovered node and its peers. For
-// edges between groups the outline is also the frame that the arcs end on, so the resting layer
-// outlines groups too, thinner and in the secondary text color, so that the outlines of the focus stand
-// out against them.
-function outlineEndpoints(ctx: CanvasRenderingContext2D, shapes: Shape[], rc: FlowRenderContext): void {
-  const lineWidth = rc.emphasised ? OUTLINE_WIDTH : REST_OUTLINE_WIDTH;
-  const color = rc.emphasised ? rc.theme.colors.text.primary : rc.theme.colors.text.secondary;
+// The nodes that the arcs of a layer connect, each once.
+function endpointKeys(shapes: Shape[]): Set<string> {
   const keys = new Set<string>();
   for (const shape of shapes) {
     keys.add(shape.edge.source);
     keys.add(shape.edge.destination);
   }
+  return keys;
+}
+
+// The color of the marks of a node: its outline and, for a group, its hub. The marks of the focus are in
+// the primary text color, so that they stand out against those of the resting layer.
+const nodeMarkColor = (rc: FlowRenderContext): string =>
+  rc.emphasised ? rc.theme.colors.text.primary : rc.theme.colors.text.secondary;
+
+// The focus layer outlines every cell or group its arcs connect: the hovered node and its peers. For
+// edges between groups the outline says that an arc belongs to the whole group, which its end at the
+// group's centre cannot say, so the resting layer outlines groups too, thinner.
+function outlineEndpoints(ctx: CanvasRenderingContext2D, shapes: Shape[], rc: FlowRenderContext): void {
+  const lineWidth = rc.emphasised ? OUTLINE_WIDTH : REST_OUTLINE_WIDTH;
+  const color = nodeMarkColor(rc);
+  const keys = endpointKeys(shapes);
   const outline = (width: number, color: string, alpha: number) => {
     ctx.lineWidth = width;
     ctx.strokeStyle = color;
@@ -200,6 +210,30 @@ function outlineEndpoints(ctx: CanvasRenderingContext2D, shapes: Shape[], rc: Fl
   };
   outline(lineWidth + 2 * HALO, rc.theme.colors.background.primary, HALO_ALPHA);
   outline(lineWidth, color, 1);
+}
+
+/** Radius of the hub at the centre of a group, in px. */
+export function flowHubRadius(lineWidth: number): number {
+  return Math.max(3, lineWidth * 1.75);
+}
+
+// An arc between groups ends at the centre of its group, on whatever cell is there. A hub closes it: a
+// dot in the color of the group's outline, drawn over the ends of the arcs. It is not a cell's mark (a
+// cell has none), and all arcs of the group meet in it, so the arc reads as attached to the outlined
+// group. The end of an arc never depends on where the curve crosses the group's frame.
+function drawHubs(ctx: CanvasRenderingContext2D, shapes: Shape[], rc: FlowRenderContext, radius: number): void {
+  const dot = (r: number, color: string, alpha: number) => {
+    ctx.fillStyle = color;
+    ctx.globalAlpha = alpha;
+    for (const key of endpointKeys(shapes)) {
+      const rect = rc.anchors.get(key)!;
+      ctx.beginPath();
+      ctx.arc(rect.x + rect.w / 2, rect.y + rect.h / 2, r, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+  };
+  dot(radius + HALO, rc.theme.colors.background.primary, HALO_ALPHA);
+  dot(radius, nodeMarkColor(rc), 1);
 }
 
 /** The hop number written on an arc: its first numbered hop, with a "+" when the edge carries more hops. */
@@ -313,6 +347,9 @@ export function renderFlowLayer(canvas: HTMLCanvasElement, rc: FlowRenderContext
     outlineEndpoints(ctx, shapes, rc);
   }
   strokeArcs(ctx, shapes, lineWidth, background);
+  if (rc.groupLevel) {
+    drawHubs(ctx, shapes, rc, flowHubRadius(lineWidth));
+  }
   fillArrows(ctx, shapes, arrowSize, background);
   drawBadges(ctx, shapes, arrowSize, size, rc.theme);
 }

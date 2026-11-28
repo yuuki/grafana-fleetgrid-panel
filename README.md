@@ -227,7 +227,7 @@ Cells show the state of one endpoint. Many faults in an AI / HPC cluster are bet
 
 ![Flow overlay: arcs between host groups, with a numbered ring of six hops](./src/img/fleetgrid-flow-overlay.png)
 
-The example shows two zones of eight hosts with two GPUs each. The edge query names hosts, so the arcs run between host groups: each group that has an edge is outlined, and an arc runs from outline to outline. The numbered arcs are the six hops of one ring. The two arcs between the hosts numbered 6 are the two directions of one pair, and the dashed arc is an edge without a value. The header says which end of the color scale is the worse one and how many rows have no arc; the banner gives an example of an edge row whose destination is not in the grid.
+The example shows two zones of eight hosts with two GPUs each. The edge query names hosts, so the arcs run between host groups: each group that has an edge is outlined, and its arcs meet in a dot at its centre. The numbered arcs are the six hops of one ring. The two arcs between the hosts numbered 6 are the two directions of one pair, and the dashed arc is an edge without a value. The header says which end of the color scale is the worse one and how many rows have no arc; the banner gives an example of an edge row whose destination is not in the grid.
 
 ### The edge query
 
@@ -251,7 +251,7 @@ max by (src_host, dst_host) (fabric_probe_loss_ratio)
 
 **Endpoint labels** says which hierarchy label an endpoint label refers to. The value of the endpoint label is compared with the **raw** value of that hierarchy label in the cell queries, before the level's extraction. So `src_host="node-a001"` matches the cells with `host="node-a001"` even when the host level shows only the trailing number.
 
-- An endpoint resolves at the **deepest mapped hierarchy level**. With `zone` → `host` → `gpu` and a mapping for `host` only, an edge runs between two host groups. Each of the two groups is outlined, and the arc runs from the outline of one group to the outline of the other, so it is not mistaken for an edge of the cell in the middle of the group. Between two neighbouring groups the arc is a small arch over the gap between them. Add a second mapping (`gpu` ← `src_gpu`, `dst_gpu`) to run the edges between GPU cells.
+- An endpoint resolves at the **deepest mapped hierarchy level**. With `zone` → `host` → `gpu` and a mapping for `host` only, an edge runs between two host groups. Each of the two groups is outlined, and the arc ends at the centre of the group under a small dot in the color of the outline (the group's hub), so it is not mistaken for an edge of the cell in the middle of the group. Add a second mapping (`gpu` ← `src_gpu`, `dst_gpu`) to run the edges between GPU cells.
 - Map every label that is needed to name one cell or group. `gpu0` alone exists under every host, so mapping only `gpu` matches more than one cell and the row is left out.
 - Every mapping must be complete and must name a hierarchy label. Otherwise nothing is drawn and the banner says why, because a skipped mapping would move the edges to another level.
 - The two directions of a pair are two edges and two arcs. An arc bulges to the left of its direction of travel and carries an arrowhead at its middle. Where the grid is narrower than the panel, an arc can bulge into the empty part of the panel beside the grid. An arc never leaves the panel: where it has no room on its own side, it bulges to the other side or bulges less.

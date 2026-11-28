@@ -6,6 +6,7 @@ import {
   FlowRenderContext,
   flowArrowSize,
   flowBadgeText,
+  flowHubRadius,
   flowLayerSize,
   flowLineWidth,
   renderFlowLayer,
@@ -339,6 +340,37 @@ describe('renderFlowLayer', () => {
       { color: BACKGROUND, width: 3.5 },
       { color: asCanvasColor(theme.colors.text.primary), width: 1.5 },
     ]);
+  });
+
+  it('ends an arc between groups at the centre of each group, under a hub in the color of the outline', () => {
+    // A group of 2 × 2 cells and two single hosts.
+    const groups = new Map(anchors);
+    groups.set('a', { x: 100, y: 300, w: 41, h: 41 });
+    const events = draw({ anchors: groups, edges: [edge('a', 'b', 2), edge('a', 'c', 1)], groupLevel: true });
+    // Both arcs start at the centre of group a, whatever the shape of the group.
+    const starts = events
+      .filter((e, i) => e.type === 'moveTo' && events[i + 1]?.type === 'quadraticCurveTo')
+      .map((e) => [e.props.x, e.props.y]);
+    expect(starts.length).toBeGreaterThan(0);
+    expect(new Set(starts.map((point) => point.join(',')))).toEqual(new Set(['120.5,320.5']));
+    // One hub per group, over a halo, at the centres of the three groups.
+    const hubs = events.filter((e) => e.type === 'arc').map((e) => e.props);
+    expect(hubs).toHaveLength(6);
+    expect(hubs.slice(3).map((hub) => [hub.x, hub.y, hub.radius])).toEqual(
+      expect.arrayContaining([
+        [120.5, 320.5, flowHubRadius(LINE)],
+        [510, 310, flowHubRadius(LINE)],
+        [810, 310, flowHubRadius(LINE)],
+      ])
+    );
+    // The hubs are painted after the arcs, so they close the ends of the arcs, in the outline's color.
+    const types = events.map((e) => e.type);
+    expect(types.indexOf('arc')).toBeGreaterThan(types.lastIndexOf('quadraticCurveTo'));
+    const fills = events.filter((e) => e.type === 'fillStyle').map((e) => e.props.value);
+    expect(fills).toContain(NEUTRAL);
+    // Arcs between cells have no hub: a cell is its own mark.
+    expect(count(draw({ edges: [edge('a', 'b', 2)] }), 'arc')).toBe(0);
+    expect(flowHubRadius(1.25)).toBe(3);
   });
 
   it('writes the hop number beside the arrowhead', () => {

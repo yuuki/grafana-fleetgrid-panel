@@ -1,15 +1,20 @@
 import fc from 'fast-check';
 import {
   FLOW_APEX_MARGIN,
-  FlowAttach,
   FlowRect,
   MIN_FLOW_BULGE,
+  flowAnchors,
   flowArc,
   flowArcPoint,
   flowArrowHead,
   flowBadgePoint,
 } from './flowGeometry';
+import { flowLayerSize } from './flowRenderer';
+import { buildHierarchy } from '../data/hierarchy';
+import { attachCells } from '../data/values';
+import { computeLayout } from '../layout/layout';
 import { propertyParams } from '../testing/property';
+import { DEFAULT_LEVEL, LevelDef, NormalizedRow } from '../types';
 
 // Geometric invariants of an arc for any two rectangles on any canvas: it joins the two centres, its
 // two directions never share a curve, every point of it is on the canvas, and its arrowhead points
@@ -25,11 +30,7 @@ const rect: fc.Arbitrary<FlowRect> = fc.record({
   h: fc.double({ min: 6, max: 40, noNaN: true }),
 });
 
-const attach = fc.constantFrom<FlowAttach>('centre', 'frame');
 const centre = (r: FlowRect) => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
-// The frames of two groups of one level do not overlap.
-const apart = (a: FlowRect, b: FlowRect) =>
-  a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
 const distinct = (a: FlowRect, b: FlowRect) => Math.hypot(centre(a).x - centre(b).x, centre(a).y - centre(b).y) > 1;
 
 describe('flowArc (properties)', () => {
@@ -79,9 +80,9 @@ describe('flowArc (properties)', () => {
 
   it('keeps every point of the arc on the canvas, on any canvas', () => {
     fc.assert(
-      fc.property(sized, attach, ([width, height, a, b], mode) => {
+      fc.property(sized, ([width, height, a, b]) => {
         fc.pre(distinct(a, b));
-        const arc = flowArc(a, b, width, height, mode)!;
+        const arc = flowArc(a, b, width, height)!;
         for (let i = 0; i <= 64; i++) {
           const point = flowArcPoint(arc, i / 64);
           expect(point.x).toBeGreaterThanOrEqual(-1e-6);
@@ -106,47 +107,6 @@ describe('flowArc (properties)', () => {
     );
   });
 
-  it('keeps the two directions between two frames apart: they differ in an end or in the bulge', () => {
-    fc.assert(
-      fc.property(sized, ([width, height, a, b]) => {
-        fc.pre(distinct(a, b) && apart(a, b));
-        const forward = flowArc(a, b, width, height, 'frame')!;
-        const backward = flowArc(b, a, width, height, 'frame')!;
-        const far = Math.max(
-          Math.hypot(forward.x0 - backward.x1, forward.y0 - backward.y1),
-          Math.hypot(forward.x1 - backward.x0, forward.y1 - backward.y0),
-          Math.hypot(forward.cx - backward.cx, forward.cy - backward.cy)
-        );
-        expect(far).toBeGreaterThan(2);
-      }),
-      propertyParams()
-    );
-  });
-
-  it('never draws an arc between two frames across a cell of its own two groups', () => {
-    const inside = (r: FlowRect, p: { x: number; y: number }) =>
-      p.x > r.x + 1e-3 && p.x < r.x + r.w - 1e-3 && p.y > r.y + 1e-3 && p.y < r.y + r.h - 1e-3;
-    fc.assert(
-      fc.property(sized, ([width, height, a, b]) => {
-        fc.pre(distinct(a, b) && apart(a, b));
-        const arc = flowArc(a, b, width, height, 'frame')!;
-        // An arc that would be too short between the frames is the arc between the centres.
-        fc.pre(arc.x0 !== centre(a).x || arc.y0 !== centre(a).y);
-        for (let i = 0; i <= 64; i++) {
-          const point = flowArcPoint(arc, i / 64);
-          expect(inside(a, point) || inside(b, point)).toBe(false);
-        }
-        // It is long enough to be seen: at least 12 px from one end over its middle to the other end.
-        const middle = flowArcPoint(arc, 0.5);
-        const visible =
-          Math.hypot(middle.x - arc.x0, middle.y - arc.y0) + Math.hypot(arc.x1 - middle.x, arc.y1 - middle.y);
-        expect(visible).toBeGreaterThanOrEqual(12 - 1e-6);
-        expect(Math.hypot(arc.nx, arc.ny)).toBeCloseTo(1);
-      }),
-      propertyParams()
-    );
-  });
-
   it('keeps the arrowhead and the hop number clear of the canvas edge whenever the arc is curved by choice', () => {
     // Only an arc of at most MIN_FLOW_BULGE can have been pushed into the margin (see flowArc).
     fc.assert(
@@ -161,6 +121,61 @@ describe('flowArc (properties)', () => {
         expect(beyond.y).toBeGreaterThanOrEqual(-1e-6);
         expect(beyond.x).toBeLessThanOrEqual(width + 1e-6);
         expect(beyond.y).toBeLessThanOrEqual(height + 1e-6);
+      }),
+      propertyParams()
+    );
+  });
+
+  it('starts every arc at the centre of its source and ends it at the centre of its destination, in real layouts', () => {
+    // Grids as the layout code builds them, with host groups of any shape: one GPU, a square of GPUs, or
+    // one long row of 16. An end of an arc is the centre of the node's rectangle, never a point that
+    // depends on where the curve crosses a rectangle.
+    const grid = fc.record({
+      hosts: fc.integer({ min: 2, max: 40 }),
+      gpus: fc.integer({ min: 1, max: 16 }),
+      hostColumns: fc.integer({ min: 1, max: 10 }),
+      gpuColumns: fc.integer({ min: 1, max: 16 }),
+      hostLabels: fc.boolean(),
+      width: fc.integer({ min: 200, max: 1600 }),
+      height: fc.integer({ min: 120, max: 800 }),
+    });
+    fc.assert(
+      fc.property(grid, fc.boolean(), (g, groups) => {
+        const levels: LevelDef[] = [
+          { ...DEFAULT_LEVEL, label: 'zone', layout: 'vertical', showBorder: true },
+          { ...DEFAULT_LEVEL, label: 'host', layout: 'grid', gridColumns: g.hostColumns, showLabel: g.hostLabels },
+          { ...DEFAULT_LEVEL, label: 'gpu', layout: 'grid', gridColumns: g.gpuColumns, showLabel: false },
+        ];
+        const rows: NormalizedRow[] = [];
+        for (let host = 0; host < g.hosts; host++) {
+          for (let gpu = 0; gpu < g.gpus; gpu++) {
+            rows.push({ labels: { zone: 'zone-a', host: `node-a${host}`, gpu: `gpu${gpu}` }, value: 1, refId: 'A' });
+          }
+        }
+        const { root } = buildHierarchy(rows, levels);
+        attachCells(root, rows, levels, 'max');
+        const layout = computeLayout(root, levels, g.width, g.height);
+        // Edges between host groups, or between GPU cells.
+        const anchors = [...flowAnchors(layout, groups ? 2 : 3).values()];
+        const size = flowLayerSize({ layout, viewportW: g.width, viewportH: g.height });
+        const step = Math.max(1, Math.floor(anchors.length / 12));
+        for (let i = 0; i < anchors.length; i += step) {
+          for (let j = 0; j < anchors.length; j += step) {
+            const arc = flowArc(anchors[i], anchors[j], size.width, size.height);
+            if (i === j) {
+              expect(arc).toBeNull();
+              continue;
+            }
+            expect([arc!.x0, arc!.y0]).toEqual([centre(anchors[i]).x, centre(anchors[i]).y]);
+            expect([arc!.x1, arc!.y1]).toEqual([centre(anchors[j]).x, centre(anchors[j]).y]);
+            // The centre of a node's rectangle is inside that rectangle: the arc touches its own two nodes.
+            const apex = flowArcPoint(arc!, 0.5);
+            expect(apex.x).toBeGreaterThanOrEqual(-1e-6);
+            expect(apex.y).toBeGreaterThanOrEqual(-1e-6);
+            expect(apex.x).toBeLessThanOrEqual(size.width + 1e-6);
+            expect(apex.y).toBeLessThanOrEqual(size.height + 1e-6);
+          }
+        }
       }),
       propertyParams()
     );

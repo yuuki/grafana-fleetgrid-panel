@@ -112,149 +112,19 @@ function sideRoom(c: Chord, nx: number, ny: number, width: number, height: numbe
 }
 
 /**
- * Where an arc is attached to its two rectangles:
- * - `centre`: at their centres. For arcs between cells.
- * - `frame`: on their borders. For arcs between groups of cells: the centre of a group is a point on
- *   one of its cells (or between them), so an arc that ends there reads as an arc of that cell.
+ * The arc from the centre of `from` to the centre of `to` on a canvas of width × height. It bulges to the
+ * left of the direction of travel, so A→B and B→A are two separate curves. The whole arc stays on the
+ * canvas, and its apex, where the arrowhead and the hop number are, keeps FLOW_APEX_MARGIN from the edge:
+ * - when its own side has no room for the bulge and the other side has room for a bulge that is
+ *   FLIP_GAIN larger, it bulges to that side instead, outside the arc of the opposite direction, which
+ *   is already there;
+ * - otherwise it stays on its own side and bulges only as far as fits there, down to a straight line;
+ * - when that leaves both directions nearly straight (a canvas with no room on either side), each may
+ *   bulge by MIN_FLOW_BULGE into the margin, as far as the canvas goes, so the two do not coincide.
+ * The two ends are the two centres for cells and for groups alike: an end never depends on where the
+ * curve crosses a rectangle. Returns null when the two centres coincide.
  */
-export type FlowAttach = 'centre' | 'frame';
-
-// Two frames whose straight connection is shorter than this are neighbours: an arc between their centres
-// would show only in the gap between them.
-const MIN_FRAME_GAP = 16;
-// An arc between neighbouring frames rises this far above the frames, so it reads as an arch from one
-// frame over the gap to the other.
-const FRAME_CLEARANCE = 6;
-// The shortest arc between two frames that is drawn from frame to frame, measured from one end over its
-// middle to the other end. A shorter one would be little more than its arrowhead; it is drawn between
-// the centres instead, which hides nothing.
-const MIN_FRAME_ARC = 12;
-
-// Distance from the centre of `rect` to its border in the direction of the unit vector (ux, uy).
-function borderDistance(rect: FlowRect, ux: number, uy: number): number {
-  return Math.min(ux === 0 ? Infinity : rect.w / (2 * Math.abs(ux)), uy === 0 ? Infinity : rect.h / (2 * Math.abs(uy)));
-}
-
-// The bulge of an arc between two frames whose centres are `length` apart in the direction (ux, uy):
-// that of an arc between cells, but for neighbouring frames at least the bulge that lifts the middle of
-// the arc FRAME_CLEARANCE above both frames.
-function frameBulge(from: FlowRect, to: FlowRect, ux: number, uy: number, length: number): number {
-  const bulge = flowBulge(length);
-  const gap = length - borderDistance(from, ux, uy) - borderDistance(to, ux, uy);
-  if (gap >= MIN_FRAME_GAP) {
-    return bulge;
-  }
-  // How far a frame reaches from the chord through its centre, along the chord's normal (uy, -ux).
-  const reach = (rect: FlowRect) => (Math.abs(uy) * rect.w + Math.abs(ux) * rect.h) / 2;
-  // The apex of a quadratic Bézier is half the bulge away from its chord.
-  return Math.max(bulge, 2 * (Math.max(reach(from), reach(to)) + FRAME_CLEARANCE));
-}
-
-const strictlyInside = (rect: FlowRect, p: FlowPoint): boolean =>
-  p.x > rect.x && p.x < rect.x + rect.w && p.y > rect.y && p.y < rect.y + rect.h;
-
-// Adds the parameters in (0, 1) at which one coordinate of a quadratic Bézier (end values p0 and p1,
-// control value c) equals `value`: the roots of a t² + b t + k with a = p0 - 2c + p1, b = 2 (c - p0) and
-// k = p0 - value. The roots are q / a and k / q, which stays exact when a is close to 0 (a coordinate
-// that grows almost evenly along the arc), where the textbook formula loses its digits.
-function addCrossings(p0: number, c: number, p1: number, value: number, out: number[]): void {
-  const a = p0 - 2 * c + p1;
-  const b = 2 * (c - p0);
-  const k = p0 - value;
-  const disc = b * b - 4 * a * k;
-  if (disc < 0) {
-    return;
-  }
-  const q = -(b + (b >= 0 ? 1 : -1) * Math.sqrt(disc)) / 2;
-  for (const t of [a !== 0 ? q / a : NaN, q !== 0 ? k / q : NaN]) {
-    if (t > 0 && t < 1) {
-      out.push(t);
-    }
-  }
-}
-
-// The parameters at which the arc crosses a line that a side of one of the two frames lies on, in
-// ascending order, between 0 and 1. Between two neighbours of the list the arc does not change from
-// inside a frame to outside it.
-function frameCrossings(arc: FlowArc, frames: FlowRect[]): number[] {
-  const crossings: number[] = [];
-  for (const frame of frames) {
-    addCrossings(arc.x0, arc.cx, arc.x1, frame.x, crossings);
-    addCrossings(arc.x0, arc.cx, arc.x1, frame.x + frame.w, crossings);
-    addCrossings(arc.y0, arc.cy, arc.y1, frame.y, crossings);
-    addCrossings(arc.y0, arc.cy, arc.y1, frame.y + frame.h, crossings);
-  }
-  return [0, ...crossings.sort((a, b) => a - b), 1];
-}
-
-// The part of an arc between the centres of two frames that lies between the frames: the last stretch
-// that is outside both of them before the arc enters `to` for good. It is found exactly, from the
-// crossings of the arc with the sides of the frames. Returns null when there is no such stretch: the
-// frames overlap or touch where the arc passes from one to the other.
-function stretchBetween(arc: FlowArc, from: FlowRect, to: FlowRect): [number, number] | null {
-  const ts = frameCrossings(arc, [from, to]);
-  const inside = (index: number, frame: FlowRect) =>
-    strictlyInside(frame, flowArcPoint(arc, (ts[index] + ts[index + 1]) / 2));
-  // From the end: the pieces inside `to`, then the pieces outside both frames.
-  let end = ts.length - 2;
-  while (end >= 0 && inside(end, to)) {
-    end--;
-  }
-  let start = end;
-  while (start >= 0 && !inside(start, to) && !inside(start, from)) {
-    start--;
-  }
-  return start === end ? null : [ts[start + 1], ts[end + 1]];
-}
-
-// An arc between the centres of two frames, drawn from frame to frame: only its part between the frames
-// (see stretchBetween). A part of a quadratic Bézier is a quadratic Bézier. The arc is returned whole
-// when the frames overlap, when it has no such part, or when the part is shorter than MIN_FRAME_ARC.
-function betweenFrames(arc: FlowArc, from: FlowRect, to: FlowRect): FlowArc {
-  // Two frames of one level do not overlap. If they do, nothing is cut.
-  if (strictlyInside(from, { x: arc.x1, y: arc.y1 }) || strictlyInside(to, { x: arc.x0, y: arc.y0 })) {
-    return arc;
-  }
-  const stretch = stretchBetween(arc, from, to);
-  if (!stretch) {
-    return arc;
-  }
-  const [t0, t1] = stretch;
-  const start = flowArcPoint(arc, t0);
-  const end = flowArcPoint(arc, t1);
-  const middle = flowArcPoint(arc, (t0 + t1) / 2);
-  const length = Math.hypot(end.x - start.x, end.y - start.y);
-  // How much of the arc shows: measured over its middle, because a high arch between two frames that
-  // touch has its two ends close together.
-  const visible = Math.hypot(middle.x - start.x, middle.y - start.y) + Math.hypot(end.x - middle.x, end.y - middle.y);
-  if (visible < MIN_FRAME_ARC || !(length > 1e-6)) {
-    return arc;
-  }
-  // The control point of the part from t0 to t1 (the blossom of the curve at t0 and t1).
-  const w0 = (1 - t0) * (1 - t1);
-  const w1 = (1 - t0) * t1 + t0 * (1 - t1);
-  const w2 = t0 * t1;
-  // The part bulges to the same side as the whole.
-  let nx = (end.y - start.y) / length;
-  let ny = -(end.x - start.x) / length;
-  if (nx * arc.nx + ny * arc.ny < 0) {
-    nx = -nx;
-    ny = -ny;
-  }
-  return {
-    x0: start.x,
-    y0: start.y,
-    cx: w0 * arc.x0 + w1 * arc.cx + w2 * arc.x1,
-    cy: w0 * arc.y0 + w1 * arc.cy + w2 * arc.y1,
-    x1: end.x,
-    y1: end.y,
-    nx,
-    ny,
-  };
-}
-
-// The arc between the centres of the two rectangles, bulging by `wanted` where the canvas has room.
-function centreArc(from: FlowRect, to: FlowRect, width: number, height: number, attach: FlowAttach): FlowArc | null {
+export function flowArc(from: FlowRect, to: FlowRect, width: number, height: number): FlowArc | null {
   const x0 = from.x + from.w / 2;
   const y0 = from.y + from.h / 2;
   const x1 = to.x + to.w / 2;
@@ -269,8 +139,7 @@ function centreArc(from: FlowRect, to: FlowRect, width: number, height: number, 
   // Left of the direction of travel in canvas coordinates (y grows downwards).
   let nx = dy / length;
   let ny = -dx / length;
-  const plain = flowBulge(length);
-  const wanted = attach === 'frame' ? frameBulge(from, to, dx / length, dy / length, length) : plain;
+  const wanted = flowBulge(length);
   const own = sideRoom(chord, nx, ny, width, height, FLOW_APEX_MARGIN);
   let bulge = wanted;
   if (own < wanted) {
@@ -279,11 +148,6 @@ function centreArc(from: FlowRect, to: FlowRect, width: number, height: number, 
       nx = -nx;
       ny = -ny;
       bulge = wanted * FLIP_GAIN;
-    } else if (wanted > plain && sideRoom(chord, nx, ny, width, height, 0) >= wanted) {
-      // The arch over two neighbouring frames fits on the canvas, though not with the margin (a row of
-      // groups under the canvas edge, with only their labels above them). It is drawn there rather than
-      // across the cells of its own groups.
-      bulge = wanted;
     } else if (own < MIN_FLOW_BULGE && other < MIN_FLOW_BULGE) {
       bulge = Math.max(own, Math.min(MIN_FLOW_BULGE, sideRoom(chord, nx, ny, width, height, 0)));
     } else {
@@ -291,33 +155,6 @@ function centreArc(from: FlowRect, to: FlowRect, width: number, height: number, 
     }
   }
   return { x0, y0, cx: (x0 + x1) / 2 + nx * bulge, cy: (y0 + y1) / 2 + ny * bulge, x1, y1, nx, ny };
-}
-
-/**
- * The arc from `from` to `to` on a canvas of width × height. It bulges to the left of the direction of
- * travel, so A→B and B→A are two separate curves. The whole arc stays on the canvas, and its apex,
- * where the arrowhead and the hop number are, keeps FLOW_APEX_MARGIN from the edge:
- * - when its own side has no room for the bulge and the other side has room for a bulge that is
- *   FLIP_GAIN larger, it bulges to that side instead, outside the arc of the opposite direction, which
- *   is already there;
- * - otherwise it stays on its own side and bulges only as far as fits there, down to a straight line;
- * - when that leaves both directions nearly straight (a canvas with no room on either side), each may
- *   bulge by MIN_FLOW_BULGE into the margin, as far as the canvas goes, so the two do not coincide.
- * An arc between cells (`centre`) joins their centres. An arc between groups (`frame`) is the same
- * curve between the centres of the two frames, drawn from the border of one frame to the border of the
- * other; between neighbouring frames it bulges enough to arch over them (see frameBulge), into the
- * margin when the arch fits on the canvas only there.
- * Returns null when the two centres coincide.
- */
-export function flowArc(
-  from: FlowRect,
-  to: FlowRect,
-  width: number,
-  height: number,
-  attach: FlowAttach = 'centre'
-): FlowArc | null {
-  const arc = centreArc(from, to, width, height, attach);
-  return arc && attach === 'frame' ? betweenFrames(arc, from, to) : arc;
 }
 
 /** The point of the arc at parameter t in [0, 1]. */
