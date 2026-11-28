@@ -733,8 +733,8 @@ test('flow overlay draws the edge query as arcs on its own canvas', async ({
   await expect(rest).toBeVisible();
   await expect.poll(() => hasArcs(rest)).toBe(true);
   expect(await hasArcs(focus)).toBe(false);
-  // The arc canvas starts at the cell canvas's origin, so both share one coordinate system. It also
-  // covers the part of the panel beside the grid: arcs bulge into it instead of being cut at the grid.
+  // The arc canvas starts at the cell canvas's origin, so both share one coordinate system. It has a
+  // bounded margin beside a grid that is narrower than the panel: arcs bulge into it.
   const box = (canvas: Locator) =>
     canvas.evaluate((el) => {
       const c = el as HTMLCanvasElement;
@@ -745,8 +745,10 @@ test('flow overlay draws the edge query as arcs on its own canvas', async ({
   const restBox = await box(rest);
   const cellBox = await box(cells);
   expect([restBox.left, restBox.top]).toEqual([cellBox.left, cellBox.top]);
-  expect(restBox.height).toBeGreaterThanOrEqual(cellBox.height);
-  expect(restBox.width).toBe(Math.max(cellBox.width, restBox.visible));
+  expect(restBox.height).toBe(cellBox.height);
+  // The margin is bounded: at most 160 px, at most the grid's own width, and never beyond the panel.
+  const margin = Math.max(0, Math.min(restBox.visible - cellBox.width, cellBox.width, 160));
+  expect(restBox.width).toBeCloseTo(cellBox.width + margin, 0);
   // It never makes the panel scroll sideways.
   expect(await rest.evaluate((el) => el.parentElement!.scrollWidth <= el.parentElement!.clientWidth)).toBe(true);
 

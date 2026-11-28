@@ -169,13 +169,34 @@ const FlowScale: React.FC<{ info: MetricInfo; worse: string }> = ({ info, worse 
   );
 };
 
-const FlowLegendComponent: React.FC<{ model: FlowModel | null }> = ({ model }) => {
+/**
+ * Why no arc is drawn although the model may hold edges, in a few words, or null: the model's own reason,
+ * or a grid whose overlay canvas would be larger than the browser can paint. The legend must not say
+ * "3 edges" over a picture without arcs.
+ */
+export function flowLegendError(model: FlowModel, tooLarge: boolean): string | null {
+  if (model.error !== null) {
+    return model.error;
+  }
+  return tooLarge && model.edges.length > 0
+    ? `${pluralize(model.edges.length, 'edge')} not drawn: the grid is too large for the overlay`
+    : null;
+}
+
+export interface FlowLegendProps {
+  model: FlowModel | null;
+  /** Whether the overlay canvas would be larger than the browser can paint. */
+  tooLarge?: boolean;
+}
+
+const FlowLegendComponent: React.FC<FlowLegendProps> = ({ model, tooLarge = false }) => {
   const theme = useTheme2();
   // No legend while the overlay is off.
   if (!model) {
     return null;
   }
   const summary = flowLegendSummary(model);
+  const error = flowLegendError(model, tooLarge);
   return (
     <div
       data-testid="flow-legend"
@@ -185,7 +206,7 @@ const FlowLegendComponent: React.FC<{ model: FlowModel | null }> = ({ model }) =
     >
       <span style={{ color: theme.colors.text.secondary }}>Flows</span>
       {model.metricInfo && model.valuedCount > 0 && <FlowScale info={model.metricInfo} worse={flowWorseEnd(model)} />}
-      {model.error === null ? (
+      {error === null ? (
         <span
           data-testid="flow-legend-count"
           style={{
@@ -198,7 +219,7 @@ const FlowLegendComponent: React.FC<{ model: FlowModel | null }> = ({ model }) =
       ) : (
         // Nothing can be drawn: say why here too, where it is readable at any panel width.
         <span data-testid="flow-legend-error" style={{ overflowWrap: 'anywhere', color: theme.colors.warning.text }}>
-          {model.error}
+          {error}
         </span>
       )}
       {summary.notes.map((note) => (

@@ -63,29 +63,71 @@ export function flowArrowSize(lineWidth: number): number {
   return Math.min(11, Math.max(6, lineWidth * 3.2));
 }
 
-// The size of a layer in CSS px. A layer starts at the cell canvas's origin, so both share one
-// coordinate system. It is as high as the cell canvas, and as wide as the wider of the cell canvas and
-// the panel: a grid that is narrower than its panel (one column of zones, for example) leaves the arcs
-// no room to bulge inside the grid, and an arc that is cut at the canvas edge loses its arrowhead.
-export function flowLayerSize(rc: Pick<FlowRenderContext, 'layout' | 'viewportW' | 'viewportH'>): {
+/**
+ * The most that a layer extends beyond the grid in one direction, in CSS px. An arc's apex is at most
+ * 140 px from its chord (half the largest flipped bulge), so more room than this is never used.
+ */
+export const FLOW_SIDE_ROOM = 160;
+/**
+ * The largest canvas that Chromium paints: beyond a side of 65,535 px or 268,435,456 px in all it paints
+ * nothing and reports no error. Both in device px.
+ */
+export const MAX_CANVAS_SIDE = 65535;
+export const MAX_CANVAS_AREA = 268435456;
+
+const canvasFits = (width: number, height: number, dpr: number): boolean => {
+  const w = Math.round(width * dpr);
+  const h = Math.round(height * dpr);
+  return w <= MAX_CANVAS_SIDE && h <= MAX_CANVAS_SIDE && w * h <= MAX_CANVAS_AREA;
+};
+
+// The room a layer adds beside the grid: only where the panel shows more than the grid, never more than
+// the grid's own width (so a layer is at most twice the cell canvas), and never more than an arc can use.
+const sideRoom = (content: number, viewport: number): number =>
+  Math.max(0, Math.min(viewport - content, content, FLOW_SIDE_ROOM));
+
+export interface FlowLayerSize {
+  /** CSS px. */
   width: number;
   height: number;
-} {
-  return {
-    width: Math.max(rc.layout.contentWidth, rc.viewportW),
-    height: Math.max(rc.layout.contentHeight, rc.viewportH),
-  };
+  /** Whether a canvas of this size can be painted at the device pixel ratio. */
+  drawable: boolean;
+}
+
+/**
+ * The size of a layer. A layer starts at the cell canvas's origin, so both share one coordinate system.
+ * It is as high as the cell canvas (the grid, or the panel when the grid is shorter), and as wide as the
+ * cell canvas plus a bounded margin where the panel is wider than the grid: a grid that is narrower
+ * than its panel (one column of zones) leaves an arc no room to bulge inside the grid. The margin is
+ * bounded because the height can be the whole scroll length of the grid: a layer as wide as the panel
+ * over a grid of 68 × 28,066 px took 174 MB. So a layer is never more than twice the cell canvas.
+ * When the browser cannot paint the layer with its margin, the layer has the cell canvas's size; when it
+ * cannot paint that either, the layer is not drawable and the legend says so.
+ */
+export function flowLayerSize(
+  rc: Pick<FlowRenderContext, 'layout' | 'viewportW' | 'viewportH'>,
+  dpr = 1
+): FlowLayerSize {
+  const { contentWidth, contentHeight } = rc.layout;
+  // The cell canvas's own size (see prepareCanvas in renderer.ts).
+  const height = Math.max(contentHeight, rc.viewportH);
+  const width = contentWidth + sideRoom(contentWidth, rc.viewportW);
+  if (canvasFits(width, height, dpr)) {
+    return { width, height, drawable: true };
+  }
+  return { width: contentWidth, height, drawable: canvasFits(contentWidth, height, dpr) };
 }
 
 // Sizes and clears a layer. Unlike the cell canvas it keeps its backing store while the size is
 // unchanged. Returns null when there is nothing to paint on.
 function prepareLayer(canvas: HTMLCanvasElement, rc: FlowRenderContext, dpr: number): CanvasRenderingContext2D | null {
-  const { width: cssW, height: cssH } = flowLayerSize(rc);
+  const { width: cssW, height: cssH, drawable } = flowLayerSize(rc, dpr);
   const fullWidth = Math.round(cssW * dpr);
   const fullHeight = Math.round(cssH * dpr);
   const allocated = canvas.width === fullWidth && canvas.height === fullHeight;
-  // An empty layer is released, unless it retains a store that already has the right size.
-  const release = rc.edges.length === 0 && !(rc.retain && allocated);
+  // An empty layer is released, unless it retains a store that already has the right size. A layer
+  // that the browser cannot paint holds no store either.
+  const release = !drawable || (rc.edges.length === 0 && !(rc.retain && allocated));
   const width = release ? 0 : fullWidth;
   const height = release ? 0 : fullHeight;
   if (canvas.width !== width) {
@@ -336,7 +378,7 @@ export function renderFlowLayer(canvas: HTMLCanvasElement, rc: FlowRenderContext
   if (!ctx || rc.edges.length === 0) {
     return;
   }
-  const size = flowLayerSize(rc);
+  const size = flowLayerSize(rc, dpr);
   const shapes = shapesOf(rc, size.width, size.height);
   const lineWidth = flowLineWidth(rc.layout.cellSize) * (rc.emphasised ? EMPHASIS : 1);
   const arrowSize = flowArrowSize(lineWidth);

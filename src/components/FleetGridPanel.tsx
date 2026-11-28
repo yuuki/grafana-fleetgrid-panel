@@ -351,7 +351,10 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
     hovered: hover,
     pinned: popover,
   });
-  const flowLegend = useMemo(() => <FlowLegend model={flowModel} />, [flowModel]);
+  const flowLegend = useMemo(
+    () => <FlowLegend model={flowModel} tooLarge={flow.tooLarge} />,
+    [flowModel, flow.tooLarge]
+  );
 
   useEffect(() => {
     if (canvasRef.current) {

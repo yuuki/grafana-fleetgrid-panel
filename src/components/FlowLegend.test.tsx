@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { createTheme } from '@grafana/data';
 import { MetricInfo } from '../data/display';
 import { FlowEdge, FlowModel, MAX_FLOW_ARCS } from '../data/edges';
-import { FlowLegend, flowLegendSummary, flowWorseEnd, formatFlowValue } from './FlowLegend';
+import { FlowLegend, flowLegendError, flowLegendSummary, flowWorseEnd, formatFlowValue } from './FlowLegend';
 
 const theme = createTheme();
 jest.mock('@grafana/ui', () => ({
@@ -251,6 +251,18 @@ describe('FlowLegend', () => {
       '2 rows left out, worst 4.5%',
       '1 row within one host not drawn, worst 2%',
     ]);
+  });
+
+  it('says that the grid is too large for the overlay instead of counting edges that are not drawn', () => {
+    render(<FlowLegend model={model(edges(3))} tooLarge />);
+    expect(screen.getByTestId('flow-legend-error')).toHaveTextContent(
+      '3 edges not drawn: the grid is too large for the overlay'
+    );
+    expect(screen.queryByTestId('flow-legend-count')).not.toBeInTheDocument();
+    // Without edges there is nothing that is not drawn, and the model's own reason comes first.
+    expect(flowLegendError(model([]), true)).toBeNull();
+    expect(flowLegendError(model(edges(3), { error: 'no query "Z"' }), true)).toBe('no query "Z"');
+    expect(flowLegendError(model(edges(3)), false)).toBeNull();
   });
 
   it('says why nothing can be drawn in place of the count', () => {

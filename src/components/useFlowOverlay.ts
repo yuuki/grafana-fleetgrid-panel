@@ -17,7 +17,7 @@ import {
 import { PanelModel } from '../data/model';
 import { LayoutResult } from '../layout/layout';
 import { flowAnchors } from '../render/flowGeometry';
-import { renderFlowLayer } from '../render/flowRenderer';
+import { flowLayerSize, renderFlowLayer } from '../render/flowRenderer';
 import { CellModel, FleetGridOptions, HierarchyNode } from '../types';
 
 const NO_FRAMES: DataFrame[] = [];
@@ -49,6 +49,8 @@ export interface FlowOverlayState {
   summary: FlowNodeSummary | null;
   /** Whether arcs are in focus, so that the resting layer is to be dimmed. */
   focused: boolean;
+  /** Whether the grid is too large for the browser to paint the overlay, so that the legend says so. */
+  tooLarge: boolean;
 }
 
 // Edge colors resolved so far, for one model and theme.
@@ -248,5 +250,8 @@ export function useFlowOverlay(input: FlowOverlayInput): FlowOverlayState {
     });
   }, [focusRef, model, layout, viewportW, viewportH, anchors, focus, theme]);
 
-  return { active: model !== null, summary, focused: focus !== null };
+  // Read at render, like the paint does: a change of the pixel ratio (browser zoom) resizes the panel.
+  const dpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1;
+  const tooLarge = model !== null && !flowLayerSize({ layout, viewportW, viewportH }, dpr).drawable;
+  return { active: model !== null, summary, focused: focus !== null, tooLarge };
 }

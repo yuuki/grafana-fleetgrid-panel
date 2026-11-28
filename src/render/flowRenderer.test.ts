@@ -4,6 +4,8 @@ import { LayoutResult } from '../layout/layout';
 import { FlowRect } from './flowGeometry';
 import {
   FlowRenderContext,
+  MAX_CANVAS_AREA,
+  MAX_CANVAS_SIDE,
   flowArrowSize,
   flowBadgeText,
   flowHubRadius,
@@ -133,11 +135,11 @@ describe('flowLineWidth', () => {
 
 describe('renderFlowLayer', () => {
   it('sizes its canvas like the cell canvas when the grid fills the panel', () => {
-    const tall: LayoutResult = { ...layout, contentWidth: 333.5, contentHeight: 120.5 };
+    const full: LayoutResult = { ...layout, contentWidth: 333.5, contentHeight: 120.5 };
     const cells = document.createElement('canvas');
     const layer = document.createElement('canvas');
     renderCanvas(cells, {
-      layout: tall,
+      layout: full,
       metricInfos: [],
       selectedRefId: 'A',
       displayMode: 'single',
@@ -148,15 +150,26 @@ describe('renderFlowLayer', () => {
       viewportH: 300,
       categoryStyle: 'strip',
     });
-    renderFlowLayer(layer, context({ layout: tall, viewportW: 333.5, viewportH: 300, edges: [edge('a', 'b', 1)] }));
+    // The grid is as wide as the panel and shorter: the cell canvas is as high as the panel, and so is
+    // the layer.
+    renderFlowLayer(layer, context({ layout: full, viewportW: 333.5, viewportH: 300, edges: [edge('a', 'b', 1)] }));
     expect([layer.width, layer.height]).toEqual([cells.width, cells.height]);
     expect([layer.style.width, layer.style.height]).toEqual([cells.style.width, cells.style.height]);
+    // A grid larger than the panel in both directions scrolls: the layer is the cell canvas again.
+    expect(flowLayerSize({ layout: full, viewportW: 200, viewportH: 100 })).toMatchObject({
+      width: 333.5,
+      height: 120.5,
+    });
   });
 
-  it('is as wide as the panel when the grid is narrower, so arcs have room beside the grid', () => {
+  it('adds a bounded margin beside a grid that is narrower than its panel, so arcs have room to bulge', () => {
     // One column of zones in a wide panel: the grid is 68 px wide, the panel 1550 px.
     const narrow: LayoutResult = { ...layout, contentWidth: 68, contentHeight: 3026 };
-    expect(flowLayerSize({ layout: narrow, viewportW: 1550, viewportH: 400 })).toEqual({ width: 1550, height: 3026 });
+    expect(flowLayerSize({ layout: narrow, viewportW: 1550, viewportH: 400 })).toEqual({
+      width: 136,
+      height: 3026,
+      drawable: true,
+    });
     const layer = document.createElement('canvas');
     const column = new Map<string, FlowRect>([
       ['a', { x: 2, y: 34, w: 13, h: 13 }],
@@ -166,11 +179,75 @@ describe('renderFlowLayer', () => {
       layer,
       context({ layout: narrow, viewportW: 1550, viewportH: 400, anchors: column, edges: [edge('a', 'b', 1)] })
     );
-    expect([layer.width, layer.style.width]).toEqual([1550, '1550px']);
-    // The arc bulges into the free area: its control point is right of the grid, on the canvas.
-    const curve = eventsOf(layer).find((e) => e.type === 'quadraticCurveTo')!;
-    expect(curve.props.cpx).toBeGreaterThan(68);
-    expect(curve.props.cpx).toBeLessThan(1550);
+    expect([layer.width, layer.style.width]).toEqual([136, '136px']);
+    // The arc bulges into the margin: its apex is right of the grid, on the canvas.
+    const events = eventsOf(layer);
+    const curve = events.findIndex((e) => e.type === 'quadraticCurveTo');
+    const start = events[curve - 1].props as unknown as { x: number };
+    const { cpx, x } = events[curve].props as unknown as { cpx: number; x: number };
+    const apex = start.x / 4 + cpx / 2 + x / 4;
+    expect(apex).toBeGreaterThan(68);
+    expect(apex).toBeLessThan(136);
+  });
+
+  it('never makes a layer more than twice the cell canvas, nor wider than the panel when the grid is narrower', () => {
+    const size = (contentWidth: number, contentHeight: number, viewportW: number, viewportH: number) => {
+      const { width, height } = flowLayerSize({
+        layout: { ...layout, contentWidth, contentHeight },
+        viewportW,
+        viewportH,
+      });
+      return [width, height];
+    };
+    // 3,400 hosts in four columns: a grid of 68 × 28,066 px in a panel 1550 px wide. The layer is twice
+    // the cell canvas, not the panel's width over the grid's whole height (that was 23 times).
+    expect(size(68, 28066, 1550, 700)).toEqual([136, 28066]);
+    // A wider grid gets no more than an arc can use.
+    expect(size(600, 28066, 1550, 700)).toEqual([760, 28066]);
+    // A grid a little narrower than the panel is filled up to the panel, not beyond it.
+    expect(size(1500, 3000, 1550, 700)).toEqual([1550, 3000]);
+    // A short grid in a high panel: the cell canvas is as high as the panel, and so is the layer.
+    expect(size(1550, 40, 1550, 700)).toEqual([1550, 700]);
+    // In every case the layer has at most twice the pixels of the cell canvas.
+    for (const [w, h, vw, vh] of [
+      [68, 28066, 1550, 700],
+      [600, 28066, 1550, 700],
+      [1500, 3000, 1550, 700],
+      [10, 10, 1550, 700],
+      [200, 3000, 250, 700],
+    ]) {
+      const [layerW, layerH] = size(w, h, vw, vh);
+      expect(layerW * layerH).toBeLessThanOrEqual(2 * w * Math.max(h, vh));
+      expect(layerW).toBeLessThanOrEqual(Math.max(w, vw));
+    }
+  });
+
+  it('falls back to the cell canvas size, and then to not drawing, when the browser cannot paint the layer', () => {
+    const at = (contentWidth: number, contentHeight: number, viewportW: number, dpr: number) =>
+      flowLayerSize({ layout: { ...layout, contentWidth, contentHeight }, viewportW, viewportH: 700 }, dpr);
+    // The tall grid at device pixel ratio 2: 272 × 56,132 device px, well inside the limits.
+    expect(at(68, 28066, 1550, 2)).toEqual({ width: 136, height: 28066, drawable: true });
+    // With its margin this layer would hold 273.6 million px, more than a canvas can: the margin goes.
+    expect(MAX_CANVAS_AREA).toBe(268435456);
+    expect(at(4400, 60000, 5000, 1)).toEqual({ width: 4400, height: 60000, drawable: true });
+    // At ratio 3 the grid is 84,198 device px high, more than a canvas side can be: nothing can be drawn.
+    expect(MAX_CANVAS_SIDE).toBe(65535);
+    expect(at(68, 28066, 1550, 3)).toEqual({ width: 68, height: 28066, drawable: false });
+
+    // Such a layer holds no backing store and paints nothing.
+    const original = window.devicePixelRatio;
+    Object.defineProperty(window, 'devicePixelRatio', { value: 3, configurable: true });
+    try {
+      const canvas = document.createElement('canvas');
+      renderFlowLayer(
+        canvas,
+        context({ layout: { ...layout, contentWidth: 68, contentHeight: 28066 }, edges: [edge('a', 'b', 1)] })
+      );
+      expect([canvas.width, canvas.height]).toEqual([0, 0]);
+      expect(count(eventsOf(canvas), 'quadraticCurveTo')).toBe(0);
+    } finally {
+      Object.defineProperty(window, 'devicePixelRatio', { value: original, configurable: true });
+    }
   });
 
   it('clears instead of resizing when the size did not change', () => {
