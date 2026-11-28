@@ -1,13 +1,17 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import { createTheme, toDataFrame, FieldType } from '@grafana/data';
+import { createTheme, toDataFrame, FieldType, Field, NumericRange } from '@grafana/data';
 import { buildMetricInfos } from '../data/display';
 import { DrilldownPopover } from './DrilldownPopover';
 import { CellRangeInfo } from '../types';
 
+// Grafana's Sparkline destructures the y field's state.range (getYRange) and throws without it; the stand-in keeps that contract.
 jest.mock('@grafana/ui', () => ({
   ...jest.requireActual('@grafana/ui'),
-  Sparkline: () => <div data-testid="sparkline" />,
+  Sparkline: ({ sparkline }: { sparkline: { y: Field } }) => {
+    const { min, max } = sparkline.y.state?.range as NumericRange;
+    return <div data-testid="sparkline" data-min={min} data-max={max} />;
+  },
 }));
 
 const theme = createTheme();
@@ -77,6 +81,45 @@ describe('DrilldownPopover', () => {
     const popover = screen.getByText('zone-a').parentElement!.parentElement as HTMLElement;
     expect(popover.style.maxHeight).toBe('74px');
     expect(popover.style.overflowY).toBe('');
+  });
+  it('gives the sparkline a y range when the frame has none, as frames of the on-demand range query', () => {
+    const infos = buildMetricInfos([rangeFrame], theme, 'browser');
+    expect(rangeFrame.fields[1].state?.range).toBeUndefined();
+    render(
+      <DrilldownPopover
+        cell={cell}
+        metricInfos={infos}
+        seriesFor={() => ({ frame: rangeFrame, seriesCount: 1, aggregated: false })}
+        loading={false}
+        x={0}
+        y={0}
+        {...bounds}
+        onClose={() => {}}
+      />
+    );
+    const sparkline = screen.getByTestId('sparkline');
+    expect(sparkline.dataset.min).toBe('500');
+    expect(sparkline.dataset.max).toBe('503');
+  });
+  it('keeps the y range that panel data already carries', () => {
+    const infos = buildMetricInfos([rangeFrame], theme, 'browser');
+    const value = { ...rangeFrame.fields[1], state: { range: { min: 0, max: 700, delta: 700 } } };
+    const frame = { ...rangeFrame, fields: [rangeFrame.fields[0], value] };
+    render(
+      <DrilldownPopover
+        cell={cell}
+        metricInfos={infos}
+        seriesFor={() => ({ frame, seriesCount: 1, aggregated: false })}
+        loading={false}
+        x={0}
+        y={0}
+        {...bounds}
+        onClose={() => {}}
+      />
+    );
+    const sparkline = screen.getByTestId('sparkline');
+    expect(sparkline.dataset.min).toBe('0');
+    expect(sparkline.dataset.max).toBe('700');
   });
   it('shows loading state', () => {
     const infos = buildMetricInfos([rangeFrame], theme, 'browser');
