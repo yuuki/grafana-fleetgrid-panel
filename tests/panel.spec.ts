@@ -93,21 +93,36 @@ async function frameHash(canvas: Locator): Promise<number> {
   });
 }
 
-/** Waits for the initial render to settle and returns a stable frameHash (avoids mistakenly using an unrendered frame as the baseline) */
+/**
+ * Waits for the canvas to settle and returns its frameHash, to use as a baseline. The picture and the
+ * size of the backing store must stay the same over six samples in a row, 100 ms apart. Two samples are
+ * not enough: in the panel view Grafana gives the panel its final height a few hundred milliseconds
+ * after the first paint (the panel then paints again, 30 px higher), and a hash taken between the two
+ * is the baseline of a picture that is gone before the test acts.
+ */
 async function stableHash(canvas: Locator): Promise<number> {
   await expect.poll(() => isPainted(canvas)).toBe(true);
-  let prev = await frameHash(canvas);
+  let previous = '';
+  let unchanged = 0;
+  let hash = 0;
   await expect
-    .poll(async () => {
-      // Insert a time gap before the second sample, to avoid an accidental match from back-to-back reads and confirm genuine stability
-      await canvas.page().waitForTimeout(60);
-      const h = await frameHash(canvas);
-      const same = h === prev;
-      prev = h;
-      return same;
-    })
+    .poll(
+      async () => {
+        await canvas.page().waitForTimeout(100);
+        const size = await canvas.evaluate((el) => {
+          const c = el as HTMLCanvasElement;
+          return `${c.width}x${c.height}`;
+        });
+        hash = await frameHash(canvas);
+        const sample = `${size}:${hash}`;
+        unchanged = sample === previous ? unchanged + 1 : 0;
+        previous = sample;
+        return unchanged >= 5;
+      },
+      { intervals: [1], timeout: 15_000 }
+    )
     .toBe(true);
-  return prev;
+  return hash;
 }
 
 interface CellPath {
