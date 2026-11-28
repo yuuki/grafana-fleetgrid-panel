@@ -407,24 +407,36 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
       });
   }, [popover, drillFrames, drillLoading, drillError, data, model.metricInfos, options.spatialAggregation]);
 
-  // Close the popover/menu on Esc or an outside pointer-down (the popover side guards with stopPropagation)
+  // Close the popover/menu on an outside pointer-down (the popover side guards with stopPropagation)
   useEffect(() => {
     const close = () => {
       setPopover(null);
       setLinkMenu(null);
     };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        close();
-      }
-    };
-    window.addEventListener('keydown', onKey);
     document.addEventListener('pointerdown', close);
     return () => {
-      window.removeEventListener('keydown', onKey);
       document.removeEventListener('pointerdown', close);
     };
   }, []);
+
+  // Close the popover/menu on Esc. Grafana's keyboard shortcuts handle Esc on document and stop it there, so a
+  // window listener in the bubble phase never sees it, and the same key press would also leave the panel view.
+  // While an overlay is open, take Esc first (window, capture phase) and stop it so that it only closes the overlay.
+  const overlayOpen = popover !== null || linkMenu !== null;
+  useEffect(() => {
+    if (!overlayOpen) {
+      return;
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setPopover(null);
+        setLinkMenu(null);
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [overlayOpen]);
 
   // Link execution: for links that carry a LinkModel.onClick (e.g. in-panel SPA navigation), prefer that
   const followLink = (link: LinkModel<Field>, e: React.MouseEvent) => {
