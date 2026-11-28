@@ -52,6 +52,15 @@ function formatValues(format: CopyFormat, values: string[]): string | null {
 
 const plural = (count: number, noun: string): string => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
+// The result of the last copy, with the values it was made of. It is shown only while the bar still
+// shows those values: after the selection changed, the text is no longer what the buttons copy.
+interface CopyOutcome {
+  values: string[];
+  format: CopyFormat;
+  /** The text of a copy that the browser refused, kept on screen so it can be copied by hand. */
+  failedText?: string;
+}
+
 /**
  * The controls of a cell selection, shown under the grid while cells are selected: the size of
  * the selection, the cohort comparison (which it opens in a drawer), one-click copy of the selected
@@ -76,27 +85,22 @@ export const SelectionBar: React.FC<SelectionBarProps> = ({
   const [comparing, setComparing] = useState(false);
   // Hostlist notation cannot express every value. The other formats can.
   const hostlistPossible = useMemo(() => values.every(isHostlistName), [values]);
-  const [copied, setCopied] = useState<CopyFormat | undefined>(undefined);
-  // The text of a copy that the browser refused, kept on screen so it can be copied by hand.
-  const [failed, setFailed] = useState<string | undefined>(undefined);
+  const [outcome, setOutcome] = useState<CopyOutcome | undefined>(undefined);
+  const current = outcome?.values === values ? outcome : undefined;
+  const copied = current && current.failedText === undefined ? current.format : undefined;
+  const failed = current?.failedText;
   useEffect(() => {
     if (copied === undefined) {
       return undefined;
     }
-    const timer = setTimeout(() => setCopied(undefined), 2000);
+    const timer = setTimeout(() => setOutcome(undefined), 2000);
     return () => clearTimeout(timer);
   }, [copied]);
 
   const copy = (format: CopyFormat, text: string) => {
     copyText(text).then(
-      () => {
-        setFailed(undefined);
-        setCopied(format);
-      },
-      () => {
-        setCopied(undefined);
-        setFailed(text);
-      }
+      () => setOutcome({ values, format }),
+      () => setOutcome({ values, format, failedText: text })
     );
   };
   const message = syncMessage(sync);

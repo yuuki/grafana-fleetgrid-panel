@@ -462,6 +462,32 @@ describe('FleetGridPanel cell selection', () => {
       await copy('list');
       expect(within(screen.getByTestId('selection-bar')).queryByRole('alert')).not.toBeInTheDocument();
     });
+
+    it('removes the text to copy by hand when the selection changes: it is no longer what would be copied', async () => {
+      writeText.mockRejectedValue(new Error('NotAllowedError'));
+      render(<FleetGridPanel {...makeProps()} />);
+      shiftClick(LABEL.b);
+      await copy('hostlist');
+      expect(within(screen.getByTestId('selection-bar')).getByRole('textbox')).toHaveValue('node-b[001-002]');
+      shiftClick(CELL.a1);
+      expect(screen.getByTestId('selection-label')).toHaveTextContent('3 host values:');
+      expect(within(screen.getByTestId('selection-bar')).queryByRole('textbox')).not.toBeInTheDocument();
+      expect(within(screen.getByTestId('selection-bar')).queryByRole('alert')).not.toBeInTheDocument();
+      // The next refused copy shows the text of the selection as it is now.
+      await copy('hostlist');
+      expect(within(screen.getByTestId('selection-bar')).getByRole('textbox')).toHaveValue('node-a001,node-b[001-002]');
+    });
+
+    it('takes the mark of a finished copy away when the selection changes', async () => {
+      render(<FleetGridPanel {...makeProps()} />);
+      shiftClick(LABEL.b);
+      await copy('list');
+      // The button of a finished copy is drawn as a success, unlike the button next to it.
+      const look = (format: string) => screen.getByTestId(`selection-copy-${format}`).className;
+      expect(look('list')).not.toBe(look('regex'));
+      shiftClick(CELL.a1);
+      expect(look('list')).toBe(look('regex'));
+    });
   });
 
   it('opens the cohort comparison of the selected cells against the others', () => {
