@@ -158,6 +158,7 @@ Instant queries have no history at hand, so the panel re-issues the dashboard's 
 - Requery only when an instant target exists (a range query with a missing series must not trigger it).
 - Targets are converted with `instant: false, range: true`, `format: 'table'` → `'time_series'`, `maxDataPoints: 100`, `intervalMs = max(15 s, span/100)`.
 - Targets are grouped per datasource (mixed-datasource dashboards work) and `DataSourceApi.query` results are awaited whether they are Promises or Observables.
+- The response frames do not pass through Grafana's field overrides, so their numeric fields have no `state.range`. Grafana's `Sparkline` reads the y range from it and throws without it, so the popover fills it from the values (`getMinMaxAndDelta`) when it is absent and keeps the range that panel data already carries.
 
 **Decision: panel-level requery cache, not per-cell.**
 *Rationale:* one range response serves every cell (cells differ only in which labels they select from the same frames). A per-cell cache (the original plan) would multiply identical queries and complicate invalidation; the panel-level cache is invalidated whenever the panel's own data (requestId) changes.
