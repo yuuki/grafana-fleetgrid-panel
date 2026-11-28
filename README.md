@@ -227,7 +227,7 @@ Cells show the state of one endpoint. Many faults in an AI / HPC cluster are bet
 
 ![Flow overlay: arcs between host groups, with a numbered ring of six hops](./src/img/fleetgrid-flow-overlay.png)
 
-The example shows two zones of eight hosts with two GPUs each. The edge query names hosts, so the arcs run between host groups. The numbered arcs are the six hops of one ring. The two arcs between the hosts numbered 6 are the two directions of one pair, and the dashed arc is an edge without a value. The banner reports one edge row whose destination is not in the grid.
+The example shows two zones of eight hosts with two GPUs each. The edge query names hosts, so the arcs run between host groups: each group that has an edge is outlined, and an arc runs from outline to outline. The numbered arcs are the six hops of one ring. The two arcs between the hosts numbered 6 are the two directions of one pair, and the dashed arc is an edge without a value. The header says which end of the color scale is the worse one and how many rows have no arc; the banner gives an example of an edge row whose destination is not in the grid.
 
 ### The edge query
 
