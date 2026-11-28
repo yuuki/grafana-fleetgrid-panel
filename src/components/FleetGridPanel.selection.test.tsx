@@ -252,6 +252,54 @@ describe('FleetGridPanel cell selection', () => {
     expect(screen.getByRole('tooltip')).toBeInTheDocument();
   });
 
+  // In a large panel the tooltip is placed beside the pointer and covers other cells and labels. The
+  // viewer sees the tooltip of one cell there, not what lies under it.
+  it('selects nothing when a Shift press on the tooltip is over another cell, a group label or no cell', () => {
+    render(<FleetGridPanel {...makeProps()} />);
+    fireEvent.mouseMove(container(), { clientX: CELL.a1[0], clientY: CELL.a1[1] });
+    const tooltip = screen.getByRole('tooltip');
+    for (const covered of [CELL.a2, CELL.b1, LABEL.a, LABEL.b, [300, 250] as const]) {
+      fireEvent.pointerDown(tooltip, pointer(covered));
+      fireEvent.pointerUp(tooltip, pointer(covered));
+      fireEvent.click(tooltip, pointer(covered));
+      expect(screen.queryByTestId('selection-bar')).not.toBeInTheDocument();
+      expect(screen.getByRole('tooltip')).toBeInTheDocument();
+    }
+    // A press over the cell that the tooltip shows still selects that cell.
+    fireEvent.pointerDown(tooltip, pointer(CELL.a1));
+    fireEvent.pointerUp(container(), pointer(CELL.a1));
+    expect(count()).toBe('1 cell selected');
+    expect(label()).toBe('1 host value:');
+  });
+
+  it('holds back every press on the tooltip that does not select its cell', () => {
+    const onPointerDown = jest.fn();
+    render(
+      <div onPointerDown={onPointerDown}>
+        <FleetGridPanel {...makeProps()} />
+      </div>
+    );
+    fireEvent.mouseMove(container(), { clientX: CELL.a1[0], clientY: CELL.a1[1] });
+    const tooltip = screen.getByRole('tooltip');
+    fireEvent.pointerDown(tooltip, pointer(CELL.a1, { shiftKey: false }));
+    fireEvent.pointerDown(tooltip, pointer(CELL.a2, { shiftKey: false }));
+    fireEvent.pointerDown(tooltip, pointer(CELL.a2));
+    expect(onPointerDown).not.toHaveBeenCalled();
+    // The press that selects the tooltip's cell is a press on the grid, and goes on like one.
+    fireEvent.pointerDown(tooltip, pointer(CELL.a1));
+    expect(onPointerDown).toHaveBeenCalledTimes(1);
+  });
+
+  it('still selects the cell of a tooltip that stayed open over a data update', () => {
+    const { rerender } = render(<FleetGridPanel {...makeProps()} />);
+    fireEvent.mouseMove(container(), { clientX: CELL.a1[0], clientY: CELL.a1[1] });
+    // The update replaces every cell object; the tooltip keeps the one it was opened with.
+    rerender(<FleetGridPanel {...makeProps(frames())} />);
+    fireEvent.pointerDown(screen.getByRole('tooltip'), pointer(CELL.a1));
+    fireEvent.pointerUp(container(), pointer(CELL.a1));
+    expect(count()).toBe('1 cell selected');
+  });
+
   it('leaves the selection bar alone while the pointer only moves over the grid', () => {
     render(<FleetGridPanel {...makeProps()} />);
     shiftClick(LABEL.a);

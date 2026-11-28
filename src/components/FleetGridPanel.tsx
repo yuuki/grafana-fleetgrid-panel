@@ -587,6 +587,9 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
             minY={visibleBounds.minY}
             maxX={visibleBounds.maxX}
             maxY={visibleBounds.maxY}
+            selectsCellAt={(clientX, clientY) =>
+              scrollElement !== null && selectionGestures.togglesCell(scrollElement, clientX, clientY, hover.cell)
+            }
           />
         )}
         {popover && (

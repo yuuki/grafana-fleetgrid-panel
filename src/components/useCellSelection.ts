@@ -5,6 +5,7 @@ import { cellsInRect, hitTest, labelAt, Rect, rectFromPoints } from '../render/h
 import { defaultSelectionLabel } from '../selection/exportFormats';
 import {
   addCells,
+  cellKey,
   CellSelection,
   groupCells,
   indexCells,
@@ -48,6 +49,11 @@ export interface SelectionGestures {
   >;
   /** Whether a Shift press is in progress. The hover tooltip stays away meanwhile. */
   isGesturing: () => boolean;
+  /**
+   * Whether a Shift+click at this point of the page toggles `cell` and nothing else. The hover
+   * tooltip can lie over the pointer, and it passes on only a press that selects the cell it shows.
+   */
+  togglesCell: (container: HTMLElement, clientX: number, clientY: number, cell: CellModel) => boolean;
   /** True, once, for the click event that a Shift press ends with: that click is not a plain click. */
   consumeClick: () => boolean;
   /** The container scrolled: the band follows, because its start point scrolls with the grid. */
@@ -176,6 +182,13 @@ export function useCellSelection(
     }
   }, [gesturesDone]);
 
+  // What a Shift+click at a content point toggles: a group, a cell or nothing. A group label is
+  // tested before the cells: the pinned top label covers the cells under it.
+  const clickTarget = (container: HTMLElement, x: number, y: number) => {
+    const label = labelAt(layout, x, y, container.scrollTop);
+    return label ? { label, cell: undefined } : { label: undefined, cell: hitTest(layout, x, y)?.cell };
+  };
+
   const finish = (container: HTMLElement) => {
     const current = gesture.current;
     if (!current) {
@@ -190,16 +203,13 @@ export function useCellSelection(
       setSelection((previous) => addCells(previous, cells));
       return;
     }
-    // A group label is tested before the cells: the pinned top label covers the cells under it.
-    const label = labelAt(layout, current.x, current.y, container.scrollTop);
-    if (label) {
-      const cells = groupCells(root, label.path);
+    const target = clickTarget(container, current.x, current.y);
+    if (target?.label) {
+      const cells = groupCells(root, target.label.path);
       setSelection((previous) => toggleGroup(previous, cells));
-      return;
-    }
-    const hit = hitTest(layout, current.x, current.y);
-    if (hit) {
-      setSelection((previous) => toggleCell(previous, hit.cell));
+    } else if (target?.cell) {
+      const cell = target.cell;
+      setSelection((previous) => toggleCell(previous, cell));
     }
   };
 
@@ -275,6 +285,12 @@ export function useCellSelection(
   const gestures: SelectionGestures = {
     containerProps,
     isGesturing: () => gesture.current !== null,
+    togglesCell: (container, clientX, clientY, cell) => {
+      const point = contentPoint(container, clientX, clientY);
+      const target = clickTarget(container, point.x, point.y).cell;
+      // Compared by key: a data update replaces the cell objects while the tooltip stays.
+      return target !== undefined && cellKey(target) === cellKey(cell);
+    },
     consumeClick: () => {
       const swallow = swallowClick.current;
       swallowClick.current = false;
