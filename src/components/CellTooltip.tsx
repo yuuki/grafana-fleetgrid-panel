@@ -78,7 +78,13 @@ export const CellTooltip: React.FC<CellTooltipProps> = ({
       tabIndex={0}
       onMouseMove={(event) => event.stopPropagation()}
       onPointerMove={(event) => event.stopPropagation()}
-      onPointerDown={(event) => event.stopPropagation()}
+      // A Shift press is a selection gesture on the grid. In a small panel the tooltip is placed over
+      // the pointer, so the press lands on the tooltip and must go on to the cell under it.
+      onPointerDown={(event) => {
+        if (!event.shiftKey) {
+          event.stopPropagation();
+        }
+      }}
       onClick={(event) => event.stopPropagation()}
       onWheel={(event) => event.stopPropagation()}
       style={{

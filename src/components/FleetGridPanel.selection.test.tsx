@@ -230,6 +230,28 @@ describe('FleetGridPanel cell selection', () => {
     expect(screen.getByRole('tooltip')).toBeInTheDocument();
   });
 
+  // In a small panel there is no room beside the pointer, and the tooltip is placed over it. The
+  // press of a Shift+click then lands on the tooltip, not on the canvas.
+  it('selects the cell under the tooltip when the tooltip lies under the pointer', () => {
+    render(<FleetGridPanel {...makeProps()} />);
+    fireEvent.mouseMove(container(), { clientX: CELL.a1[0], clientY: CELL.a1[1] });
+    const tooltip = screen.getByRole('tooltip');
+    fireEvent.pointerDown(tooltip, pointer(CELL.a1, { shiftKey: true }));
+    fireEvent.pointerUp(container(), pointer(CELL.a1, { shiftKey: true }));
+    expect(count()).toBe('1 cell selected');
+    expect(label()).toBe('1 host value:');
+  });
+
+  it('keeps a plain press on the tooltip to the tooltip', () => {
+    render(<FleetGridPanel {...makeProps()} />);
+    fireEvent.mouseMove(container(), { clientX: CELL.a1[0], clientY: CELL.a1[1] });
+    fireEvent.pointerDown(screen.getByRole('tooltip'), pointer(CELL.a1, { shiftKey: false }));
+    fireEvent.pointerUp(container(), pointer(CELL.a1, { shiftKey: false }));
+    expect(screen.queryByTestId('selection-bar')).not.toBeInTheDocument();
+    // The tooltip is still there: its text can be selected and it can be scrolled.
+    expect(screen.getByRole('tooltip')).toBeInTheDocument();
+  });
+
   it('leaves the selection bar alone while the pointer only moves over the grid', () => {
     render(<FleetGridPanel {...makeProps()} />);
     shiftClick(LABEL.a);
