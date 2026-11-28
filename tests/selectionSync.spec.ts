@@ -1,5 +1,4 @@
-import { test, expect as baseExpect } from '@grafana/plugin-e2e';
-import type { DashboardPage } from '@grafana/plugin-e2e';
+import { test, expect as baseExpect, type DashboardPage } from '@grafana/plugin-e2e';
 import type { Locator } from '@playwright/test';
 
 // The subject under test is provisioning/dashboards/selection-sync.json (uid: fleetgrid-selection-sync-e2e):

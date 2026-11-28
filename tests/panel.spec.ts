@@ -1,5 +1,4 @@
-import { test, expect } from '@grafana/plugin-e2e';
-import type { DashboardPage } from '@grafana/plugin-e2e';
+import { test, expect, type DashboardPage } from '@grafana/plugin-e2e';
 import type { Locator } from '@playwright/test';
 
 // The subject under test is provisioning/dashboards/fleetgrid.json (uid: fleetgrid-e2e).
