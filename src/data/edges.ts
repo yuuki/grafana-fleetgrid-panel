@@ -767,8 +767,15 @@ function flowWarnings(config: FlowConfig, stats: FlowStats, problem: { warning: 
     warnings.push(problem.warning);
   }
   if (stats.readRows < stats.totalRows) {
+    // The row bound is applied before the endpoints are matched (matching needs the labels of every
+    // row, which is the cost the bound avoids). So rows that match no cell use up the bound, and an
+    // edge inside the grid can be among the rows that were not read: say what to do about it.
+    const unmatched = stats.missingLabel + stats.unmatched + stats.ambiguous > 0;
+    const advice = unmatched
+      ? 'Rows that match no cell count towards that limit, so edges of this grid may not have been read: restrict the query to the hosts of this panel'
+      : 'Narrow the query (for example with topk)';
     warnings.push(
-      `Flow overlay: query "${config.refId}" returned ${stats.totalRows} rows; the worst ${stats.readRows} are used. Narrow the query (for example with topk)`
+      `Flow overlay: query "${config.refId}" returned ${stats.totalRows} rows; the worst ${stats.readRows} are used. ${advice}`
     );
   }
   const excluded = excludedWarning(stats);

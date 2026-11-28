@@ -529,6 +529,14 @@ describe('buildFlowModel', () => {
       const frame = colored({ src_host: ['node-a1'], dst_host: ['node-a2'], rate: [1] });
       const low = model([frame], { flowWorst: 'low', flowThreshold: 50 });
       expect([low.metricInfo!.effectiveMin, low.metricInfo!.effectiveMax]).toEqual([1, 50]);
+      // For lower is worse, too, the range is taken before the filter: only the edge with 20 passes
+      // "below 50", and the range still ends at the 90 of the edge that is not drawn.
+      const filteredLow = model(
+        [colored({ src_host: ['node-a1', 'node-a2'], dst_host: ['node-a2', 'node-b1'], rate: [20, 90] })],
+        { flowWorst: 'low', flowThreshold: 50 }
+      );
+      expect(pairs(filteredLow.edges)).toEqual([`${A1}>${A2}=20`]);
+      expect([filteredLow.metricInfo!.effectiveMin, filteredLow.metricInfo!.effectiveMax]).toEqual([20, 90]);
       // Lower is worse has no natural healthy end: without a threshold the range is the data's own.
       const open = model(
         [colored({ src_host: ['node-a1', 'node-a2'], dst_host: ['node-a2', 'node-b1'], rate: [20, 90] })],
@@ -653,6 +661,25 @@ describe('buildFlowModel', () => {
       expect(pairs(m.edges)).toEqual([`${A1}>${B1}=99`, `${A1}>${A2}=0.1`]);
       expect(flowBaseEdges(m)[0].value).toBe(99);
       expect(m.warnings).toEqual([used(MAX_FLOW_ROWS)]);
+    });
+
+    it('says so when rows that match no cell used up the bound: an edge of this grid may not have been read', () => {
+      // The worst MAX_FLOW_ROWS rows name hosts of another cluster. The five rows after them are edges
+      // inside this grid, one of them clearly degraded (40). The bound is applied before the endpoints
+      // are matched, so those five rows are not read. This is a documented limit: the panel must say it.
+      const frame = edgeTable({
+        src_host: many((i) => (i < MAX_FLOW_ROWS ? `node-z${i}` : 'node-a1')),
+        dst_host: many((i) => (i < MAX_FLOW_ROWS ? `node-z${i + 1}` : 'node-a2')),
+        loss: many((i) => (i < MAX_FLOW_ROWS ? 50 : i === MAX_FLOW_ROWS ? 40 : 0.1)),
+      });
+      const m = model([frame]);
+      expect(m.edges).toEqual([]);
+      expect(m.stats).toMatchObject({ totalRows: count, readRows: MAX_FLOW_ROWS, unmatched: MAX_FLOW_ROWS });
+      expect(m.warnings[0]).toBe(
+        `Flow overlay: query "E" returned ${count} rows; the worst ${MAX_FLOW_ROWS} are used. ` +
+          'Rows that match no cell count towards that limit, so edges of this grid may not have been read: ' +
+          'restrict the query to the hosts of this panel'
+      );
     });
 
     it('leaves out the least bad rows, in the direction that is worse', () => {

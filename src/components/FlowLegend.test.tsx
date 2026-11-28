@@ -164,6 +164,14 @@ describe('flowLegendSummary', () => {
     expect(flowLegendSummary(model(edges(2))).notes).toEqual([]);
   });
 
+  it('says how many rows were not read when rows that match no cell used up the row bound', () => {
+    const m = model([], {}, { totalRows: 30000, readRows: 20000, unmatched: 20000, excludedWorst: 59 });
+    expect(flowLegendSummary(m).notes).toEqual([
+      'worst 20000 of 30000 rows used, 10000 rows not read',
+      '20000 rows left out, worst 59%',
+    ]);
+  });
+
   it('says in its visible text how many rows have no arc, and the worst value among them', () => {
     // Two rows match no cell, one has no endpoint label; three rows start and end at the same host.
     const stats = { unmatched: 2, missingLabel: 1, excludedWorst: 4.5, selfEdges: 3, selfWorst: 2 };

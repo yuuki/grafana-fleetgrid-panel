@@ -89,9 +89,14 @@ export function flowLegendSummary(model: FlowModel): FlowLegendSummary {
   const drawn = share.valued + share.unknown;
   const bound = config.show === 'always' && drawn < model.edges.length;
   const notes: string[] = [];
-  // More rows than the row bound: the least bad ones are not used at all.
+  // More rows than the row bound: the least bad ones are not used at all. When rows that match no cell
+  // took part of the bound, edges of this grid can be among the rows that were not read.
   if (stats.readRows < stats.totalRows) {
-    notes.push(`worst ${stats.readRows} of ${stats.totalRows} rows used`);
+    const excluded = stats.missingLabel + stats.unmatched + stats.ambiguous;
+    notes.push(
+      `worst ${stats.readRows} of ${stats.totalRows} rows used` +
+        (excluded > 0 ? `, ${stats.totalRows - stats.readRows} rows not read` : '')
+    );
   }
   const unknownNote = noValueNote(model, share.unknown);
   if (unknownNote) {
