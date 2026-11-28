@@ -261,8 +261,10 @@ Rows that cannot be drawn are counted and reported; they are never dropped silen
 ### Filter, limits and legend
 
 - **Only draw edges worse than** keeps the edges strictly worse than a number: above it when **Worse values are** is `Higher` (for example loss > 0, or RTT above the objective), below it when `Lower` (for example throughput below the objective).
-- At most **20,000 rows** of the edge query are read, and at most **500 arcs** are drawn at once. When more edges remain, the worst 500 are drawn (ties are broken by the endpoints, so the choice does not depend on the order of the query result). Pairwise data grows with the square of the fleet: narrow a large edge query in the data source, for example with `topk` or a `> 0` comparison.
-- The header shows the edge query's color scale and how many edges are drawn, for example `12 of 240 edges > 0%` or `500 of 4032 edges drawn, worst first`. The banner says so when rows beyond the first 20,000 were not read.
+- At most **500 arcs** are drawn at once. When more edges remain, the worst 500 are drawn (ties are broken by the endpoints, so the choice does not depend on the order of the query result).
+- At most **20,000 rows** of the edge query are turned into edges. Of a larger result the panel reads the value of every row and uses the **worst 20,000 rows**, wherever they are in the result, so the worst edge is not lost. The rows it leaves out are the least bad ones. Reading the values of a very large result still costs time (about 0.25 s for a million rows), and pairwise data grows with the square of the fleet: narrow a large edge query in the data source, for example with `topk` or a `> 0` comparison.
+- The header shows the edge query's color scale and how many edges are drawn, for example `12 of 240 edges > 0%` or `500 of 4032 edges drawn, worst first`. It also says, in text that wraps in a narrow panel, when the picture is incomplete: `worst 20000 of 25001 rows used`, or how many edges without a value are not drawn.
+- The warning banner is one line and cuts long warnings; hover a warning to read it in full.
 
 ### Hover
 

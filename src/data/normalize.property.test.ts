@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { FieldType, ReducerID, toDataFrame } from '@grafana/data';
-import { countFrameRows, normalizeFrames } from './normalize';
+import { countFrameRows, forEachRowValue, normalizeFrames } from './normalize';
 import { propertyParams } from '../testing/property';
 
 // The numeric reducers the panel offers (ReduceCalcEditor's allowlist).
@@ -71,7 +71,7 @@ describe('normalizeFrames (properties)', () => {
     );
   });
 
-  it('counts the rows without building them, and a row limit returns exactly the first rows', () => {
+  it('counts and visits the rows without building them, with the values of the rows', () => {
     const toSeries = (f: typeof seriesFrame extends fc.Arbitrary<infer T> ? T : never) =>
       toDataFrame({
         refId: f.refId,
@@ -91,11 +91,13 @@ describe('normalizeFrames (properties)', () => {
     fc.assert(
       fc.property(
         fc.array(fc.oneof(seriesFrame.map(toSeries), tableFrame.map(toTable)), { maxLength: 5 }),
-        fc.nat({ max: 30 }),
-        (frames, maxRows) => {
-          const all = normalizeFrames(frames, ReducerID.lastNotNull);
+        fc.constantFrom(...REDUCERS),
+        (frames, reducer) => {
+          const all = normalizeFrames(frames, reducer);
           expect(countFrameRows(frames)).toBe(all.length);
-          expect(normalizeFrames(frames, ReducerID.lastNotNull, maxRows)).toEqual(all.slice(0, maxRows));
+          const values: Array<number | null> = [];
+          frames.forEach((frame) => forEachRowValue(frame, reducer, (_, value) => values.push(value)));
+          expect(values).toEqual(all.map((row) => row.value));
         }
       ),
       propertyParams()

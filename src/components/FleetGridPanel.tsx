@@ -119,7 +119,8 @@ const WarningBanner: React.FC<{ warnings: string[]; theme: GrafanaTheme2 }> = ({
       }}
     >
       {warnings.map((w) => (
-        <span key={w} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        // The banner is one line and cuts a long warning with an ellipsis; the title has it in full.
+        <span key={w} title={w} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {w}
         </span>
       ))}

@@ -68,11 +68,15 @@ export function flowLegendSummary(model: FlowModel): FlowLegendSummary {
   const drawn = share.valued + share.unknown;
   const bound = config.show === 'always' && drawn < model.edges.length;
   const notes: string[] = [];
+  // More rows than the row bound: the least bad ones are not used at all.
+  if (stats.readRows < stats.totalRows) {
+    notes.push(`worst ${stats.readRows} of ${stats.totalRows} rows used`);
+  }
   const unknownNote = noValueNote(model, share.unknown);
   if (unknownNote) {
     notes.push(unknownNote);
   }
-  const details = [`Edge query ${config.refId}: ${stats.readRows} of ${stats.totalRows} rows read`];
+  const details = [`Edge query ${config.refId}: ${stats.readRows} of ${stats.totalRows} rows used`];
   if (stats.selfEdges > 0) {
     details.push(
       `${stats.selfEdges} rows start and end at the same ${model.groupLevel ? 'group' : 'cell'} (not drawn)`

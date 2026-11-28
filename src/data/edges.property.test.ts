@@ -3,7 +3,17 @@ import { FieldType, createTheme, toDataFrame } from '@grafana/data';
 import { DEFAULT_LEVEL, FleetGridOptions, LevelDef, NormalizedRow, SpatialAggregation } from '../types';
 import { buildHierarchy, pathKey } from './hierarchy';
 import { attachCells } from './values';
-import { FlowEdge, FlowModel, buildFlowModel, flowFocusEdges, resolveFlowConfig, summarizeFlowNode } from './edges';
+import {
+  FlowEdge,
+  FlowModel,
+  buildFlowModel,
+  flowFocusEdges,
+  resolveFlowConfig,
+  selectWorstRows,
+  shareFlowBound,
+  summarizeFlowNode,
+} from './edges';
+import { countFrameRows, normalizeFrames } from './normalize';
 import { propertyParams } from '../testing/property';
 
 // Model-based check of the flow overlay's data stage: every edge-query row is either part of exactly
@@ -208,6 +218,84 @@ describe('buildFlowModel (properties)', () => {
               )
             ).toBe(true);
           }
+        }
+      }),
+      propertyParams()
+    );
+  });
+});
+
+// The rows that are used of a result with more rows than the bound: for any frames, direction and
+// bound, they are the worst rows by value, and the rows without a value get their share.
+describe('selectWorstRows (properties)', () => {
+  // Few distinct values, so that ties at the cut are common.
+  const rowValue = fc.oneof(fc.constantFrom(0, 1, 2, 3, 5, 8), fc.constantFrom(null, Number.NaN));
+  const tableFrame = fc.array(rowValue, { maxLength: 12 }).map((values) =>
+    toDataFrame({
+      refId: 'E',
+      fields: [
+        { name: 'src_host', type: FieldType.string, values: values.map((_, i) => `node-a${i}`) },
+        { name: 'loss', type: FieldType.number, values },
+      ],
+    })
+  );
+  const seriesFrame = fc.array(rowValue, { minLength: 1, maxLength: 4 }).map((values) =>
+    toDataFrame({
+      refId: 'E',
+      fields: [
+        { name: 'Time', type: FieldType.time, values: [1000] },
+        ...values.map((v, i) => ({
+          name: 'Value',
+          type: FieldType.number,
+          values: [v],
+          labels: { src_host: `node-b${i}` },
+        })),
+      ],
+    })
+  );
+  const valuesOf = (frames: Array<ReturnType<typeof toDataFrame>>) =>
+    normalizeFrames(frames, 'lastNotNull').map((row) => row.value);
+
+  it('keeps the worst rows by value and the share of the rows without a value', () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.oneof(tableFrame, seriesFrame), { maxLength: 6 }),
+        worst,
+        fc.integer({ min: 1, max: 12 }),
+        (frames, direction, bound) => {
+          const all = valuesOf(frames);
+          fc.pre(all.length > bound);
+          const kept = valuesOf(selectWorstRows(frames, 'lastNotNull', direction, countFrameRows(frames), bound));
+
+          const valued = all.filter((v): v is number => v !== null);
+          const share = shareFlowBound(valued.length, all.length - valued.length, bound);
+          expect(kept).toHaveLength(bound);
+          expect(kept.filter((v) => v === null)).toHaveLength(share.unknown);
+          const worstFirst = [...valued].sort((a, b) => (direction === 'high' ? b - a : a - b));
+          const keptValued = kept.filter((v): v is number => v !== null);
+          expect([...keptValued].sort((a, b) => a - b)).toEqual(
+            worstFirst.slice(0, share.valued).sort((a, b) => a - b)
+          );
+        }
+      ),
+      propertyParams()
+    );
+  });
+
+  it('keeps the labels of the rows it keeps', () => {
+    fc.assert(
+      fc.property(fc.array(tableFrame, { minLength: 1, maxLength: 4 }), worst, (frames, direction) => {
+        const all = normalizeFrames(frames, 'lastNotNull');
+        fc.pre(all.length > 3);
+        const kept = normalizeFrames(
+          selectWorstRows(frames, 'lastNotNull', direction, countFrameRows(frames), 3),
+          'lastNotNull'
+        );
+        // Every kept row is a row of the result, with its own label and value.
+        for (const row of kept) {
+          expect(all.some((r) => r.labels.src_host === row.labels.src_host && Object.is(r.value, row.value))).toBe(
+            true
+          );
         }
       }),
       propertyParams()

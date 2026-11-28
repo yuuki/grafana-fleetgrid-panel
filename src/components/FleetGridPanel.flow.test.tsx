@@ -142,6 +142,9 @@ describe('FleetGridPanel flow overlay', () => {
       'Flow overlay: 1/4 edge rows were left out (1 with an endpoint that matches no cell or group; for example dst_host=node-x9)'
     );
     expect(screen.getByTestId('flow-legend-count')).toHaveTextContent('3 edges');
+    // The banner cuts a long warning in a narrow panel; its title has the full text.
+    const warning = screen.getByRole('alert').firstElementChild as HTMLElement;
+    expect(warning).toHaveAttribute('title', warning.textContent);
   });
 
   it('says so when the named edge query returned nothing', () => {

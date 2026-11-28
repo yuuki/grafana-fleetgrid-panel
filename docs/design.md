@@ -258,14 +258,18 @@ DataFrame[] of the edge query
 
 ### Bounds and cost
 
-Pairwise data grows with the square of the fleet: 1,000 hosts can report a million pairs. Two hard bounds keep the panel's work independent of that:
+Pairwise data grows with the square of the fleet: 1,000 hosts can report a million pairs. Two hard bounds keep the panel's work small for such a result:
 
 | Bound | Value | When it binds |
 |---|---|---|
-| Rows read (`MAX_FLOW_ROWS`) | 20,000 | The first 20,000 rows are read. The banner says how many there were and asks to narrow the query. Which rows come first is the data source's order, so this bound is a guard, not a ranking. |
+| Rows resolved (`MAX_FLOW_ROWS`) | 20,000 | The worst 20,000 rows by value are resolved into edges; the others are left out. The legend reads `worst 20000 of N rows used` and the banner asks to narrow the query. Only the value of each row is read for the ranking, which is the one cost that still grows with the result. |
 | Arcs drawn (`MAX_FLOW_ARCS`) | 500 | The worst 500 edges that pass the filter are drawn, and the legend reads `500 of N edges drawn, worst first`. The same bound applies to the arcs of a hovered node. |
 
 Edges are ranked by value in the worse direction, ties by source and destination key. The ranking is therefore the same for any order of the query result.
+
+**Decision: the rows of an oversized result are ranked by value before they are cut.**
+*Alternative:* read the first 20,000 rows (the first implementation).
+*Rationale:* which rows come first is the data source's order. With 25,001 rows whose only degraded row was the last one, that row was never read, while the legend said `500 of 19999 edges drawn, worst first`. The legend's claim has to be true for the whole result. So when there are more than 20,000 rows, the value of every row is read (`forEachRowValue`: one number per table row, one reduction per series), the 20,000 worst are found with a bounded heap in O(n log 20,000) for any order, and only those rows are turned into label sets and edges. Because an edge takes the worst of its rows, the edges of the worst rows have exactly the values they would have with all rows. Rows without a value share the bound as arcs do; rows that tie with the least bad row that is kept are taken in the order of the result. What remains unbounded is the value scan: the fastest of several runs took 62 ms for 20,000 rows (no scan), 61 ms for 100,000 table rows, 227–306 ms for 1,000,000 table rows and 192 ms for 100,000 single-point series (Node 22, shared container). A cap on the scan was left out: it would bring back "the first N rows" at a larger N, and a result of that size does not reach a browser panel.
 
 **Decision: edges without a value share the arc bound instead of being cut first.**
 *Rationale:* an edge without a value cannot be ranked, and the first implementation put it last. With 600 healthy edges and 20 whose probe returned nothing, none of the 20 was drawn, while the legend's tooltip said they were dashed. A probe that returns nothing may be the most broken path of all. When the edges do not all fit, the edges without a value now get what the valued ones leave free, and at least half of the bound (`shareFlowBound`); the same rule applies to the edges of a hovered node. They cannot take the whole bound either, because the edges that are known to be degraded must stay. The legend's visible text says how many of them are drawn (`250 of 300 edges without a value drawn`), and, with a filter, that none is (`12 edges without a value not drawn`).
@@ -273,7 +277,8 @@ Edges are ranked by value in the worse direction, ties by source and destination
 | Step | Cost | Runs when |
 |---|---|---|
 | Find and count the edge query's frames | O(frames × fields); no value is read | data or options change |
-| Read rows, resolve endpoints, aggregate | O(R), R ≤ 20,000 rows, hash lookups | data or options change |
+| Rank the rows of a result with more than 20,000 rows | O(N log 20,000) for N rows; one value per row, three typed arrays of N | data or options change |
+| Resolve endpoints, take the worst row per pair | O(R), R ≤ 20,000 rows, hash lookups | data or options change |
 | Endpoint index | O(cell label sets × mapped levels) | data or options change |
 | Filter and rank | O(E log E), E ≤ R edges | data or options change |
 | Hover index (node → edges, path → edges) | O(E + hops) to build | data or options change |
@@ -283,7 +288,7 @@ Edges are ranked by value in the worse direction, ties by source and destination
 | Paint the focus layer | O(focused arcs), at most 500 | the hovered node changes |
 | Pointer move inside a cell or a group | nothing | — |
 
-The hover lookup is covered by a test that counts the edges it reads on a 10,000-edge model. A timing test builds the model at the row bound (20,000 distinct edges) against a budget that only a quadratic step would exceed. Measured with Node 22 on the container described below, that build took about 100 ms at best, and looking up and summarizing a node with 270 edges in it took 0.35 ms.
+The hover lookup is covered by a test that counts the edges it reads on a 10,000-edge model. A timing test builds the model just above the row bound (22,350 rows, 20,000 distinct edges) against a budget that only a quadratic step would exceed. Measured with Node 22 on the container described below, that build took about 60–100 ms at best, and looking up and summarizing a node with 270 edges in it took 0.35 ms.
 
 Paint times were measured in headless Chromium without a GPU (software rasterizer) on a shared 4-core container, on a 1531 × 773 px canvas, by drawing and then forcing the canvas to rasterize. They are an upper bound for one environment, not a promise:
 

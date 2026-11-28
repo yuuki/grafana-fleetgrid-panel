@@ -546,21 +546,84 @@ describe('buildFlowModel', () => {
     ]);
   });
 
-  it('reads at most MAX_FLOW_ROWS rows and says how many there were', () => {
+  describe('a result with more than MAX_FLOW_ROWS rows', () => {
     const extra = 5;
     const count = MAX_FLOW_ROWS + extra;
-    const frame = edgeTable({
-      src_host: Array.from({ length: count }, () => 'node-a1'),
-      dst_host: Array.from({ length: count }, (_, i) => (i < MAX_FLOW_ROWS ? 'node-a2' : 'node-b1')),
-      loss: Array.from({ length: count }, (_, i) => i),
+    const many = <T>(make: (i: number) => T) => Array.from({ length: count }, (_, i) => make(i));
+    const used = (rows: number) =>
+      `Flow overlay: query "E" returned ${count} rows; the worst ${rows} are used. Narrow the query (for example with topk)`;
+
+    it('uses the worst rows, wherever they are in the result', () => {
+      // Every row is healthy (0.1) but the last one, the only row to node-b1, which is degraded (99).
+      const frame = edgeTable({
+        src_host: many(() => 'node-a1'),
+        dst_host: many((i) => (i === count - 1 ? 'node-b1' : 'node-a2')),
+        loss: many((i) => (i === count - 1 ? 99 : 0.1)),
+      });
+      const m = model([frame]);
+      expect(m.stats).toMatchObject({ totalRows: count, readRows: MAX_FLOW_ROWS });
+      expect(pairs(m.edges)).toEqual([`${A1}>${B1}=99`, `${A1}>${A2}=0.1`]);
+      expect(flowBaseEdges(m)[0].value).toBe(99);
+      expect(m.warnings).toEqual([used(MAX_FLOW_ROWS)]);
     });
-    const m = model([frame]);
-    expect(m.stats).toMatchObject({ totalRows: count, readRows: MAX_FLOW_ROWS });
-    // The rows past the bound (the only ones to node-b1) were not read.
-    expect(pairs(m.edges)).toEqual([`${A1}>${A2}=${MAX_FLOW_ROWS - 1}`]);
-    expect(m.warnings).toEqual([
-      `Flow overlay: read the first ${MAX_FLOW_ROWS} of ${count} edge rows; narrow query "E" (for example with topk)`,
-    ]);
+
+    it('leaves out the least bad rows, in the direction that is worse', () => {
+      // Loss 0, 1, 2, ...: the five rows to node-b1 are the first ones, with the lowest values.
+      const frame = edgeTable({
+        src_host: many(() => 'node-a1'),
+        dst_host: many((i) => (i < extra ? 'node-b1' : 'node-a2')),
+        loss: many((i) => i),
+      });
+      // Higher is worse: the five lowest rows are left out, and with them the edge to node-b1.
+      expect(pairs(model([frame]).edges)).toEqual([`${A1}>${A2}=${count - 1}`]);
+      // Lower is worse: the five highest rows are left out; the lowest rows stay.
+      expect(pairs(model([frame], { flowWorst: 'low' }).edges)).toEqual([`${A1}>${B1}=0`, `${A1}>${A2}=${extra}`]);
+    });
+
+    it('does not leave out the rows without a value first', () => {
+      // The first ten rows, to node-b1, have no value; every other row is healthy.
+      const frame = edgeTable({
+        src_host: many(() => 'node-a1'),
+        dst_host: many((i) => (i < 10 ? 'node-b1' : 'node-a2')),
+        loss: many((i) => (i < 10 ? null : 0)),
+      });
+      const m = model([frame]);
+      expect(m.stats.readRows).toBe(MAX_FLOW_ROWS);
+      expect(pairs(m.edges)).toEqual([`${A1}>${A2}=0`, `${A1}>${B1}=null`]);
+      expect(m.edges[1].rowCount).toBe(10);
+    });
+
+    it('ranks time series by their reduced value', () => {
+      // One frame per series, as a data source returns them; the last series is the degraded one.
+      const frames = many((i) =>
+        toDataFrame({
+          refId: 'E',
+          fields: [
+            { name: 'Time', type: FieldType.time, values: [1000, 2000] },
+            {
+              name: 'Value',
+              type: FieldType.number,
+              values: i === count - 1 ? [0, 99] : [50, 0.1],
+              labels: { src_host: 'node-a1', dst_host: i === count - 1 ? 'node-b1' : 'node-a2' },
+            },
+          ],
+        })
+      );
+      expect(pairs(model(frames).edges)).toEqual([`${A1}>${B1}=99`, `${A1}>${A2}=0.1`]);
+      // With another calculation the same series are ranked by another value.
+      expect(pairs(model(frames, { reduceCalc: 'max' }).edges)).toEqual([`${A1}>${B1}=99`, `${A1}>${A2}=50`]);
+    });
+
+    it('keeps the labels of the rows it uses, including a numeric hop column', () => {
+      const frame = edgeTable({
+        src_host: many(() => 'node-a1'),
+        dst_host: many((i) => (i === count - 1 ? 'node-b1' : 'node-a2')),
+        hop: many((i) => i),
+        loss: many((i) => (i === count - 1 ? 99 : 0.1)),
+      });
+      const m = model([frame], { flowOrderLabel: 'hop' });
+      expect(m.edges[0]).toMatchObject({ destination: B1, value: 99, hops: [{ path: '', order: count - 1 }] });
+    });
   });
 });
 
@@ -700,17 +763,7 @@ describe('flowFocusEdges', () => {
     expect(flowNodeKey(m, cell)).toBe(B2);
   });
 
-  it('is bounded by MAX_FLOW_ARCS even when one node has more edges', () => {
-    const m = meshModel(MAX_FLOW_ARCS + 50, MAX_FLOW_ARCS + 49);
-    const node = pathKey(['node-a0']);
-    expect(m.byNode.get(node)!.length).toBeGreaterThan(MAX_FLOW_ARCS);
-    const focus = flowFocusEdges(m, [node])!;
-    expect(focus).toHaveLength(MAX_FLOW_ARCS);
-    // The node's worst edges are the ones kept.
-    expect(focus[0]).toBe(m.edges[m.byNode.get(node)![0]]);
-  });
-
-  it('keeps the edges without a value of a node that has more edges than the bound', () => {
+  it('is bounded by MAX_FLOW_ARCS for a node with more edges, and keeps its edges without a value', () => {
     // One host with 600 healthy edges and 20 edges whose probe returned nothing.
     const names = Array.from({ length: 621 }, (_, i) => `node-a${i}`);
     const lv: LevelDef[] = [{ ...DEFAULT_LEVEL, label: 'host' }];

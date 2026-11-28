@@ -11,13 +11,16 @@ import {
 } from '../types';
 import { MetricInfo, buildMetricInfos } from './display';
 import { pathKey } from './hierarchy';
-import { countFrameRows, normalizeFrames } from './normalize';
+import { countFrameRows, forEachRowValue, isTableFrame, normalizeFrames } from './normalize';
 
 // Flow overlay data: one query (the edge query) returns a row per directed pair, and each row is
 // resolved to an edge between two hierarchy nodes (cells or groups). Everything here is a pure
 // function of the frames, the hierarchy and the options; drawing lives in src/render/flow*.ts.
 
-/** Hard bound on the edge-query rows that are read. Pairwise data grows with the square of the fleet. */
+/**
+ * Hard bound on the edge-query rows that are resolved into edges. Pairwise data grows with the square of
+ * the fleet. Of a larger result only the value of each row is read, to find the worst MAX_FLOW_ROWS.
+ */
 export const MAX_FLOW_ROWS = 20000;
 /** Hard bound on the arcs drawn at once. It applies to the resting set and to a focus set alike. */
 export const MAX_FLOW_ARCS = 500;
@@ -65,7 +68,7 @@ export interface FlowNode {
 }
 
 export interface FlowStats {
-  /** Rows the edge query returned, and how many of them were read (at most MAX_FLOW_ROWS). */
+  /** Rows the edge query returned, and how many of them were resolved (the worst MAX_FLOW_ROWS at most). */
   totalRows: number;
   readRows: number;
   /** Rows left out, by reason. They are counted, never drawn as if they were something else. */
@@ -461,11 +464,10 @@ const isLabelColumn = (field: Field): boolean =>
   field.type === FieldType.string ||
   (field.type === FieldType.number && !(field.labels && Object.keys(field.labels).length > 0));
 
-// The edge query's label columns as text. A table column that carries a flow label can be numeric (a hop
-// number, a rank or an ID): normalizeFrames reads labels from string columns only and would take such a
-// column as the value. An empty cell becomes '' (no label) instead of the text "null". Only the rows that
-// can be read are converted.
-function flowLabelColumns(frames: DataFrame[], names: Set<string>, maxRows: number): DataFrame[] {
+// The edge query's label columns, typed as labels. A table column that carries a flow label can be
+// numeric (a hop number, a rank or an ID): normalizeFrames reads labels from string columns only and
+// would take such a column as the value. Only the type changes here; no value is read.
+function flowLabelColumns(frames: DataFrame[], names: Set<string>): DataFrame[] {
   return frames.map((frame) => {
     const isFlowLabel = (field: Field) => names.has(field.name) && isLabelColumn(field);
     if (!frame.fields.some(isFlowLabel)) {
@@ -473,17 +475,165 @@ function flowLabelColumns(frames: DataFrame[], names: Set<string>, maxRows: numb
     }
     return {
       ...frame,
+      fields: frame.fields.map((field) => (isFlowLabel(field) ? { ...field, type: FieldType.string } : field)),
+    };
+  });
+}
+
+// The values of the label columns as text, for the rows that are resolved. An empty cell becomes ''
+// (no label) instead of the text "null".
+function flowLabelText(frames: DataFrame[], names: Set<string>): DataFrame[] {
+  return frames.map((frame) => {
+    const isFlowLabel = (field: Field) => names.has(field.name) && field.type === FieldType.string;
+    if (!frame.fields.some(isFlowLabel)) {
+      return frame;
+    }
+    return {
+      ...frame,
       fields: frame.fields.map((field) =>
         isFlowLabel(field)
-          ? {
-              ...field,
-              type: FieldType.string,
-              values: field.values.slice(0, maxRows).map((value) => (value == null ? '' : String(value))),
-            }
+          ? { ...field, values: field.values.map((value) => (value == null ? '' : String(value))) }
           : field
       ),
     };
   });
+}
+
+// A frame reduced to some of its rows: rows of a table frame by row number, series by their position
+// among the frame's numeric fields (the row numbering of forEachRowValue).
+function pickRows(frame: DataFrame, picked: number[]): DataFrame {
+  if (isTableFrame(frame)) {
+    return {
+      ...frame,
+      length: picked.length,
+      fields: frame.fields.map((field) => ({ ...field, values: picked.map((row) => field.values[row]) })),
+    };
+  }
+  const keep = new Set(picked);
+  let position = -1;
+  return {
+    ...frame,
+    fields: frame.fields.filter((field) => field.type !== FieldType.number || keep.has(++position)),
+  };
+}
+
+// The `size` smallest of the numbers that are offered, kept in a binary max-heap: `top()` is the largest
+// of them. Finding the worst rows of a result this way costs O(n log size) for any order of the rows, and
+// a row that is not among the worst so far costs one comparison.
+class SmallestKeys {
+  private readonly heap: Float64Array;
+  private count = 0;
+
+  constructor(private readonly size: number) {
+    this.heap = new Float64Array(size);
+  }
+
+  top(): number {
+    return this.count < this.size ? Infinity : this.heap[0];
+  }
+
+  offer(key: number): void {
+    const heap = this.heap;
+    if (this.count < this.size) {
+      // Sift up.
+      let i = this.count++;
+      while (i > 0) {
+        const parent = (i - 1) >> 1;
+        if (heap[parent] >= key) {
+          break;
+        }
+        heap[i] = heap[parent];
+        i = parent;
+      }
+      heap[i] = key;
+      return;
+    }
+    if (key >= heap[0]) {
+      return;
+    }
+    // Replace the largest and sift down.
+    let i = 0;
+    for (;;) {
+      let child = 2 * i + 1;
+      if (child >= this.size) {
+        break;
+      }
+      if (child + 1 < this.size && heap[child + 1] > heap[child]) {
+        child++;
+      }
+      if (heap[child] <= key) {
+        break;
+      }
+      heap[i] = heap[child];
+      i = child;
+    }
+    heap[i] = key;
+  }
+}
+
+/**
+ * The frames reduced to the `bound` rows that are resolved when the edge query returns more (`total`
+ * rows): the worst rows by value, not the first ones, so that the worst edge is found wherever it is in
+ * the result. The value of every row is read once (one number per table row, one reduction per series);
+ * nothing else is built for the rows that are left out. Rows without a value share the bound like arcs
+ * do (shareFlowBound). Rows that tie with the least bad row that is kept are taken in the order of the
+ * result.
+ */
+export function selectWorstRows(
+  frames: DataFrame[],
+  reduceCalc: string,
+  worst: FlowWorstDirection,
+  total: number,
+  bound: number
+): DataFrame[] {
+  const frameOf = new Int32Array(total);
+  const rowOf = new Int32Array(total);
+  // Rank key of each row: ascending is worst first; NaN marks a row without a value.
+  const keys = new Float64Array(total);
+  let count = 0;
+  let unknown = 0;
+  frames.forEach((frame, frameIndex) =>
+    forEachRowValue(frame, reduceCalc, (row, value) => {
+      frameOf[count] = frameIndex;
+      rowOf[count] = row;
+      keys[count] = value === null ? NaN : worst === 'high' ? -value : value;
+      unknown += value === null ? 1 : 0;
+      count++;
+    })
+  );
+  const share = shareFlowBound(count - unknown, unknown, bound);
+  // The key of the least bad row that is kept, and how many rows are strictly worse than it.
+  let cutoff = -Infinity;
+  let below = 0;
+  if (share.valued > 0) {
+    const smallest = new SmallestKeys(share.valued);
+    for (let i = 0; i < count; i++) {
+      // A NaN key (no value) fails the comparison and is never offered.
+      if (keys[i] < smallest.top()) {
+        smallest.offer(keys[i]);
+      }
+    }
+    cutoff = smallest.top();
+    for (let i = 0; i < count; i++) {
+      below += keys[i] < cutoff ? 1 : 0;
+    }
+  }
+  let ties = share.valued - below;
+  let unknownLeft = share.unknown;
+  const picked = new Map<number, number[]>();
+  for (let i = 0; i < count; i++) {
+    const key = keys[i];
+    const take = Number.isNaN(key) ? unknownLeft-- > 0 : key < cutoff || (key === cutoff && ties-- > 0);
+    if (take) {
+      const rows = picked.get(frameOf[i]);
+      if (rows) {
+        rows.push(rowOf[i]);
+      } else {
+        picked.set(frameOf[i], [rowOf[i]]);
+      }
+    }
+  }
+  return [...picked].map(([frameIndex, rows]) => pickRows(frames[frameIndex], rows));
 }
 
 function flowLabelNames(config: FlowConfig): Set<string> {
@@ -521,7 +671,7 @@ function flowWarnings(config: FlowConfig, stats: FlowStats): string[] {
   }
   if (stats.readRows < stats.totalRows) {
     warnings.push(
-      `Flow overlay: read the first ${stats.readRows} of ${stats.totalRows} edge rows; narrow query "${config.refId}" (for example with topk)`
+      `Flow overlay: query "${config.refId}" returned ${stats.totalRows} rows; the worst ${stats.readRows} are used. Narrow the query (for example with topk)`
     );
   }
   const excluded = excludedWarning(stats);
@@ -626,11 +776,18 @@ export function buildFlowModel(
   if (invalid.length > 0) {
     return emptyModel(config, invalid);
   }
-  const labelFrames = flowLabelColumns(frames, flowLabelNames(config), MAX_FLOW_ROWS);
-  const rows = normalizeFrames(labelFrames, options.reduceCalc || 'lastNotNull', MAX_FLOW_ROWS);
+  const reduceCalc = options.reduceCalc || 'lastNotNull';
+  const names = flowLabelNames(config);
+  const labelFrames = flowLabelColumns(frames, names);
+  const totalRows = countFrameRows(labelFrames);
+  const readFrames =
+    totalRows > MAX_FLOW_ROWS
+      ? selectWorstRows(labelFrames, reduceCalc, config.worst, totalRows, MAX_FLOW_ROWS)
+      : labelFrames;
+  const rows = normalizeFrames(flowLabelText(readFrames, names), reduceCalc);
   const index = buildEndpointIndex(root, levels, config.endpoints);
   const collected = collectFlowEdges(rows, index, config);
-  const stats: FlowStats = { ...collected.stats, totalRows: countFrameRows(labelFrames) };
+  const stats: FlowStats = { ...collected.stats, totalRows };
   const edges = selectFlowEdges(collected.edges, config.worst, config.threshold);
   // Passing a range and a single frame also keeps buildMetricInfos from scanning every value of an
   // oversized result.

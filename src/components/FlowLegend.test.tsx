@@ -151,10 +151,19 @@ describe('flowLegendSummary', () => {
     });
   });
 
+  it('says in the visible text that only the worst rows of an oversized result are used', () => {
+    const m = model(edges(MAX_FLOW_ARCS + 1), {}, { totalRows: 25001, readRows: 20000 });
+    expect(flowLegendSummary(m)).toMatchObject({
+      text: `${MAX_FLOW_ARCS} of ${MAX_FLOW_ARCS + 1} edges drawn, worst first`,
+      notes: ['worst 20000 of 25001 rows used'],
+    });
+    expect(flowLegendSummary(model(edges(2))).notes).toEqual([]);
+  });
+
   it('lists what was read and what was left out', () => {
     const m = model(edges(2), {}, { totalRows: 50000, readRows: 20000, selfEdges: 3, unmatched: 2 });
     expect(flowLegendSummary(m).details).toEqual([
-      'Edge query E: 20000 of 50000 rows read',
+      'Edge query E: 20000 of 50000 rows used',
       '3 rows start and end at the same group (not drawn)',
       '2 rows left out (see the warning)',
     ]);
@@ -181,7 +190,7 @@ describe('FlowLegend', () => {
     expect(screen.getByLabelText('loss flow color scale, Auto, 0% to 5%')).toBeInTheDocument();
     expect(screen.getByTestId('flow-legend-gradient')).toBeInTheDocument();
     expect(screen.getByTestId('flow-legend-count')).toHaveTextContent('2 edges');
-    expect(legend).toHaveAttribute('title', 'Edge query E: 2 of 2 rows read');
+    expect(legend).toHaveAttribute('title', 'Edge query E: 2 of 2 rows used');
   });
 
   it('does not reuse the test ids of the cell legend', () => {

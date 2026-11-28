@@ -21,18 +21,12 @@ function toFiniteNumberOrNull(raw: unknown): number | null {
 }
 
 // Table format: one record per row, labeled by the frame's string columns, valued by its first numeric field
-function pushTableRows(
-  rows: NormalizedRow[],
-  frame: DataFrame,
-  refId: string,
-  valueField: Field | undefined,
-  maxRows: number
-): void {
+function pushTableRows(rows: NormalizedRow[], frame: DataFrame, refId: string, valueField: Field | undefined): void {
   if (!valueField) {
     return;
   }
   const stringFields = frame.fields.filter((f) => f.type === FieldType.string);
-  for (let i = 0; i < frame.length && rows.length < maxRows; i++) {
+  for (let i = 0; i < frame.length; i++) {
     const labels: Record<string, string> = {};
     for (const f of stringFields) {
       labels[f.name] = String(f.values[i]);
@@ -42,17 +36,8 @@ function pushTableRows(
 }
 
 // Time series format: one record per numeric field
-function pushSeriesRows(
-  rows: NormalizedRow[],
-  numberFields: Field[],
-  refId: string,
-  reduceCalc: string,
-  maxRows: number
-): void {
+function pushSeriesRows(rows: NormalizedRow[], numberFields: Field[], refId: string, reduceCalc: string): void {
   for (const field of numberFields) {
-    if (rows.length >= maxRows) {
-      return;
-    }
     rows.push({
       labels: { ...(field.labels ?? {}) },
       value: reduceToValue(field, reduceCalc),
@@ -61,28 +46,21 @@ function pushSeriesRows(
   }
 }
 
-/**
- * `maxRows` stops the scan after that many rows. The cell pipeline reads every row; the flow overlay
- * bounds its work with it, because pairwise (edge) data grows with the square of the fleet.
- */
-export function normalizeFrames(frames: DataFrame[], reduceCalc: string, maxRows = Infinity): NormalizedRow[] {
+export function normalizeFrames(frames: DataFrame[], reduceCalc: string): NormalizedRow[] {
   const rows: NormalizedRow[] = [];
   for (const frame of frames) {
-    if (rows.length >= maxRows) {
-      break;
-    }
     const refId = frame.refId ?? 'A';
     const numberFields = frame.fields.filter((f) => f.type === FieldType.number);
     if (isTableFrame(frame)) {
-      pushTableRows(rows, frame, refId, numberFields[0], maxRows);
+      pushTableRows(rows, frame, refId, numberFields[0]);
     } else {
-      pushSeriesRows(rows, numberFields, refId, reduceCalc, maxRows);
+      pushSeriesRows(rows, numberFields, refId, reduceCalc);
     }
   }
   return rows;
 }
 
-/** The number of rows normalizeFrames returns for these frames without a limit, counted without building them. */
+/** The number of rows normalizeFrames returns for these frames, counted without building them. */
 export function countFrameRows(frames: DataFrame[]): number {
   let count = 0;
   for (const frame of frames) {
@@ -102,7 +80,7 @@ export function countFrameRows(frames: DataFrame[]): number {
 /**
  * Calls `visit` with the value of every row normalizeFrames returns for a frame, in the same order,
  * without building the rows: `row` is the row number of a table frame, or the position of the series
- * among the frame's numeric fields. The flow overlay is to rank the rows of an oversized result with it.
+ * among the frame's numeric fields. The flow overlay ranks the rows of an oversized result with it.
  */
 export function forEachRowValue(
   frame: DataFrame,
