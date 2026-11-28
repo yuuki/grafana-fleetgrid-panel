@@ -678,13 +678,11 @@ test('query-B cell has no link and opens the popover instead of navigating', asy
 // directions, an edge without a value, one row to a host that is no cell, and one self-edge.
 // The arcs are drawn on two canvases stacked on the cell canvas: the arcs at rest and the arcs in focus.
 async function openFlowPanel(
-  gotoDashboardPage: (args: {
-    uid: string;
-  }) => Promise<{ getPanelByTitle(title: string): Promise<{ locator: Locator }> }>,
+  gotoDashboardPage: (args: { uid: string }) => Promise<{ getPanelByTitle(title: string): { locator: Locator } }>,
   uid: string
 ): Promise<{ panel: Locator; cells: Locator; rest: Locator; focus: Locator }> {
   const dashboardPage = await gotoDashboardPage({ uid });
-  const found = await dashboardPage.getPanelByTitle('Flow Overlay');
+  const found = dashboardPage.getPanelByTitle('Flow Overlay');
   // Open the dedicated panel directly because Grafana does not mount dashboard rows below the viewport.
   const page = found.locator.page();
   const panelUrl = new URL(page.url());
