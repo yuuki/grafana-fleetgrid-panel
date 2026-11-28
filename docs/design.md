@@ -229,13 +229,14 @@ DataFrame[] of the edge query
 
 | Subject | Rule |
 |---|---|
-| Edge query | The query named by `flowRefId`. Its frames and its target leave the cell pipeline: no cells, no selector entry, no drilldown requery. |
+| Edge query | The query named by `flowRefId` (spaces around it are ignored). Its frames and its target leave the cell pipeline: no cells, no selector entry, no drilldown requery, and no suggestions in the editors of the cell options (`cellFrames` in `src/options/suggestions.ts`). |
+| No rows | A query that ran and returned no rows draws nothing and is **not** a warning: it is the healthy state of a query that filters in the data source. A refId that no query of the request has (or only a hidden one) is a warning. The request's visible targets tell the two apart (`flowQueryState`); without a request and without a frame the panel says only that there is no data. |
 | Row | One directed pair: a source, a destination, a value. Table frames and time-series frames are read as for cells; a range series is reduced with `reduceCalc`. |
 | Endpoint | `flowEndpoints` maps a hierarchy label to the edge query's source label and destination label. The endpoint's value is compared with the **raw** value of that hierarchy label on the cells (`CellModel.labelSets`). |
 | Level | An endpoint resolves at the deepest mapped hierarchy level: to a cell when that is the leaf level, otherwise to the group. All edges of a panel resolve at the same level. |
 | Edge | One per ordered pair of nodes. Its value is the worst of the rows of the pair (`flowWorst`). A→B and B→A are two edges. |
 | Value | `number`, or `null` when none of the rows has a finite value. `null` is "unknown": drawn dashed in a neutral color, never 0, and left out by a filter (the legend then says how many). |
-| Not drawn | A row without an endpoint label, with an endpoint that matches no node, or with one that matches several nodes; and a self-edge (both ends resolve to one node). All four are counted. The first three are reported in the warning banner, self-edges in the legend's tooltip. |
+| Not drawn | A row without an endpoint label, with an endpoint that matches no node, or with one that matches several nodes; and a self-edge (both ends resolve to one node). All four are counted, and the worst value among the first three and among the self-edges is kept (`excludedWorst`, `selfWorst`). The legend gives both counts with that value in its visible text (`3 rows left out, worst 4.5%`); the first three are also in the warning banner, with examples. |
 
 **Decision: bind the edge query by an explicit refId and explicit label names, never by recognizing label names.**
 *Alternatives:* treat any query that carries `src_*` / `dst_*` labels as an edge query; a per-query custom option in the query editor.
@@ -263,9 +264,14 @@ Pairwise data grows with the square of the fleet: 1,000 hosts can report a milli
 | Bound | Value | When it binds |
 |---|---|---|
 | Rows resolved (`MAX_FLOW_ROWS`) | 20,000 | The worst 20,000 rows by value are resolved into edges; the others are left out. The legend reads `worst 20000 of N rows used` and the banner asks to narrow the query. Only the value of each row is read for the ranking, which is the one cost that still grows with the result. |
-| Arcs drawn (`MAX_FLOW_ARCS`) | 500 | The worst 500 edges that pass the filter are drawn, and the legend reads `500 of N edges drawn, worst first`. The same bound applies to the arcs of a hovered node. |
+| Arcs at rest (`flowRestArcs`) | 100 by default, 1–500 | The worst edges that pass the filter are drawn, and the legend reads `100 of N edges drawn, worst first` in the warning color. |
+| Arcs in focus (`MAX_FLOW_ARCS`) | 500 | The arcs of a hovered node, and the most that the resting picture can be set to. |
 
 Edges are ranked by value in the worse direction, ties by source and destination key. The ranking is therefore the same for any order of the query result.
+
+**Decision: the resting picture holds 100 arcs unless the user asks for more.**
+*Alternative:* draw up to the hard bound of 500 (the first implementation).
+*Rationale:* the hard bound was chosen for the paint time, not for the reader. A screenshot of 500 arcs over 1,000 hosts shows a mat of lines: the cells under it cannot be read, and the one red arc among 499 orange ones is not easier to find than in a table. The overlay is there to make the degraded paths stand out, so its default has to leave the grid readable. 100 arcs is still a dense picture but the cells show through, and the legend turns to the warning color and says `100 of N edges drawn, worst first`, which tells the user to filter. The number is an option because the right value depends on the size of the grid; it cannot exceed the hard bound. The focus keeps the hard bound: the edges of one hovered node are what the user asked to see.
 
 **Decision: the rows of an oversized result are ranked by value before they are cut.**
 *Alternative:* read the first 20,000 rows (the first implementation).
@@ -283,7 +289,7 @@ Edges are ranked by value in the worse direction, ties by source and destination
 | Filter and rank | O(E log E), E ≤ R edges | data or options change |
 | Hover index (node → edges, path → edges) | O(E + hops) to build | data or options change |
 | Node rectangles | O(cells) | layout changes |
-| Paint the resting layer | O(min(E, 500)) arcs | data, options, layout or theme change |
+| Paint the resting layer | O(min(E, `flowRestArcs`)) arcs, at most 500 | data, options, layout or theme change |
 | Look up a hovered node | O(its edges + the edges of its paths), at most 500; independent of E | the hovered **node** changes |
 | Paint the focus layer | O(focused arcs), at most 500 | the hovered node changes |
 | Pointer move inside a cell or a group | nothing | — |
@@ -298,7 +304,7 @@ Paint times were measured in headless Chromium without a GPU (software rasterize
 | 500 arcs of at most 300 px | about 11 ms | about 25 ms |
 | The focus layer for a host with 38 edges, in the panel | 5 ms median, 11 ms worst | 14 ms median, 49 ms worst |
 
-In the panel, with 1,000 hosts and 25,000 edge rows, the resting layer took about 60–100 ms per paint at ratio 1, including the first color lookups. That is the reason for the bound of 500 and for keeping this layer out of the hover path.
+In the panel, with 1,000 hosts and 25,000 edge rows, the resting layer took about 60–100 ms per paint at ratio 1, including the first color lookups. That is the reason for the hard bound of 500 and for keeping this layer out of the hover path. With the default of 100 arcs at rest a paint is a fifth of that.
 
 ### Drawing
 
@@ -330,19 +336,23 @@ In the panel, with 1,000 hosts and 25,000 edge rows, the resting layer took abou
 
 **Decision: the automatic color range is taken before the filter and anchored at the healthy end.**
 *Alternative:* the range of the edges that are drawn, as for the cells' displayed values (the first implementation).
-*Rationale:* with a continuous scheme and no Min/Max, a range over the drawn edges made the filter repaint them: with losses 0 and 7 and "worse than 1", the only drawn edge was green, with a legend of `7 – 8`; unfiltered, the same edge was red. In the configuration that shows only degraded paths, the degraded paths got the healthy color. The range now spans every valued edge before the filter and includes the threshold. When higher is worse it also includes 0, because an edge query that filters in the data source (`> 0`) returns only degraded pairs, and the least degraded of them would otherwise sit at the healthy end. Lower-is-worse metrics have no such natural healthy end, so there the threshold is the only anchor. Field-config Min/Max still win, and thresholds are absolute anyway. What the overlay cannot do is choose the scheme: `flowWorst` does not invert colors, because it cannot know whether the user already picked a scheme whose low end is the alarm color; the README says so.
+*Rationale:* with a continuous scheme and no Min/Max, a range over the drawn edges made the filter repaint them: with losses 0 and 7 and "worse than 1", the only drawn edge was green, with a legend of `7 – 8`; unfiltered, the same edge was red. In the configuration that shows only degraded paths, the degraded paths got the healthy color. The range now spans every valued edge before the filter and includes the threshold. When higher is worse it also includes 0, because an edge query that filters in the data source (`> 0`) returns only degraded pairs, and the least degraded of them would otherwise sit at the healthy end. Lower-is-worse metrics have no such natural healthy end, so there the threshold is the only anchor. The rule is kept to these three clauses on purpose, so that a user can predict the range: every valued edge before the filter, the threshold, and 0 when higher is worse. Field-config Min/Max still win, each end on its own, whether they come from the standard options or from an override for the edge query (Grafana applies both to the field config before the panel reads it), and thresholds are absolute anyway. What the overlay cannot do is choose the scheme: `flowWorst` does not invert colors, because it cannot know whether the user already picked a scheme whose low end is the alarm color. A silent inversion would make half of those users' panels wrong. Instead the legend's scale says in words which end is the bad one (`higher is worse` / `lower is worse`), so a green arc at the worse end cannot be read as healthy without contradicting the text next to the scale, and the README tells how to choose the scheme.
 
 **Decision: every arc is its own path.**
 *Rationale:* painting all arcs of one color as a single path looked like the cheaper way and was implemented first. Measured in Chromium, one path with 1,000 arcs took 2–3 times as long as 1,000 single strokes at device pixel ratio 1 and was no faster at ratio 2: the strokes of one path overlap everywhere, and the rasterizer has to resolve that. Single strokes also let each halo cut through the arcs below it.
 
 ### Hover
 
-Hovering a cell puts the edges of its node in focus: the cell itself, or its group at the endpoint level. The focus also contains the other edges of every path that those edges are on, so pointing at one member of a ring shows the whole ring. The focused arcs are drawn on the focus layer, the resting layer is dimmed, and the tooltip gains the node's outgoing and incoming edge counts, its peer count, its worst peer with the formatted value, and its hops. A node without edges puts nothing in focus and dims nothing. The cell of an open drilldown popover stays in focus while the pointer is elsewhere.
+Hovering a cell puts the edges of its node in focus: the cell itself, or its group at the endpoint level. The focus also contains the other edges of every path that those edges are on, so pointing at one member of a ring shows the whole ring. The focused arcs are drawn on the focus layer, the resting layer is dimmed, and the tooltip gains the node's outgoing and incoming edge counts, its peer count, its worst peer with the formatted value, and its hops. A node without edges puts nothing in focus and dims nothing.
 
-The focus is drawn from the filtered edges, not from the 500 resting arcs, so a hover can show edges that the draw bound left out. The filter is not lifted by a hover: it defines which edges exist for drawing.
+**Decision: the focus is the hovered cell's node if it has edges, otherwise the node of the open drilldown popover.**
+*Alternative:* the hovered cell first, whatever it has (the first implementation).
+*Rationale:* a popover pins a cell: the user reads its sparklines while its edges stay emphasised. With the first rule, moving the pointer over any cell without edges on the way to the popover dropped the focus, although that cell had nothing to show. A hovered cell that has edges still wins, because the pointer is the more recent intent. The tooltip summary is always the hovered cell's, never the pinned one's: a tooltip that describes another cell than the one it points at would be wrong.
+
+The focus is drawn from the filtered edges, not from the resting arcs, so a hover can show edges that **Arcs at rest** left out. The filter is not lifted by a hover: it defines which edges exist for drawing.
 
 **Decision: the focus is a set of node keys.**
-*Rationale:* `flowFocusEdges(model, nodeKeys)` takes any number of nodes. Today the panel passes the hovered cell's node. A later multi-cell selection can pass the selected cells' nodes without a change to the data stage or the draw pass; the overlay builds no selection mechanism of its own.
+*Rationale:* `flowFocusEdges(model, nodeKeys)` takes any number of nodes. Today the panel passes one node: the hovered cell's or the pinned cell's. A later multi-cell selection can pass the selected cells' nodes without a change to the data stage or the draw pass; the overlay builds no selection mechanism of its own.
 
 ### Ordered paths
 
@@ -369,12 +379,17 @@ A path is given as its hops: each edge row can carry a hop number (`flowOrderLab
 | `flowRefId` | refId of the edge query (`''` — overlay off) |
 | `flowEndpoints` | `{ level, source, destination }[]` (`[]`) — custom editor with the hierarchy labels and the edge query's labels as suggestions |
 | `flowShow` | `always` (default) / `hover` |
+| `flowRestArcs` | whole number 1–500 (unset — 100); hidden in hover mode |
 | `flowWorst` | `high` (default) / `low` |
 | `flowThreshold` | number (unset — no filter) |
 | `flowOrderLabel` | label name (`''`) |
 | `flowPathLabel` | label name (`''`) |
 
-Unknown or missing values are normalized at runtime (`resolveFlowConfig`), so a dashboard saved before these options existed, or edited by hand, behaves like the defaults. An edge query without endpoint mappings draws nothing and says so in the banner. So does one with a mapping that is incomplete or that names no hierarchy label: such a mapping is not skipped, because the mappings together decide the level at which the endpoints resolve, and drawing with the remaining ones would show the edges at a level nobody asked for.
+Unknown or missing values are normalized at runtime (`resolveFlowConfig`), so a dashboard saved before these options existed, or edited by hand, behaves like the defaults. The refId and the label names of the edge query are used without the spaces around them (`"E "` names query E); a hierarchy label is compared as the levels store it. An edge query without endpoint mappings draws nothing and says so in the banner and, in a few words, in the legend. So does one with a mapping that is incomplete or that names no hierarchy label: such a mapping is not skipped, because the mappings together decide the level at which the endpoints resolve, and drawing with the remaining ones would show the edges at a level nobody asked for.
+
+**Decision: everything that makes the picture incomplete, or empty by mistake, is in the legend's visible text.**
+*Alternative:* the warning banner and the legend's tooltip only (the first implementation).
+*Rationale:* the banner is one line of 20 px, shared with the cells' warnings, and it cuts long texts with an ellipsis; a tooltip needs a pointer, and a wall display has none. In a panel a quarter of the dashboard wide, the notice that rows were left out was not readable at all. The legend wraps and breaks long words, so its text is readable at any panel width. It therefore carries, in the warning color: the arcs that the draw bound left out, the rows that the row bound left out, the edges without a value that are not drawn, the rows that match no cell and the rows within one node (each with the worst value among them, so a degraded row without an arc is still seen), and the reason why nothing can be drawn (`no query "E"`, `endpoint mapping incomplete`). The banner keeps the long form with examples, and each of its entries has its full text as its title.
 
 ### Known limits
 
