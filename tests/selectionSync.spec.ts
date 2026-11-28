@@ -1,4 +1,4 @@
-import { test, expect } from '@grafana/plugin-e2e';
+import { test, expect as baseExpect } from '@grafana/plugin-e2e';
 import type { DashboardPage } from '@grafana/plugin-e2e';
 import type { Locator } from '@playwright/test';
 
@@ -12,6 +12,10 @@ import type { Locator } from '@playwright/test';
 const FILE = 'selection-sync.json';
 const HOSTS = ['node-a001', 'node-a002', 'node-a003', 'node-b001', 'node-b002', 'node-b003'];
 const ALL_HOSTS = HOSTS.join(',');
+
+// The sync writes 0.4 s after a selection and then reads the variable back, and other tests load the
+// same Grafana at the same time, so an expectation gets more time than Playwright's default 5 s.
+const expect = baseExpect.configure({ timeout: 20_000 });
 
 // Every panel of the dashboard is on screen at once: Grafana does not mount panels below the viewport.
 test.use({ viewport: { width: 1600, height: 1000 } });
@@ -29,41 +33,55 @@ async function openGrid(dashboardPage: DashboardPage, title: string): Promise<Gr
   const canvas = panel.locator('canvas');
   await expect(canvas).toBeVisible();
   const cells: Grid['cells'] = {};
+  // The scan moves the pointer in the page, one event per point, and waits for React to draw the
+  // tooltip after each. It stops at the first row under the grid, so a slow machine has time for it.
   await expect
-    .poll(async () => {
-      const found = await canvas.evaluate(async (el) => {
-        const container = el.parentElement as HTMLElement;
-        const box = el.getBoundingClientRect();
-        const seen: Record<string, { x0: number; x1: number; y0: number; y1: number }> = {};
-        for (let y = 3; y < box.height; y += 6) {
-          for (let x = 3; x < box.width; x += 6) {
-            el.dispatchEvent(
-              new MouseEvent('mousemove', { bubbles: true, clientX: box.left + x, clientY: box.top + y })
-            );
-            await new Promise((resolve) => setTimeout(resolve, 0));
-            // The tooltip is labelled with the path of its cell: "host: node-a001".
-            const label = container.querySelector('[role="tooltip"]')?.getAttribute('aria-label') ?? '';
-            const host = /^host: (.+)$/.exec(label)?.[1];
-            if (host) {
-              const cell = (seen[host] ??= { x0: x, x1: x, y0: y, y1: y });
-              cell.x1 = Math.max(cell.x1, x);
-              cell.y1 = Math.max(cell.y1, y);
+    .poll(
+      async () => {
+        const found = await canvas.evaluate(async (el, expected) => {
+          const container = el.parentElement as HTMLElement;
+          const box = el.getBoundingClientRect();
+          const seen: Record<string, { x0: number; x1: number; y0: number; y1: number }> = {};
+          for (let y = 4; y < box.height; y += 8) {
+            let hits = 0;
+            for (let x = 4; x < box.width; x += 8) {
+              el.dispatchEvent(
+                new MouseEvent('mousemove', { bubbles: true, clientX: box.left + x, clientY: box.top + y })
+              );
+              await new Promise((resolve) => setTimeout(resolve, 0));
+              // The tooltip is labelled with the path of its cell: "host: node-a001".
+              const label = container.querySelector('[role="tooltip"]')?.getAttribute('aria-label') ?? '';
+              const host = /^host: (.+)$/.exec(label)?.[1];
+              if (host) {
+                hits++;
+                const cell = (seen[host] ??= { x0: x, x1: x, y0: y, y1: y });
+                cell.x1 = Math.max(cell.x1, x);
+                cell.y1 = Math.max(cell.y1, y);
+              }
+            }
+            if (hits === 0 && Object.keys(seen).length === expected) {
+              break;
             }
           }
+          el.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }));
+          return seen;
+        }, HOSTS.length);
+        for (const [host, { x0, x1, y0, y1 }] of Object.entries(found)) {
+          cells[host] = { x: (x0 + x1) / 2, y: (y0 + y1) / 2 };
         }
-        el.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }));
-        return seen;
-      });
-      for (const [host, { x0, x1, y0, y1 }] of Object.entries(found)) {
-        cells[host] = { x: (x0 + x1) / 2, y: (y0 + y1) / 2 };
-      }
-      return Object.keys(found).sort();
-    })
+        return Object.keys(found).sort();
+      },
+      { timeout: 60_000 }
+    )
     .toEqual(HOSTS);
   return { panel, canvas, cells };
 }
 
-const select = (grid: Grid, host: string) => grid.canvas.click({ position: grid.cells[host], modifiers: ['Shift'] });
+// The hover tooltip of the cell the pointer rests on can cover the next cell. Playwright would then
+// wait for the canvas to be on top at that point; the panel does not need it to be (a Shift press on
+// the tooltip goes to the cell under it), so the click is made where it is aimed.
+const select = (grid: Grid, host: string) =>
+  grid.canvas.click({ position: grid.cells[host], modifiers: ['Shift'], force: true });
 
 // Grafana 13 can float a pane over the right side of a panel, so the click is dispatched to the
 // button instead of aimed at its position.
@@ -96,7 +114,7 @@ test('a multi-value variable holds exactly the selected hosts, also after a refr
   gotoDashboardPage,
   readProvisionedDashboard,
 }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(120_000);
   const dashboardPage = await openDashboard(gotoDashboardPage, readProvisionedDashboard);
   const grid = await openGrid(dashboardPage, 'Sync A');
   const hosts = variableText(dashboardPage, 'hosts');
@@ -122,7 +140,7 @@ test('two panels that sync to one variable add their selections up, and the last
   gotoDashboardPage,
   readProvisionedDashboard,
 }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(120_000);
   const dashboardPage = await openDashboard(gotoDashboardPage, readProvisionedDashboard);
   const a = await openGrid(dashboardPage, 'Sync A');
   const b = await openGrid(dashboardPage, 'Sync B');
@@ -150,7 +168,7 @@ test('a text box holds one regular expression for the selected hosts', async ({
   gotoDashboardPage,
   readProvisionedDashboard,
 }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(120_000);
   const dashboardPage = await openDashboard(gotoDashboardPage, readProvisionedDashboard);
   const grid = await openGrid(dashboardPage, 'Text box');
   const regex = variableText(dashboardPage, 'host_regex');
@@ -171,7 +189,7 @@ test('a variable that takes one value is not written, and the bar says why', asy
   gotoDashboardPage,
   readProvisionedDashboard,
 }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(120_000);
   const dashboardPage = await openDashboard(gotoDashboardPage, readProvisionedDashboard);
   const grid = await openGrid(dashboardPage, 'Single value');
   const oneHost = variableText(dashboardPage, 'one_host');
@@ -198,7 +216,7 @@ test('nothing is written without a selection label, and the bar says what to set
   gotoDashboardPage,
   readProvisionedDashboard,
 }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(120_000);
   const dashboardPage = await openDashboard(gotoDashboardPage, readProvisionedDashboard);
   const grid = await openGrid(dashboardPage, 'No label');
   const unlabelled = variableText(dashboardPage, 'unlabelled');
@@ -216,7 +234,7 @@ test('the bar says so when Grafana takes the selection out of the variable at a 
   gotoDashboardPage,
   readProvisionedDashboard,
 }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(120_000);
   const dashboardPage = await openDashboard(gotoDashboardPage, readProvisionedDashboard);
   const grid = await openGrid(dashboardPage, 'Query options');
   const listed = variableText(dashboardPage, 'listed');

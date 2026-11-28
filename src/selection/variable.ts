@@ -58,9 +58,11 @@ export const MAX_URL_CHARS = 6000;
 
 /**
  * How long Grafana gets to show a written value before the write counts as not kept. Grafana applies
- * a URL change to its variables within a few milliseconds; this covers a busy page.
+ * a URL change to its variables within a few milliseconds, also while the query of a query variable
+ * is slow (measured with a 4 s variable query in Grafana 11.6.0 and 13.3.1). The margin is for a page
+ * whose main thread is busy: a verdict that comes too early would take a good write back.
  */
-export const CONFIRM_MS = 2000;
+export const CONFIRM_MS = 5000;
 
 /** The value Grafana gives a variable that is set to "All". A label value equal to it cannot be synced. */
 export const ALL_VALUE = '$__all';
