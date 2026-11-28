@@ -5,6 +5,7 @@ import { CellModel } from '../types';
 import { MetricInfo } from '../data/display';
 import { placeOverlay } from './overlay';
 import { cellRangeFor } from '../data/cellRange';
+import { withSparklineRange } from '../drilldown/series';
 
 const W = 300;
 const ROW_H = 34;
@@ -93,7 +94,7 @@ export const DrilldownPopover: React.FC<DrilldownPopoverProps> = (props) => {
             <span style={{ width: 60, textAlign: 'right' }}>{disp ? formattedValueToString(disp) : 'No data'}</span>
             <span style={{ flex: 1 }}>
               {yField && xField ? (
-                <Sparkline width={120} height={ROW_H - 8} sparkline={{ y: yField, x: xField }} theme={theme} />
+                <Sparkline width={120} height={ROW_H - 8} sparkline={{ y: withSparklineRange(yField), x: xField }} theme={theme} />
               ) : props.loading ? (
                 <span style={{ opacity: 0.7 }}>Loading…</span>
               ) : props.error ? (

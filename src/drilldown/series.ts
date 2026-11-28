@@ -1,4 +1,4 @@
-import { DataFrame, DisplayValue, Field, FieldType, LinkModel } from '@grafana/data';
+import { DataFrame, DisplayValue, Field, FieldType, getMinMaxAndDelta, LinkModel } from '@grafana/data';
 import { SpatialAggregation } from '../types';
 
 function labelsMatch(fieldLabels: Record<string, string> | undefined, want: Record<string, string>): boolean {
@@ -71,6 +71,14 @@ function aggregatePoint(values: number[], agg: SpatialAggregation): number {
     case 'mean':
       return values.reduce((a, b) => a + b, 0) / values.length;
   }
+}
+
+/**
+ * Grafana's Sparkline reads the y range from field.state.range and throws inside uPlot when it is absent.
+ * Panel data gets it from Grafana's field overrides; frames of the on-demand range query do not, so compute it from the values.
+ */
+export function withSparklineRange(field: Field): Field {
+  return field.state?.range ? field : { ...field, state: { ...field.state, range: getMinMaxAndDelta(field) } };
 }
 
 export interface DrilldownResult {

@@ -55,6 +55,13 @@ export interface FleetGridOptions {
   categoryStyle?: CategoryDecorationStyle;
   /** Whether to show the categorical legend. */
   showCategoryLegend?: boolean;
+  /**
+   * Hierarchy label whose values a cell selection is copied and synced by (e.g. 'host').
+   * Empty or unset picks the deepest level whose values are unique in the grid.
+   */
+  selectionLabel?: string;
+  /** Dashboard variable that receives the selected label values. Empty or unset disables the sync. */
+  selectionVariable?: string;
   missingColor: string;
   spatialAggregation: SpatialAggregation;
   /** ReducerID (e.g. 'lastNotNull') — reduce along the time axis */

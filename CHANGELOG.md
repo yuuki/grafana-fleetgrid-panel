@@ -2,9 +2,14 @@
 
 ## Unreleased
 
+- Add cell selection: Shift+click a cell or a group label, or Shift+drag a rectangle, to select any set of cells. Selected cells are ringed, keep their selection through data refreshes and resizes, and are cleared with **Clear** or Escape. Every gesture without Shift works as before.
+- Add a cohort comparison for the selected cells against all other cells: per query, the number of cells with and without a value, min, median, p95, max and Cliff's delta. Cells without a value are counted and never treated as zero.
+- Add one-click copy of the selected cells' label values as a regular expression, a comma-separated list or a hostlist (`node-a[001-012]`). The label is `Selection label`, or one that the panel chooses when the selection begins. The bar warns when the regular expression needs escaping inside a quoted string.
+- Add an optional sync of the selected values of `Selection label` to a multi-value or text box dashboard variable (`Sync selection to variable`), so that other panels filter by them. The bar says that the variable holds the selection only after it has read the variable back, and says why when a variable is not written. Several panels can share one variable, and it gets its previous value back when the last selection is cleared.
 - Update the transitive `brace-expansion`, `postcss`, `postcss-selector-parser`, `qs`, `serialize-javascript` and `zod` dependencies to resolve their advisories.
 - Override versions that `@grafana/data`, `@grafana/runtime` and `@grafana/ui` 12.4 pin, to resolve their advisories: `dompurify` 3.4.17, `immutable` 5.1.10, `moment` 2.31.0, `uuid` 11.1.1, and `react-use` 17.6.1, which moves `js-cookie` to 3.0.8. The `@grafana/*` releases that allow the fixed `dompurify` and `moment` (13.2 and later) need React 19. The plugin bundle does not change, because Grafana provides these packages at runtime.
 - Record in `osv-scanner.toml` the advisories that cannot be fixed yet, with the reason for each, until 2027-02-20: `minimatch` and `glob` in the Jest toolchain, and `react-router` 6 in `@grafana/ui`.
+- Fix the drilldown popover of a panel with an instant query: a click on a cell raised an exception inside Grafana and the popover showed no sparkline. The frames of the on-demand range query have no y range (`state.range`), which Grafana's `Sparkline` requires, so the popover now computes it from the values.
 - Fix Escape on the drilldown popover and the link menu: it did not close them on a dashboard, because Grafana's keyboard shortcuts stop Escape before it reaches the panel, and in the panel view it made Grafana leave the panel view instead. Escape now closes an open popover or link menu first and goes no further; with nothing open, Grafana handles it as before.
 
 ## 0.4.1 - 2026-11-12

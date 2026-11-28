@@ -12,6 +12,10 @@ import { hitTest } from '../render/hitTest';
 import { splitRects } from '../render/split';
 import { drilldownSeries, getCellLinks } from '../drilldown/series';
 import { fetchDrilldownFrames } from '../drilldown/requery';
+import { useCellSelection, useSelectionBarHeight } from './useCellSelection';
+import { useSelectionExport } from './useSelectionExport';
+import { SelectionFooter } from './SelectionBar';
+import { SelectionBand } from './SelectionBand';
 import { CellTooltip } from './CellTooltip';
 import { DrilldownPopover } from './DrilldownPopover';
 import { RangeLegend } from './RangeLegend';
@@ -70,7 +74,8 @@ function scrollContainerStyle(width: number, viewportH: number, layout: LayoutRe
     width,
     height: viewportH,
     position: 'relative',
-    overflowY: layout.scrollable ? 'auto' : 'hidden',
+    // Scrolls when the cells do not fit even at S_MIN, and when the selection bar takes the bottom of the box.
+    overflowY: layout.scrollable || layout.contentHeight > viewportH ? 'auto' : 'hidden',
     // For configurations that don't fit within the width even at S_MIN (e.g. too many columns), prevent clipping with horizontal scroll
     overflowX: layout.contentWidth > width ? 'auto' : 'hidden',
   };
@@ -318,6 +323,28 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
   const selectedRefId = resolveSelectedRefId(selected, model.refIds);
   const selectedMetricInfo = model.metricInfos.find((info) => info.refId === selectedRefId);
 
+  // Cell selection (Shift+click, Shift+drag): viewer-local state, like the metric and category selections.
+  const hideHover = useCallback(() => setHover(null), []);
+  const {
+    selection: selectionState,
+    resolved: cellSelection,
+    selectedSet: selectedCells,
+    gestures: selectionGestures,
+    bandRef: selectionBandRef,
+    barRef: selectionBarRef,
+    clear: clearSelection,
+  } = useCellSelection(model.root, layout, options.levels, hideHover);
+  const selectionExport = useSelectionExport(
+    selectionState,
+    cellSelection,
+    options.selectionLabel,
+    options.selectionVariable,
+    options.levels
+  );
+  // The selection bar appears under the grid. The layout above ignores it on purpose: the cells stay
+  // where they are when the first cell is selected, and the grid scrolls if the bar takes its last rows.
+  const gridViewportH = Math.max(0, viewportH - useSelectionBarHeight(selectionBarRef, cellSelection, fitContent));
+
   useEffect(() => {
     if (canvasRef.current) {
       renderCanvas(canvasRef.current, {
@@ -328,23 +355,25 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
         showValues: options.showValues,
         missingColor: options.missingColor,
         category: model.category,
+        selectedCells,
         categoryStyle: normalizeCategoryStyle(options.categoryStyle),
         selectedCategoryValues: effectiveSelection,
         hoverCategoryValue: effectiveHover,
         theme,
         scrollTop,
-        viewportH,
+        viewportH: gridViewportH,
       });
     }
   }, [
     layout,
     model,
+    selectedCells,
     selectedRefId,
     displayMode,
     options,
     theme,
     scrollTop,
-    viewportH,
+    gridViewportH,
     effectiveSelection,
     effectiveHover,
   ]);
@@ -460,7 +489,10 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
   }
 
   return (
-    <div style={{ width, height: fitContent ? 'auto' : height, overflow: 'hidden' }}>
+    <div
+      style={{ width, height: fitContent ? 'auto' : height, overflow: 'hidden' }}
+      onKeyDown={(e) => selectionGestures.onKeyDown(e, popover !== null || linkMenu !== null)}
+    >
       {showHeader && (
         <PanelHeader
           headerRef={headerRef}
@@ -479,14 +511,19 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
       <WarningBanner warnings={model.warnings} theme={theme} />
       <div
         ref={setScrollRef}
-        style={scrollContainerStyle(width, viewportH, layout)}
+        style={scrollContainerStyle(width, gridViewportH, layout)}
+        {...selectionGestures.containerProps}
         onScroll={(e) => {
+          selectionGestures.onScroll(e.currentTarget);
           setScrollTop(e.currentTarget.scrollTop);
           // Close it because scrolling would make the held coordinates diverge from reality
           setPopover(null);
           setLinkMenu(null);
         }}
         onMouseMove={(e) => {
+          if (selectionGestures.isGesturing()) {
+            return; // A Shift press is selecting cells: no tooltip until it ends
+          }
           const rect = e.currentTarget.getBoundingClientRect();
           // Both hitTest and the tooltip are handled in the scroll container's content coordinate system.
           // The absolutely-positioned tooltip child is placed in content coordinates, and hitTest's hit detection also uses content coordinates, so
@@ -498,6 +535,9 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
         }}
         onMouseLeave={() => setHover(null)}
         onClick={(e) => {
+          if (selectionGestures.consumeClick()) {
+            return; // This click ends a Shift press, which edits the selection and never drills down
+          }
           const rect = e.currentTarget.getBoundingClientRect();
           // Hit-test clicks in the same content coordinate system as hover (including scrollLeft/scrollTop)
           const cx = e.clientX - rect.left + e.currentTarget.scrollLeft;
@@ -546,6 +586,7 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
         }}
       >
         <canvas ref={canvasRef} />
+        <SelectionBand ref={selectionBandRef} />
         {hover && (
           <CellTooltip
             cell={hover.cell}
@@ -558,6 +599,9 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
             minY={visibleBounds.minY}
             maxX={visibleBounds.maxX}
             maxY={visibleBounds.maxY}
+            selectsCellAt={(clientX, clientY) =>
+              scrollElement !== null && selectionGestures.togglesCell(scrollElement, clientX, clientY, hover.cell)
+            }
           />
         )}
         {popover && (
@@ -659,6 +703,14 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
             );
           })()}
       </div>
+      <SelectionFooter
+        barRef={selectionBarRef}
+        selection={cellSelection}
+        exported={selectionExport}
+        refIds={model.refIds}
+        metricInfos={model.metricInfos}
+        onClear={clearSelection}
+      />
     </div>
   );
 };

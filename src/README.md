@@ -11,6 +11,7 @@ All cells are drawn on a single `<canvas>`, with the tooltip, drilldown popover,
 - **Auto-fitted cells** — Cell size is computed from the panel dimensions. Numbers are drawn only when the formatted text fits; the exact value is always available on hover.
 - **Natural sort** — Numeric segments inside labels are compared as numbers (`node-a2` before `node-a10`), ascending by default (descending and data-order are also selectable).
 - **Multiple metrics** — Show one metric at a time with an in-panel selector (default), or opt in to split each cell into sub-regions to compare its metrics side by side. The tooltip and popover list every metric that returned data.
+- **Cell selection and cohort comparison** — Shift+click cells or group labels, or Shift+drag a rectangle, to select any set of cells. Compare them with the rest of the grid for every query (count, min, median, p95, max and Cliff's delta), copy their hosts as a regular expression, a list or a hostlist (`node-a[001-012]`), and optionally keep a multi-value or text box dashboard variable equal to them so that other panels filter by them. See the repository README for the gestures, the formats and the variable types.
 - **Drilldown** — Click a cell to open a popover with the current value per metric, plus a sparkline whenever time-series data is available for that metric. If the field has Data Links, navigation takes priority over the popover.
 
 ## Requirements
