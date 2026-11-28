@@ -754,6 +754,14 @@ test('flow overlay draws the edge query as arcs on its own canvas', async ({
   await expect(panel.getByTestId('flow-legend-count')).toHaveText('10 edges');
   await expect(panel.getByRole('alert')).toContainText('1/13 edge rows were left out');
   await expect(panel.getByRole('alert')).toContainText('dst_host=node-x9');
+  // What has no arc is also in the legend's visible text, with the worst value among it: the banner is
+  // one line and is cut in a narrow panel.
+  await expect(panel.getByTestId('flow-legend-note')).toHaveText([
+    /^1 row left out, worst 0\.30*\s*%$/,
+    /^1 row within one host not drawn, worst 0\s*%$/,
+  ]);
+  // The scale says in words which of its ends is the bad one.
+  await expect(panel.getByTestId('flow-legend-worse')).toHaveText('higher is worse');
   // The edge query is drawn as arcs, not as a cell metric: there is one cell metric and so no selector.
   await expect(panel.getByRole('radio')).toHaveCount(0);
 });
@@ -793,6 +801,20 @@ test('hovering a cell emphasises the flows of its host and lists its peers', asy
   await expect(panel.getByRole('tooltip')).not.toContainText('Flows');
   await expect.poll(() => hasArcs(focus)).toBe(false);
   await expect(rest).toHaveCSS('opacity', '1');
+
+  // While the drilldown popover of node-b1 is open, its edges stay emphasised when the pointer is on a
+  // cell that has no edges of its own. The tooltip is that cell's and says nothing about flows.
+  const farCell = await findHostPoint(cells, panel, 'node-a4');
+  await cells.click({ position: onRing });
+  await expect(panel.getByRole('button', { name: 'Close' })).toBeVisible();
+  await expect.poll(() => hasArcs(focus)).toBe(true);
+  const focusOfPopover = await stableHash(focus);
+  await hoverCanvas(cells, farCell);
+  await expect(panel.getByRole('tooltip')).toContainText('host: node-a4');
+  await expect(panel.getByRole('tooltip')).not.toContainText('Flows');
+  await expect(panel.getByRole('button', { name: 'Close' })).toBeVisible();
+  await expect(rest).toHaveCSS('opacity', '0.22');
+  expect(await frameHash(focus)).toBe(focusOfPopover);
 });
 
 test('flow overlay options switch to drawing on hover and filter the edges', async ({
@@ -824,6 +846,23 @@ test('flow overlay options switch to drawing on hover and filter the edges', asy
   await threshold.fill('0.3');
   await threshold.blur();
   await expect(count).toHaveText(/^6 of 10 edges < 0\.30*\s*%$/);
+});
+
+test('flow overlay draws as many arcs at rest as its option says', async ({
+  gotoPanelEditPage,
+  readProvisionedDashboard,
+  page,
+}) => {
+  const dashboard = await readProvisionedDashboard({ fileName: FILE });
+  const panelEditPage = await gotoPanelEditPage({ dashboard: { uid: dashboard.uid }, id: '9' });
+  const count = page.getByTestId('flow-legend-count');
+  await expect(count).toHaveText('10 edges');
+  const arcs = panelEditPage.getCustomOptions('Flow overlay').getNumberInput('Arcs at rest');
+  // A stored panel without the option draws up to 100 arcs at rest.
+  await expect(arcs).toHaveValue('100');
+  await arcs.fill('3');
+  await arcs.blur();
+  await expect(count).toHaveText('3 of 10 edges drawn, worst first');
 });
 
 test('a panel without an edge query has no overlay canvas', async ({ gotoDashboardPage, readProvisionedDashboard }) => {

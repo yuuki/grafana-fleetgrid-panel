@@ -540,9 +540,17 @@ describe('buildFlowModel', () => {
     });
 
     it('leaves an endpoint that the field config sets alone', () => {
+      // Min and Max of the standard options, or of an override "Fields returned by query": Grafana
+      // applies both to the field config before the panel sees the frame.
       const frame = colored({ src_host: ['node-a1'], dst_host: ['node-a2'], loss: [7] }, { min: 2, max: 100 });
       const m = model([frame], { flowThreshold: 1 });
       expect([m.metricInfo!.effectiveMin, m.metricInfo!.effectiveMax]).toEqual([2, 100]);
+      // Each end on its own: the other end stays automatic (0 when higher is worse; the data's maximum).
+      const columns = { src_host: ['node-a1'], dst_host: ['node-a2'], loss: [7] };
+      const onlyMax = model([colored(columns, { max: 100 })]);
+      expect([onlyMax.metricInfo!.effectiveMin, onlyMax.metricInfo!.effectiveMax]).toEqual([0, 100]);
+      const onlyMin = model([colored(columns, { min: 5 })]);
+      expect([onlyMin.metricInfo!.effectiveMin, onlyMin.metricInfo!.effectiveMax]).toEqual([5, 7]);
     });
   });
 
