@@ -149,20 +149,20 @@ The following panel-options fragment gives GPU power query `A` a zone-specific m
   "rangeOverrides": [
     {
       "refId": "A",
-      "matchers": [{ "label": "zone", "operator": "exact", "value": "isk-sec-c" }],
+      "matchers": [{ "label": "zone", "operator": "exact", "value": "zone-a" }],
       "min": 0,
       "max": 700
     },
     {
       "refId": "A",
-      "matchers": [{ "label": "zone", "operator": "exact", "value": "isk-sec-d" }],
+      "matchers": [{ "label": "zone", "operator": "exact", "value": "zone-b" }],
       "min": 0,
       "max": 650
     },
     {
       "refId": "B",
       "matchers": [
-        { "label": "zone", "operator": "exact", "value": "isk-sec-c" },
+        { "label": "zone", "operator": "exact", "value": "zone-a" },
         { "label": "bw_type", "operator": "regex", "value": "^NVLink " }
       ],
       "min": 0,
@@ -171,7 +171,7 @@ The following panel-options fragment gives GPU power query `A` a zone-specific m
     {
       "refId": "B",
       "matchers": [
-        { "label": "zone", "operator": "exact", "value": "isk-sec-c" },
+        { "label": "zone", "operator": "exact", "value": "zone-a" },
         { "label": "bw_type", "operator": "regex", "value": "^(PCIe|NIC|Lustre|SONiC) " }
       ],
       "min": 0,
