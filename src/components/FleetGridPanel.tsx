@@ -12,6 +12,10 @@ import { hitTest } from '../render/hitTest';
 import { splitRects } from '../render/split';
 import { drilldownSeries, getCellLinks } from '../drilldown/series';
 import { fetchDrilldownFrames } from '../drilldown/requery';
+import { FlowLayers } from './FlowLayers';
+import { FlowLegend } from './FlowLegend';
+import { FlowTooltipSection, flowTooltipRows } from './FlowTooltipSection';
+import { useCellQueries, useFlowModel, useFlowOverlay, withFlowWarnings } from './useFlowOverlay';
 import { useCellSelection, useSelectionBarHeight } from './useCellSelection';
 import { useSelectionExport } from './useSelectionExport';
 import { SelectionFooter } from './SelectionBar';
@@ -38,6 +42,13 @@ const measureVisibleBounds = (el: HTMLElement): VisibleBounds => {
   const minX = el.scrollLeft;
   const minY = el.scrollTop;
   return { minX, minY, maxX: minX + el.clientWidth, maxY: minY + el.clientHeight };
+};
+
+// The width that the scroll container shows: the panel's width without a vertical scrollbar. Before the
+// first measurement it is the panel's width.
+const visibleWidth = (bounds: VisibleBounds, width: number): number => {
+  const measured = bounds.maxX - bounds.minX;
+  return measured > 0 ? Math.min(width, measured) : width;
 };
 
 const sameVisibleBounds = (a: VisibleBounds, b: VisibleBounds): boolean =>
@@ -120,7 +131,8 @@ const WarningBanner: React.FC<{ warnings: string[]; theme: GrafanaTheme2 }> = ({
       }}
     >
       {warnings.map((w) => (
-        <span key={w} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        // The banner is one line and cuts a long warning with an ellipsis; the title has it in full.
+        <span key={w} title={w} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {w}
         </span>
       ))}
@@ -140,6 +152,8 @@ interface PanelHeaderProps {
   effectiveSelection: string[];
   setSelectedCategories: React.Dispatch<React.SetStateAction<string[]>>;
   onHoverCategory: (value: string | undefined) => void;
+  /** Further legends shown after the built-in ones (the flow overlay's legend). */
+  children?: React.ReactNode;
 }
 
 const PanelHeader: React.FC<PanelHeaderProps> = ({
@@ -154,6 +168,7 @@ const PanelHeader: React.FC<PanelHeaderProps> = ({
   effectiveSelection,
   setSelectedCategories,
   onHoverCategory,
+  children,
 }) => (
   <div ref={headerRef} style={{ minHeight: HEADER_H, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
     {isSplit ? (
@@ -194,6 +209,7 @@ const PanelHeader: React.FC<PanelHeaderProps> = ({
         onHover={onHoverCategory}
       />
     )}
+    {children}
   </div>
 );
 
@@ -236,14 +252,16 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
   // Requery generation token. Advanced every time requestId changes, used to decide whether to discard responses from stale in-flight requests
   const drillGen = useRef(0);
 
-  const targetRefIds = useMemo(
-    () => (data.request?.targets ?? []).map((t) => t.refId).filter((r): r is string => Boolean(r)),
-    [data.request]
+  // The flow overlay's edge query is not a cell metric: the cells are built without it. While no edge
+  // query is named, these are the panel's own frames, target refIds and request, and `model` is the cell
+  // model itself.
+  const { series: cellSeries, targetRefIds, request: cellRequest } = useCellQueries(data, options);
+  const cellModel = useMemo(
+    () => buildModel(cellSeries, options, theme, timeZone, targetRefIds),
+    [cellSeries, options, theme, timeZone, targetRefIds]
   );
-  const model = useMemo(
-    () => buildModel(data.series, options, theme, timeZone, targetRefIds),
-    [data.series, options, theme, timeZone, targetRefIds]
-  );
+  const flowModel = useFlowModel(data, options, cellModel.root, theme, timeZone);
+  const model = useMemo(() => withFlowWarnings(cellModel, flowModel), [cellModel, flowModel]);
   const effectiveSelection = useMemo(
     () => selectedCategories.filter((value) => model.category?.colorByValue.has(value) ?? false),
     [selectedCategories, model.category]
@@ -324,6 +342,9 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
   const selectedMetricInfo = model.metricInfos.find((info) => info.refId === selectedRefId);
 
   // Cell selection (Shift+click, Shift+drag): viewer-local state, like the metric and category selections.
+  // A Shift press takes the pointer for as long as the button is down: it ends the hover, and with the
+  // hover the tooltip and the focus that the flow overlay gives the hovered cell, and the pointer does not
+  // hover again until the press ends. The focus that an open popover keeps lasts as long as the popover.
   const hideHover = useCallback(() => setHover(null), []);
   const {
     selection: selectionState,
@@ -344,6 +365,28 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
   // The selection bar appears under the grid. The layout above ignores it on purpose: the cells stay
   // where they are when the first cell is selected, and the grid scrolls if the bar takes its last rows.
   const gridViewportH = Math.max(0, viewportH - useSelectionBarHeight(selectionBarRef, cellSelection, fitContent));
+
+  // The flow overlay paints its own canvases. The hovered cell's edges are emphasised; an open popover
+  // keeps its cell's edges emphasised while the pointer is elsewhere. The selected cells are not passed:
+  // a selection changes neither the arcs at rest nor the arcs in focus. The layers get the height of the
+  // grid's box without the selection bar, like the cell canvas, so that all three canvases stay one size.
+  const flowRestRef = useRef<HTMLCanvasElement>(null);
+  const flowFocusRef = useRef<HTMLCanvasElement>(null);
+  const flow = useFlowOverlay({
+    model: flowModel,
+    restRef: flowRestRef,
+    focusRef: flowFocusRef,
+    layout,
+    viewportW: visibleWidth(visibleBounds, width),
+    viewportH: gridViewportH,
+    theme,
+    hovered: hover,
+    pinned: popover,
+  });
+  const flowLegend = useMemo(
+    () => <FlowLegend model={flowModel} tooLarge={flow.tooLarge} />,
+    [flowModel, flow.tooLarge]
+  );
 
   useEffect(() => {
     if (canvasRef.current) {
@@ -394,11 +437,11 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
   // Don't requery for range-only cases (range data may already be on hand). The drillError guard prevents a retry loop on failure.
   // The response captures the generation at fetch start, and is only applied when it matches the generation at arrival time; otherwise it's discarded as stale.
   useEffect(() => {
-    if (!popover || drillFrames || drillLoading || drillError || !data.request) {
+    if (!popover || drillFrames || drillLoading || drillError || !cellRequest) {
       return;
     }
     // No requery needed if the data on hand comes from a range query. Only run it when there's an instant target
-    const hasInstant = (data.request.targets ?? []).some((t) => (t as { instant?: boolean }).instant);
+    const hasInstant = (cellRequest.targets ?? []).some((t) => (t as { instant?: boolean }).instant);
     if (!hasInstant) {
       return;
     }
@@ -410,11 +453,11 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
       return;
     }
     const gen = drillGen.current;
-    const requestId = data.request.requestId;
+    const requestId = cellRequest.requestId;
     // Intentional async fetch triggered from the popover. loading is both the in-progress UI and a re-entrancy guard, so it must be set synchronously
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setDrillLoading(true);
-    fetchDrilldownFrames(data.request)
+    fetchDrilldownFrames(cellRequest)
       .then((frames) => {
         if (drillGen.current !== gen) {
           return; // Discard stale responses that arrive after requestId has changed
@@ -434,7 +477,16 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
         }
         setDrillLoading(false);
       });
-  }, [popover, drillFrames, drillLoading, drillError, data, model.metricInfos, options.spatialAggregation]);
+  }, [
+    popover,
+    drillFrames,
+    drillLoading,
+    drillError,
+    data,
+    cellRequest,
+    model.metricInfos,
+    options.spatialAggregation,
+  ]);
 
   // Close the popover/menu on Esc or an outside pointer-down (the popover side guards with stopPropagation)
   useEffect(() => {
@@ -494,7 +546,9 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
           effectiveSelection={effectiveSelection}
           setSelectedCategories={setSelectedCategories}
           onHoverCategory={setHoverCategory}
-        />
+        >
+          {flowLegend}
+        </PanelHeader>
       )}
       <WarningBanner warnings={model.warnings} theme={theme} />
       <div
@@ -574,6 +628,9 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
         }}
       >
         <canvas ref={canvasRef} />
+        {/* Bottom to top: the cells with the selection rings (one canvas), the arcs, the rubber band of a
+            Shift+drag, then the tooltip, the popover and the link menu. */}
+        <FlowLayers active={flow.active} restRef={flowRestRef} focusRef={flowFocusRef} focused={flow.focused} />
         <SelectionBand ref={selectionBandRef} />
         {hover && (
           <CellTooltip
@@ -590,7 +647,10 @@ export const FleetGridPanel: React.FC<FleetGridPanelProps> = (props) => {
             selectsCellAt={(clientX, clientY) =>
               scrollElement !== null && selectionGestures.togglesCell(scrollElement, clientX, clientY, hover.cell)
             }
-          />
+            extraRows={flowTooltipRows(flow.summary)}
+          >
+            <FlowTooltipSection model={flowModel} summary={flow.summary} missingColor={options.missingColor} />
+          </CellTooltip>
         )}
         {popover && (
           <DrilldownPopover

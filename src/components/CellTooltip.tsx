@@ -12,6 +12,9 @@ export interface CellTooltipProps {
   metricInfos: MetricInfo[];
   missingColor: string;
   tooltipLabels?: string[];
+  /** Extra content below the metrics (the flow overlay's summary), and its height in rows for the placement. */
+  children?: React.ReactNode;
+  extraRows?: number;
   x: number;
   y: number;
   minX?: number;
@@ -32,6 +35,8 @@ export const CellTooltip: React.FC<CellTooltipProps> = ({
   metricInfos,
   missingColor,
   tooltipLabels = [],
+  children,
+  extraRows = 0,
   x,
   y,
   selectsCellAt,
@@ -68,7 +73,7 @@ export const CellTooltip: React.FC<CellTooltipProps> = ({
     }, 0);
   const placementH = hasBounds ? Math.min(estimatedH, availableH) : undefined;
   const placement = hasBounds
-    ? placeOverlay(x, y, outerW!, placementH!, bounds as Required<typeof bounds>)
+    ? placeOverlay(x, y, outerW!, Math.min(placementH! + extraRows * 18, availableH), bounds as Required<typeof bounds>)
     : { left: x + 12, top: y + 12 };
   const outerH = hasBounds ? Math.max(0, bounds.maxY! - placement.top) : undefined;
   const accessibleName =
@@ -166,6 +171,7 @@ export const CellTooltip: React.FC<CellTooltipProps> = ({
           </div>
         );
       })}
+      {children}
     </div>
   );
 };

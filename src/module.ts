@@ -1,6 +1,9 @@
 import { PanelPlugin } from '@grafana/data';
 import { FleetGridOptions, normalizeCategoryStyle } from './types';
 import { FleetGridPanel } from './components/FleetGridPanel';
+import { DEFAULT_FLOW_REST_ARCS, flowRefId } from './data/edges';
+import { FlowEndpointsEditor } from './options/FlowEndpointsEditor';
+import { FlowRestArcsEditor } from './options/FlowRestArcsEditor';
 import { LevelsEditor } from './options/LevelsEditor';
 import { ReduceCalcEditor } from './options/ReduceCalcEditor';
 import { RangeOverridesEditor } from './options/RangeOverridesEditor';
@@ -15,6 +18,9 @@ export function declareFitContentSupport(target: object): void {
   const candidate = target as { setFitContentSupport?: (enabled?: boolean) => unknown };
   candidate.setFitContentSupport?.();
 }
+
+// The flow overlay is off until an edge query is named, and its other options stay hidden until then.
+const flowEnabled = (options: FleetGridOptions): boolean => flowRefId(options) !== '';
 
 // useFieldConfig() enables the standard Field settings (Color scheme / Thresholds / Unit / Min-Max / Data Links / Overrides).
 // Without this, this plugin's entire color/unit design would not function.
@@ -139,6 +145,87 @@ export const plugin = new PanelPlugin<FleetGridOptions>(FleetGridPanel).useField
         'Name of a multi-value or text box variable that is kept equal to the selected values of the selection label, so other panels can filter by it. Empty disables the sync',
       category: ['Selection'],
       defaultValue: '',
+    })
+    .addTextInput({
+      path: 'flowRefId',
+      name: 'Edge query (refId)',
+      description:
+        'Query whose rows are edges between cells or groups. It is drawn as arcs, not as a cell metric. Empty turns the overlay off',
+      category: ['Flow overlay'],
+      defaultValue: '',
+    })
+    .addCustomEditor({
+      id: 'flowEndpoints',
+      path: 'flowEndpoints',
+      name: 'Endpoint labels',
+      description: 'The labels of the edge query that name the source and the destination, per hierarchy label',
+      category: ['Flow overlay'],
+      editor: FlowEndpointsEditor,
+      defaultValue: [],
+      showIf: flowEnabled,
+    })
+    .addRadio({
+      path: 'flowShow',
+      name: 'Show arcs',
+      description: 'On hover draws only the arcs of the cell under the pointer',
+      category: ['Flow overlay'],
+      defaultValue: 'always',
+      settings: {
+        options: [
+          { value: 'always', label: 'Always' },
+          { value: 'hover', label: 'On hover' },
+        ],
+      },
+      showIf: flowEnabled,
+    })
+    .addCustomEditor({
+      id: 'flowRestArcs',
+      path: 'flowRestArcs',
+      name: 'Arcs at rest',
+      description:
+        'The most arcs drawn while no cell is hovered: the worst ones, 1 to 500. More than about a hundred hide the cells. A hovered cell always shows its own edges',
+      category: ['Flow overlay'],
+      editor: FlowRestArcsEditor,
+      defaultValue: DEFAULT_FLOW_REST_ARCS,
+      showIf: (options) => flowEnabled(options) && options.flowShow !== 'hover',
+    })
+    .addRadio({
+      path: 'flowWorst',
+      name: 'Worse values are',
+      description: 'Direction of the filter below, and which edges are kept when there are more than can be drawn',
+      category: ['Flow overlay'],
+      defaultValue: 'high',
+      settings: {
+        options: [
+          { value: 'high', label: 'Higher' },
+          { value: 'low', label: 'Lower' },
+        ],
+      },
+      showIf: flowEnabled,
+    })
+    .addNumberInput({
+      path: 'flowThreshold',
+      name: 'Only draw edges worse than',
+      description: 'Edges whose value is not strictly worse than this are not drawn. Empty draws every edge',
+      category: ['Flow overlay'],
+      settings: { placeholder: 'No filter' },
+      showIf: flowEnabled,
+    })
+    .addTextInput({
+      path: 'flowOrderLabel',
+      name: 'Hop number label',
+      description: 'Label of the edge query with the position of an edge in an ordered path, such as a ring',
+      category: ['Flow overlay'],
+      defaultValue: '',
+      showIf: flowEnabled,
+    })
+    .addTextInput({
+      path: 'flowPathLabel',
+      name: 'Path label',
+      description: 'Label of the edge query that names the path an edge belongs to, such as a job',
+      category: ['Flow overlay'],
+      defaultValue: '',
+      showIf: flowEnabled,
     })
 );
 

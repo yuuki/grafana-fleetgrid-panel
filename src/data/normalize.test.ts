@@ -1,5 +1,5 @@
 import { toDataFrame, FieldType } from '@grafana/data';
-import { isTableFrame, normalizeFrames } from './normalize';
+import { countFrameRows, forEachRowValue, isTableFrame, normalizeFrames } from './normalize';
 
 describe('isTableFrame', () => {
   const strField = { name: 'zone', type: FieldType.string, values: ['zone-a'] };
@@ -116,5 +116,69 @@ describe('normalizeFrames', () => {
       ],
     });
     expect(normalizeFrames([frame], 'lastNotNull')[0].value).toBeNull();
+  });
+});
+
+describe('countFrameRows and forEachRowValue', () => {
+  const table = (refId: string, zones: string[], values = zones.map((_, i): number | null => i)) =>
+    toDataFrame({
+      refId,
+      fields: [
+        { name: 'zone', type: FieldType.string, values: zones },
+        { name: 'Value', type: FieldType.number, values },
+      ],
+    });
+  const series = (zones: string[]) =>
+    toDataFrame({
+      refId: 'A',
+      fields: [
+        { name: 'Time', type: FieldType.time, values: [1000, 2000] },
+        ...zones.map((zone, i) => ({ name: 'Value', type: FieldType.number, values: [i, i + 10], labels: { zone } })),
+      ],
+    });
+  const frames = [
+    table('A', ['zone-a', 'zone-b', 'zone-c'], [5, null, Infinity]),
+    series(['zone-d', 'zone-e']),
+    table('B', ['zone-f']),
+  ];
+  const visited = (reduceCalc: string) => {
+    const out: Array<[number, number | null]> = [];
+    frames.forEach((frame) => forEachRowValue(frame, reduceCalc, (row, value) => out.push([row, value])));
+    return out;
+  };
+
+  it('counts the rows that normalizeFrames returns', () => {
+    expect(normalizeFrames(frames, 'lastNotNull')).toHaveLength(6);
+    expect(countFrameRows(frames)).toBe(6);
+  });
+
+  it('visits the value of every row in the order of normalizeFrames, without building rows', () => {
+    // Table rows by row number; series by their position among the numeric fields. Missing and
+    // non-finite values are null, as in the rows.
+    expect(visited('lastNotNull')).toEqual([
+      [0, 5],
+      [1, null],
+      [2, null],
+      [0, 10],
+      [1, 11],
+      [0, 0],
+    ]);
+    expect(visited('lastNotNull').map(([, value]) => value)).toEqual(
+      normalizeFrames(frames, 'lastNotNull').map((row) => row.value)
+    );
+    // A range series is reduced with the same calculation.
+    expect(visited('mean').slice(3, 5)).toEqual([
+      [0, 5],
+      [1, 6],
+    ]);
+  });
+
+  it('counts and visits no rows for a table frame without a numeric column', () => {
+    const labelsOnly = toDataFrame({ fields: [{ name: 'zone', type: FieldType.string, values: ['zone-a'] }] });
+    const visit = jest.fn();
+    forEachRowValue(labelsOnly, 'lastNotNull', visit);
+    expect(visit).not.toHaveBeenCalled();
+    expect(countFrameRows([labelsOnly])).toBe(0);
+    expect(normalizeFrames([labelsOnly], 'lastNotNull')).toEqual([]);
   });
 });

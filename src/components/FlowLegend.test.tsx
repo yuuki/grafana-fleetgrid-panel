@@ -1,0 +1,282 @@
+import React from 'react';
+import { render, screen } from '@testing-library/react';
+import { createTheme } from '@grafana/data';
+import { MetricInfo } from '../data/display';
+import { FlowEdge, FlowModel, MAX_FLOW_ARCS } from '../data/edges';
+import { FlowLegend, flowLegendError, flowLegendSummary, flowWorseEnd, formatFlowValue } from './FlowLegend';
+
+const theme = createTheme();
+jest.mock('@grafana/ui', () => ({
+  ...jest.requireActual('@grafana/ui'),
+  useTheme2: () => theme,
+}));
+
+const metricInfo: MetricInfo = {
+  refId: 'E',
+  name: 'loss',
+  effectiveMin: 0,
+  effectiveMax: 5,
+  minConfigured: false,
+  maxConfigured: false,
+  processor: ((value: number) => ({
+    text: String(value),
+    suffix: '%',
+    numeric: value,
+    color: value >= 1 ? '#ff0000' : '#00ff00',
+  })) as MetricInfo['processor'],
+  field: {} as MetricInfo['field'],
+  frame: {} as MetricInfo['frame'],
+};
+
+const edge = (index: number, value: number | null = 1): FlowEdge => ({
+  source: `s${index}`,
+  destination: `d${index}`,
+  value,
+  rowCount: 1,
+  hops: [],
+});
+const edges = (count: number, value: number | null = 1, from = 0) =>
+  Array.from({ length: count }, (_, i) => edge(from + i, value));
+
+// A model as buildFlowModel returns it: the edges with a value first, then those without one.
+const model = (
+  list: FlowEdge[],
+  over: Partial<FlowModel> = {},
+  stats: Partial<FlowModel['stats']> = {}
+): FlowModel => ({
+  config: {
+    refId: 'E',
+    endpoints: [{ level: 'host', source: 'src_host', destination: 'dst_host' }],
+    incompleteEndpoints: 0,
+    show: 'always',
+    restArcs: 500,
+    worst: 'high',
+    threshold: undefined,
+    orderLabel: '',
+    pathLabel: '',
+  },
+  depth: 2,
+  levelLabel: 'host',
+  groupLevel: true,
+  edges: list,
+  valuedCount: list.filter((e) => e.value !== null).length,
+  nodes: new Map(),
+  byNode: new Map(),
+  byPath: new Map(),
+  stats: {
+    totalRows: list.length,
+    readRows: list.length,
+    missingLabel: 0,
+    unmatched: 0,
+    ambiguous: 0,
+    selfEdges: 0,
+    excludedWorst: null,
+    selfWorst: null,
+    invalidOrder: 0,
+    edgeCount: list.length,
+    noValue: list.filter((e) => e.value === null).length,
+    examples: [],
+    ...stats,
+  },
+  warnings: [],
+  error: null,
+  metricInfo,
+  ...over,
+});
+
+const withConfig = (m: FlowModel, config: Partial<FlowModel['config']>): FlowModel => ({
+  ...m,
+  config: { ...m.config, ...config },
+});
+
+describe('flowLegendSummary', () => {
+  it('counts the edges', () => {
+    expect(flowLegendSummary(model(edges(2)))).toMatchObject({ text: '2 edges', notes: [], bound: false });
+    expect(flowLegendSummary(model(edges(1))).text).toBe('1 edge');
+    expect(flowLegendSummary(model([])).text).toBe('no edges');
+  });
+
+  it('says how many edges are drawn when the draw bound leaves some out', () => {
+    expect(flowLegendSummary(model(edges(MAX_FLOW_ARCS + 234)))).toMatchObject({
+      text: `${MAX_FLOW_ARCS} of ${MAX_FLOW_ARCS + 234} edges drawn, worst first`,
+      notes: [],
+      bound: true,
+    });
+  });
+
+  it('does not claim that arcs are drawn at rest in hover mode', () => {
+    expect(flowLegendSummary(withConfig(model(edges(MAX_FLOW_ARCS + 234)), { show: 'hover' }))).toMatchObject({
+      text: `${MAX_FLOW_ARCS + 234} edges, shown on hover`,
+      bound: false,
+    });
+  });
+
+  it('names the filter with the formatted threshold and its direction', () => {
+    const filtered = model(edges(1), {}, { edgeCount: 4 });
+    expect(flowLegendSummary(withConfig(filtered, { threshold: 0.5 })).text).toBe('1 of 4 edges > 0.5%');
+    expect(flowLegendSummary(withConfig(filtered, { threshold: 99, worst: 'low' })).text).toBe('1 of 4 edges < 99%');
+    expect(flowLegendSummary(withConfig(model([], {}, { edgeCount: 4 }), { threshold: 0.5 })).text).toBe(
+      '0 of 4 edges > 0.5%'
+    );
+  });
+
+  it('says that hover mode draws on hover', () => {
+    expect(flowLegendSummary(withConfig(model(edges(1)), { show: 'hover' })).text).toBe('1 edge, shown on hover');
+  });
+
+  describe('edges without a value', () => {
+    it('are dashed and need no remark while all of them are drawn', () => {
+      const summary = flowLegendSummary(model([...edges(3), ...edges(2, null, 3)]));
+      expect(summary).toMatchObject({ text: '5 edges', notes: [], bound: false });
+      expect(summary.details).toContain('2 edges without a value (dashed)');
+    });
+
+    it('says in the visible text how many of them the draw bound left out', () => {
+      // 600 healthy edges and 300 whose probe returned nothing: half of the bound goes to each.
+      const summary = flowLegendSummary(model([...edges(600, 0), ...edges(300, null, 600)]));
+      expect(summary.text).toBe(`${MAX_FLOW_ARCS} of 900 edges drawn, worst first`);
+      expect(summary.notes).toEqual([`${MAX_FLOW_ARCS / 2} of 300 edges without a value drawn`]);
+      expect(summary.details.join(' ')).not.toContain('dashed');
+    });
+
+    it('needs no remark when the bound cuts only edges with a value', () => {
+      const summary = flowLegendSummary(model([...edges(600, 0), ...edges(20, null, 600)]));
+      expect(summary.text).toBe(`${MAX_FLOW_ARCS} of 620 edges drawn, worst first`);
+      expect(summary.notes).toEqual([]);
+      expect(summary.details).toContain('20 edges without a value (dashed)');
+    });
+
+    it('says in the visible text that a filter does not draw them', () => {
+      // The filter left three valued edges; the two edges without a value are not among the candidates.
+      const filtered = withConfig(model(edges(3), {}, { edgeCount: 6, noValue: 2 }), { threshold: 0 });
+      expect(flowLegendSummary(filtered).notes).toEqual(['2 edges without a value not drawn']);
+      const one = withConfig(model(edges(3), {}, { edgeCount: 6, noValue: 1 }), { threshold: 0 });
+      expect(flowLegendSummary(one).notes).toEqual(['1 edge without a value not drawn']);
+    });
+  });
+
+  it('says in the visible text that only the worst rows of an oversized result are used', () => {
+    const m = model(edges(MAX_FLOW_ARCS + 1), {}, { totalRows: 25001, readRows: 20000 });
+    expect(flowLegendSummary(m)).toMatchObject({
+      text: `${MAX_FLOW_ARCS} of ${MAX_FLOW_ARCS + 1} edges drawn, worst first`,
+      notes: ['worst 20000 of 25001 rows used'],
+    });
+    expect(flowLegendSummary(model(edges(2))).notes).toEqual([]);
+  });
+
+  it('says how many rows were not read when rows that match no cell used up the row bound', () => {
+    const m = model([], {}, { totalRows: 30000, readRows: 20000, unmatched: 20000, excludedWorst: 59 });
+    expect(flowLegendSummary(m).notes).toEqual([
+      'worst 20000 of 30000 rows used, 10000 rows not read',
+      '20000 rows left out, worst 59%',
+    ]);
+  });
+
+  it('says in its visible text how many rows have no arc, and the worst value among them', () => {
+    // Two rows match no cell, one has no endpoint label; three rows start and end at the same host.
+    const stats = { unmatched: 2, missingLabel: 1, excludedWorst: 4.5, selfEdges: 3, selfWorst: 2 };
+    const m = model(edges(2), {}, stats);
+    expect(flowLegendSummary(m).notes).toEqual([
+      '3 rows left out, worst 4.5%',
+      '3 rows within one host not drawn, worst 2%',
+    ]);
+    // Between cells, and for a single row.
+    const cells = model(edges(2), { groupLevel: false }, { selfEdges: 1, selfWorst: 0 });
+    expect(flowLegendSummary(cells).notes).toEqual(['1 row within one cell not drawn, worst 0%']);
+    // None of the rows has a value: there is no worst value to give, and none is made up.
+    const unknown = model(edges(2), {}, { ambiguous: 1, selfEdges: 2 });
+    expect(flowLegendSummary(unknown).notes).toEqual(['1 row left out', '2 rows within one host not drawn']);
+    expect(flowLegendSummary(model(edges(2))).notes).toEqual([]);
+  });
+
+  it('gives the rows that were read in its tooltip', () => {
+    const m = model(edges(2), {}, { totalRows: 50000, readRows: 20000, selfEdges: 3, unmatched: 2 });
+    expect(flowLegendSummary(m).details).toEqual([
+      'Edge query E: 20000 of 50000 rows used',
+      'Rows are left out when an end has no label or matches no cell or group (see the warning)',
+    ]);
+  });
+
+  it('names the worse end of the color scale', () => {
+    expect(flowWorseEnd(model(edges(2)))).toBe('higher is worse');
+    expect(flowWorseEnd(withConfig(model(edges(2)), { worst: 'low' }))).toBe('lower is worse');
+  });
+});
+
+describe('formatFlowValue', () => {
+  it('formats with the edge query field config, and says when there is no value', () => {
+    expect(formatFlowValue(model([]), 2.5)).toBe('2.5%');
+    expect(formatFlowValue(model([]), null)).toBe('No data');
+    expect(formatFlowValue(model([], { metricInfo: undefined }), 2.5)).toBe('2.5');
+  });
+});
+
+describe('FlowLegend', () => {
+  it('shows the color scale of the edge query and the edge count', () => {
+    render(<FlowLegend model={model(edges(2))} />);
+    const legend = screen.getByTestId('flow-legend');
+    expect(legend).toHaveTextContent('Flows');
+    expect(screen.getByTestId('flow-legend-scale')).toHaveTextContent('loss');
+    expect(screen.getByLabelText('loss flow color scale, Auto, 0% to 5%, higher is worse')).toBeInTheDocument();
+    // In words, because the color scheme is the user's: a scale can have green at its worse end.
+    expect(screen.getByTestId('flow-legend-worse')).toHaveTextContent('higher is worse');
+    expect(screen.getByTestId('flow-legend-gradient')).toBeInTheDocument();
+    expect(screen.getByTestId('flow-legend-count')).toHaveTextContent('2 edges');
+    expect(legend).toHaveAttribute('title', 'Edge query E: 2 of 2 rows used');
+  });
+
+  it('does not reuse the test ids of the cell legend', () => {
+    render(<FlowLegend model={model(edges(2))} />);
+    expect(screen.queryByTestId('range-legend')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('range-gradient')).not.toBeInTheDocument();
+  });
+
+  it('renders nothing while the overlay is off', () => {
+    const { container } = render(<FlowLegend model={null} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('shows no color scale when no edge has a value', () => {
+    render(<FlowLegend model={model(edges(1, null))} />);
+    expect(screen.queryByTestId('flow-legend-scale')).not.toBeInTheDocument();
+    expect(screen.getByTestId('flow-legend-count')).toHaveTextContent('1 edge');
+  });
+
+  it('marks the count when the draw bound binds, and writes its remarks as visible text that can wrap', () => {
+    render(<FlowLegend model={model([...edges(600, 0), ...edges(300, null, 600)])} />);
+    expect(screen.getByTestId('flow-legend-count')).toHaveStyle({ color: theme.colors.warning.text });
+    const note = screen.getByTestId('flow-legend-note');
+    expect(note).toHaveTextContent(`${MAX_FLOW_ARCS / 2} of 300 edges without a value drawn`);
+    expect(note).toHaveStyle({ overflowWrap: 'anywhere' });
+    expect(screen.getByTestId('flow-legend')).toHaveStyle({ flexWrap: 'wrap' });
+  });
+
+  it('writes the rows that have no arc as visible notes, with the worst value among them', () => {
+    render(
+      <FlowLegend model={model(edges(2), {}, { unmatched: 2, excludedWorst: 4.5, selfEdges: 1, selfWorst: 2 })} />
+    );
+    expect(screen.getAllByTestId('flow-legend-note').map((note) => note.textContent)).toEqual([
+      '2 rows left out, worst 4.5%',
+      '1 row within one host not drawn, worst 2%',
+    ]);
+  });
+
+  it('says that the grid is too large for the overlay instead of counting edges that are not drawn', () => {
+    render(<FlowLegend model={model(edges(3))} tooLarge />);
+    expect(screen.getByTestId('flow-legend-error')).toHaveTextContent(
+      '3 edges not drawn: the grid is too large for the overlay'
+    );
+    expect(screen.queryByTestId('flow-legend-count')).not.toBeInTheDocument();
+    // Without edges there is nothing that is not drawn, and the model's own reason comes first.
+    expect(flowLegendError(model([]), true)).toBeNull();
+    expect(flowLegendError(model(edges(3), { error: 'no query "Z"' }), true)).toBe('no query "Z"');
+    expect(flowLegendError(model(edges(3)), false)).toBeNull();
+  });
+
+  it('says why nothing can be drawn in place of the count', () => {
+    render(<FlowLegend model={model([], { error: 'no query "Z"' })} />);
+    expect(screen.getByTestId('flow-legend-error')).toHaveTextContent('no query "Z"');
+    expect(screen.getByTestId('flow-legend-error')).toHaveStyle({ color: theme.colors.warning.text });
+    expect(screen.queryByTestId('flow-legend-count')).not.toBeInTheDocument();
+  });
+});

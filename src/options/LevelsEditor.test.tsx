@@ -129,6 +129,28 @@ describe('LevelsEditor (component)', () => {
     expect(screen.getByText(/groups/)).toHaveTextContent('2 groups: 001, 002');
   });
 
+  it('does not count the rows of the flow overlay edge query as groups of a level', () => {
+    // The edge query has a "host" column of its own: the hosts that an edge names, not the hosts of the grid.
+    const edgeFrame = toDataFrame({
+      refId: 'E',
+      fields: [
+        { name: 'host', type: FieldType.string, values: ['node-a007', 'node-a008', 'node-a009'] },
+        { name: 'src_host', type: FieldType.string, values: ['node-a001', 'node-a001', 'node-a002'] },
+        { name: 'Value', type: FieldType.number, values: [1, 2, 3] },
+      ],
+    });
+    const level = { ...DEFAULT_LEVEL, label: 'host', extract: 'trailingNumber' as const };
+    const withEdges = editorProps([level], jest.fn(), [tableFrame, edgeFrame]);
+    const view = render(
+      <LevelsEditor {...withEdges} context={{ data: withEdges.context.data, options: { flowRefId: 'E' } }} />
+    );
+    expect(screen.getByText(/groups/)).toHaveTextContent('2 groups: 001, 002');
+    view.unmount();
+    // Without an edge query, query E is an ordinary query of cells.
+    render(<LevelsEditor {...withEdges} />);
+    expect(screen.getByText(/groups/)).toHaveTextContent('5 groups: 001, 002, 007');
+  });
+
   it('shows a layout combobox and reveals Columns after choosing Grid', () => {
     render(<StatefulLevelsEditor initial={[{ ...DEFAULT_LEVEL, label: 'host', layout: 'flow' }]} />);
     const selects = screen.getAllByRole('combobox');

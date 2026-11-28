@@ -715,6 +715,138 @@
       },
       "title": "Selected hosts",
       "type": "text"
+    },
+    {
+      "datasource": {
+        "type": "grafana-testdata-datasource",
+        "uid": "trlxrdZVk"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
+          "unit": "watt"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "E"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 0.1
+                    },
+                    {
+                      "color": "red",
+                      "value": 1
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 43
+      },
+      "id": 9,
+      "options": {
+        "levels": [
+          {
+            "label": "zone",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "grid",
+            "gridColumns": 2,
+            "showBorder": true,
+            "showLabel": true
+          },
+          {
+            "label": "host",
+            "extract": "trailingNumber",
+            "sort": "natural",
+            "layout": "grid",
+            "gridColumns": 4,
+            "showBorder": true,
+            "showLabel": true
+          },
+          {
+            "label": "gpu",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "grid",
+            "gridColumns": 2,
+            "showBorder": false,
+            "showLabel": true
+          }
+        ],
+        "displayMode": "single",
+        "defaultMetric": "",
+        "showValues": true,
+        "missingColor": "rgb(70,70,70)",
+        "spatialAggregation": "max",
+        "reduceCalc": "lastNotNull",
+        "flowRefId": "E",
+        "flowEndpoints": [
+          {
+            "level": "host",
+            "source": "src_host",
+            "destination": "dst_host"
+          }
+        ],
+        "flowShow": "always",
+        "flowWorst": "high",
+        "flowOrderLabel": "hop",
+        "flowPathLabel": "job"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "trlxrdZVk"
+          },
+          "refId": "A",
+          "scenarioId": "csv_content",
+          "csvContent": "zone,host,gpu,power\nzone-a,node-a1,gpu0,316\nzone-a,node-a1,gpu1,133\nzone-a,node-a2,gpu0,338\nzone-a,node-a2,gpu1,271\nzone-a,node-a3,gpu0,340\nzone-a,node-a3,gpu1,221\nzone-a,node-a4,gpu0,262\nzone-a,node-a4,gpu1,187\nzone-a,node-a5,gpu0,196\nzone-a,node-a5,gpu1,217\nzone-a,node-a6,gpu0,250\nzone-a,node-a6,gpu1,327\nzone-a,node-a7,gpu0,380\nzone-a,node-a7,gpu1,165\nzone-a,node-a8,gpu0,246\nzone-a,node-a8,gpu1,227\nzone-b,node-b1,gpu0,100\nzone-b,node-b1,gpu1,205\nzone-b,node-b2,gpu0,206\nzone-b,node-b2,gpu1,327\nzone-b,node-b3,gpu0,312\nzone-b,node-b3,gpu1,281\nzone-b,node-b4,gpu0,354\nzone-b,node-b4,gpu1,267\nzone-b,node-b5,gpu0,360\nzone-b,node-b5,gpu1,153\nzone-b,node-b6,gpu0,306\nzone-b,node-b6,gpu1,167\nzone-b,node-b7,gpu0,320\nzone-b,node-b7,gpu1,289\nzone-b,node-b8,gpu0,126\nzone-b,node-b8,gpu1,219"
+        },
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "trlxrdZVk"
+          },
+          "refId": "E",
+          "scenarioId": "csv_content",
+          "csvContent": "src_host,dst_host,job,hop,loss\nnode-a1,node-a2,ring-a,1,0\nnode-a2,node-a3,ring-a,2,0\nnode-a3,node-b2,ring-a,3,0.4\nnode-b2,node-b3,ring-a,4,0\nnode-b3,node-b1,ring-a,5,2.5\nnode-b1,node-a1,ring-a,6,0\nnode-a6,node-b6,,,0\nnode-a6,node-b6,,,0.2\nnode-b6,node-a6,,,1.2\nnode-a7,node-a8,,,0.05\nnode-a5,node-b8,,,\nnode-a4,node-x9,,,0.3\nnode-a8,node-a8,,,0"
+        }
+      ],
+      "title": "Flow Overlay",
+      "type": "yuuk1-fleetgrid-panel"
     }
   ],
   "preload": false,

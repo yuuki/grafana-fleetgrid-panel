@@ -10,7 +10,7 @@ import {
   RadioButtonGroup,
 } from '@grafana/ui';
 import { RangeMatcher, RangeMatcherOperator, RangeOverride } from '../types';
-import { collectRangeOverrideSuggestions } from './suggestions';
+import { cellFrames, collectRangeOverrideSuggestions } from './suggestions';
 
 export { collectRangeOverrideSuggestions } from './suggestions';
 
@@ -140,7 +140,12 @@ function inputValue(value: unknown): string | number {
 export const RangeOverridesEditor: React.FC<StandardEditorProps<RangeOverride[]>> = ({ value, onChange, context }) => {
   const rawRules: unknown[] = Array.isArray(value) ? value : [];
   const rules = rawRules.map(normalizeRule);
-  const suggestions = React.useMemo(() => collectRangeOverrideSuggestions(context.data ?? []), [context.data]);
+  // A range override applies to cell metrics: the flow overlay's edge query is not one.
+  const edgeRefId = context.options?.flowRefId;
+  const suggestions = React.useMemo(
+    () => collectRangeOverrideSuggestions(cellFrames(context.data, { flowRefId: edgeRefId })),
+    [context.data, edgeRefId]
+  );
   const labels = Object.keys(suggestions.valuesByLabel);
   const instanceId = React.useId().replace(/[^a-zA-Z0-9_-]/g, '-');
   const refIdsListId = `range-override-refids-${instanceId}`;

@@ -18,7 +18,7 @@ This repository contains a **Grafana plugin**. You must Read @./.config/AGENTS/i
 
 ## Before opening a pull request
 - `npm ci`, then `make check`; also `make test-integration` (with `npm run server`) for rendering, interactions, option editors, `provisioning/`, `tests/`.
-- `src/data/`, `src/layout/`, `src/render/hitTest.ts`, `src/selection/`: also `make test-fuzz`; `@grafana/*` usage or versions: `npm run compat`; dependencies: `make vuln`.
+- `src/data/`, `src/layout/`, `src/render/hitTest.ts`, `src/render/flowGeometry.ts`, `src/selection/`: also `make test-fuzz`; `@grafana/*` usage or versions: `npm run compat`; dependencies: `make vuln`.
 
 ## Git conventions
 - Branches: `<type>/<issue>-<summary>` (`<type>/<summary>` without an issue); tools' `agent/*`, `claude/*`, `copilot/*`, `dependabot/*` keep their names.

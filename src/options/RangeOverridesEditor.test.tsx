@@ -207,6 +207,29 @@ describe('RangeOverridesEditor', () => {
     ]);
   });
 
+  it('offers neither the refId nor the labels of the flow overlay edge query', () => {
+    const edgeFrame = toDataFrame({
+      refId: 'E',
+      fields: [
+        { name: 'src_host', type: FieldType.string, values: ['node-a1'] },
+        { name: 'dst_host', type: FieldType.string, values: ['node-a2'] },
+        { name: 'loss', type: FieldType.number, values: [1] },
+      ],
+    });
+    const withEdges = editorProps([first], jest.fn(), [timeSeries, table, edgeFrame]);
+    const view = render(
+      <RangeOverridesEditor {...withEdges} context={{ data: withEdges.context.data, options: { flowRefId: 'E' } }} />
+    );
+    // A range override applies to cell metrics, and the edge query is not one.
+    expect(screen.getByText('Available refIds: A, B')).toBeInTheDocument();
+    expect(screen.getByText('Available labels: bw_type, pod, zone')).toBeInTheDocument();
+    view.unmount();
+    // Without an edge query, query E is an ordinary metric.
+    render(<RangeOverridesEditor {...withEdges} />);
+    expect(screen.getByText('Available refIds: A, B, E')).toBeInTheDocument();
+    expect(screen.getByText('Available labels: bw_type, dst_host, pod, src_host, zone')).toBeInTheDocument();
+  });
+
   it('shows refId, label, and value suggestions while allowing custom values and all metrics', () => {
     render(<StatefulEditor initial={[first]} frames={[timeSeries, table]} />);
     expect(screen.getByPlaceholderText('All metrics')).toBeInTheDocument();

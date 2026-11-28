@@ -1,11 +1,15 @@
 import React from 'react';
 import { StandardEditorProps } from '@grafana/data';
 import { Button, IconButton, InlineField, InlineFieldRow, Input } from '@grafana/ui';
-import { collectRangeOverrideSuggestions } from './suggestions';
+import { cellFrames, collectRangeOverrideSuggestions } from './suggestions';
 
 export const TooltipLabelsEditor: React.FC<StandardEditorProps<string[]>> = ({ value, onChange, context }) => {
   const labels = Array.isArray(value) ? value : [];
-  const suggestions = React.useMemo(() => collectRangeOverrideSuggestions(context.data ?? []), [context.data]);
+  const edgeRefId = context.options?.flowRefId;
+  const suggestions = React.useMemo(
+    () => collectRangeOverrideSuggestions(cellFrames(context.data, { flowRefId: edgeRefId })),
+    [context.data, edgeRefId]
+  );
   const availableLabels = Object.keys(suggestions.valuesByLabel);
   const instanceId = React.useId().replace(/[^a-zA-Z0-9_-]/g, '-');
   const listId = `tooltip-labels-${instanceId}`;

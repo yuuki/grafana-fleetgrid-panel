@@ -1,0 +1,131 @@
+import React from 'react';
+import { StandardEditorProps } from '@grafana/data';
+import { Button, FieldValidationMessage, IconButton, InlineField, InlineFieldRow, Input } from '@grafana/ui';
+import { frameHasRefId, flowRefId } from '../data/edges';
+import { FleetGridOptions, FlowEndpointMapping } from '../types';
+import { collectLabelNames } from './suggestions';
+
+const EMPTY_MAPPING: FlowEndpointMapping = { level: '', source: '', destination: '' };
+// In Grafana's 8 px grid units. A label and an input fit the options pane on one row.
+const LABEL_WIDTH = 15;
+const INPUT_WIDTH = 14;
+
+function normalizeMapping(value: unknown): FlowEndpointMapping {
+  const record = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
+  const text = (v: unknown) => (typeof v === 'string' ? v : '');
+  return { level: text(record.level), source: text(record.source), destination: text(record.destination) };
+}
+
+/** Why a mapping cannot be used, in the order the fields appear; empty when it is valid. */
+export function validateFlowEndpoint(mapping: FlowEndpointMapping, hierarchyLabels: string[]): string[] {
+  const errors: string[] = [];
+  if (!mapping.level.trim()) {
+    errors.push('Hierarchy label is required.');
+  } else if (!hierarchyLabels.includes(mapping.level)) {
+    errors.push(`"${mapping.level}" is not a hierarchy label.`);
+  }
+  if (!mapping.source.trim()) {
+    errors.push('Source label is required.');
+  }
+  if (!mapping.destination.trim()) {
+    errors.push('Destination label is required.');
+  }
+  if (mapping.source.trim() && mapping.source === mapping.destination) {
+    errors.push('Source and destination must be different labels.');
+  }
+  return errors;
+}
+
+type Props = StandardEditorProps<FlowEndpointMapping[], unknown, FleetGridOptions>;
+
+export const FlowEndpointsEditor: React.FC<Props> = ({ value, onChange, context }) => {
+  const mappings = Array.isArray(value) ? value.map(normalizeMapping) : [];
+  const hierarchyLabels = [...new Set((context.options?.levels ?? []).map((level) => level.label))].filter(Boolean);
+  const refId = flowRefId(context.options ?? {});
+  // Only the edge query's own labels are useful suggestions for the source and destination labels. Their
+  // names are read from the fields: an edge query can return very many rows, and no value is needed.
+  const edgeLabels = React.useMemo(
+    () => collectLabelNames((context.data ?? []).filter((frame) => frameHasRefId(frame, refId))),
+    [context.data, refId]
+  );
+  const instanceId = React.useId().replace(/[^a-zA-Z0-9_-]/g, '-');
+  const levelListId = `flow-levels-${instanceId}`;
+  const labelListId = `flow-labels-${instanceId}`;
+
+  const update = (index: number, patch: Partial<FlowEndpointMapping>) => {
+    onChange(mappings.map((mapping, i) => (i === index ? { ...mapping, ...patch } : mapping)));
+  };
+
+  return (
+    <div>
+      <datalist id={levelListId}>
+        {hierarchyLabels.map((label) => (
+          <option value={label} key={label} />
+        ))}
+      </datalist>
+      <datalist id={labelListId}>
+        {edgeLabels.map((label) => (
+          <option value={label} key={label} />
+        ))}
+      </datalist>
+      <div style={{ marginBottom: 12, opacity: 0.8 }}>
+        Labels of query {refId || '(not set)'}: {edgeLabels.join(', ') || 'None'}
+      </div>
+      {mappings.map((mapping, index) => (
+        <div key={index} data-testid={`flow-endpoint-${index}`} style={{ marginBottom: 8 }}>
+          {/* The remove button has a row of its own: the options pane is too narrow in some Grafana versions
+              to hold it beside a label and an input. */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+            <span style={{ opacity: 0.8 }}>{`Mapping ${index + 1}`}</span>
+            <IconButton
+              name="trash-alt"
+              data-testid={`remove-flow-endpoint-${index}`}
+              aria-label={`Remove endpoint mapping ${index + 1}`}
+              tooltip="Remove mapping"
+              onClick={() => onChange(mappings.filter((_, i) => i !== index))}
+            />
+          </div>
+          <InlineFieldRow>
+            <InlineField label="Hierarchy label" labelWidth={LABEL_WIDTH}>
+              <Input
+                aria-label={`Hierarchy label ${index + 1}`}
+                list={levelListId}
+                value={mapping.level}
+                onChange={(event) => update(index, { level: event.currentTarget.value })}
+                width={INPUT_WIDTH}
+              />
+            </InlineField>
+          </InlineFieldRow>
+          <InlineFieldRow>
+            <InlineField label="Source label" labelWidth={LABEL_WIDTH}>
+              <Input
+                aria-label={`Source label ${index + 1}`}
+                list={labelListId}
+                value={mapping.source}
+                onChange={(event) => update(index, { source: event.currentTarget.value })}
+                width={INPUT_WIDTH}
+              />
+            </InlineField>
+          </InlineFieldRow>
+          <InlineFieldRow>
+            <InlineField label="Destination label" labelWidth={LABEL_WIDTH}>
+              <Input
+                aria-label={`Destination label ${index + 1}`}
+                list={labelListId}
+                value={mapping.destination}
+                onChange={(event) => update(index, { destination: event.currentTarget.value })}
+                width={INPUT_WIDTH}
+              />
+            </InlineField>
+          </InlineFieldRow>
+          {validateFlowEndpoint(mapping, hierarchyLabels).map((error) => (
+            <FieldValidationMessage key={error}>{error}</FieldValidationMessage>
+          ))}
+        </div>
+      ))}
+      <Button icon="plus" variant="secondary" onClick={() => onChange([...mappings, { ...EMPTY_MAPPING }])}>
+        Add endpoint mapping
+      </Button>
+    </div>
+  );
+};

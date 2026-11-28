@@ -1,5 +1,7 @@
 import { DataFrame, Field, FieldType } from '@grafana/data';
+import { flowRefId, frameHasRefId } from '../data/edges';
 import { isTableFrame } from '../data/normalize';
+import { FleetGridOptions } from '../types';
 
 export interface RangeOverrideSuggestions {
   refIds: string[];
@@ -60,4 +62,39 @@ export function collectRangeOverrideSuggestions(frames: DataFrame[]): RangeOverr
 
   const result = sortedValuesByLabel(valuesByLabel);
   return { refIds: sorted(refIds), valuesByLabel: result };
+}
+
+/**
+ * The frames that the cells are built from: all frames but those of the flow overlay's edge query. The
+ * edge query's labels (the names of the two ends, hop numbers) are not labels of a cell, and its refId
+ * is not a cell metric, so the editors of the cell options do not offer them. The frames are returned
+ * as they are while no edge query is named.
+ */
+export function cellFrames(
+  frames: DataFrame[] | undefined,
+  options: Pick<FleetGridOptions, 'flowRefId'> | undefined
+): DataFrame[] {
+  const all = frames ?? [];
+  const refId = flowRefId(options ?? {});
+  return refId === '' ? all : all.filter((frame) => !frameHasRefId(frame, refId));
+}
+
+/**
+ * The names that can be used as a label of the frames: the labels of series, and the string columns of
+ * tables. Reads the fields only, never a value, so it is cheap for a result of any number of rows.
+ */
+export function collectLabelNames(frames: DataFrame[]): string[] {
+  const names = new Set<string>();
+  for (const frame of frames) {
+    const table = isTableFrame(frame);
+    for (const field of frame.fields) {
+      if (field.type === FieldType.number && field.labels) {
+        Object.keys(field.labels).forEach((name) => names.add(name));
+      }
+      if (table && field.type === FieldType.string) {
+        names.add(field.name);
+      }
+    }
+  }
+  return sorted(names);
 }

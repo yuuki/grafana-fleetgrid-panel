@@ -24,6 +24,7 @@ The example shows two zones and 200 nodes (100 per zone), with four GPU cells pe
 - **Natural sort** — Numeric segments inside labels are compared as numbers (`node-a2 < node-a10`), ascending by default (descending and "data order" are also selectable).
 - **Multiple metrics** — Show one metric at a time with an in-panel selector (default), or opt in to split each cell into sub-regions to compare its metrics side by side. The tooltip and popover list every metric that returned data.
 - **Cell selection and cohort comparison** — Shift+click cells or group labels, or Shift+drag a rectangle, to select any set of cells. Compare the selected cells with the rest of the grid for every query, copy their hosts as a regular expression, a list or a hostlist (`node-a[001-012]`), and optionally keep a multi-value or text box dashboard variable equal to them so that other panels filter by them.
+- **Flow overlay** — Optionally draw the rows of one more query as arcs between cells or groups: pairwise metrics such as packet loss or round-trip time between hosts, or the ordered hops of a job's ring. Arcs take their color from Grafana's thresholds, can be limited to the degraded pairs, and are emphasised for the hovered cell.
 - **Drilldown** — Click a cell to open a popover with the current value per metric, plus a sparkline whenever time-series data is available for that metric. If the field has Data Links, navigation takes priority over the popover.
 
 ## Compatibility
@@ -195,6 +196,21 @@ If a hierarchy extraction regex collapses several source label sets into one cel
 
 Selecting cells needs no option: see [Cell selection](#cell-selection).
 
+### Flow overlay
+
+All options are in the **Flow overlay** category. The overlay is off while **Edge query (refId)** is empty, and the other options are hidden until it is set. See [Edges between cells](#edges-between-cells-flow-overlay) for what the options mean.
+
+| Option                     | Default  | Description                                                                                                                                     |
+| -------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Edge query (refId)         | empty    | The query whose rows are edges. It is drawn as arcs and is no longer a cell metric. Empty turns the overlay off                                 |
+| Endpoint labels            | none     | One or more mappings from a hierarchy label to the edge query's source label and destination label, for example `host` ← `src_host`, `dst_host` |
+| Show arcs                  | `Always` | `Always` draws the arcs all the time; `On hover` draws only the arcs of the cell under the pointer                                              |
+| Arcs at rest               | `100`    | The most arcs drawn while no cell is hovered: the worst ones. 1 to 500. A hovered cell always shows its own edges                               |
+| Worse values are           | `Higher` | `Higher` for loss, latency and errors; `Lower` for throughput and success ratios. Sets the filter direction and which edges win the draw limit  |
+| Only draw edges worse than | empty    | A number in the edge query's unit. Only edges strictly worse than it are drawn. Empty draws every edge                                          |
+| Hop number label           | empty    | Label of the edge query with the position of an edge in an ordered path                                                                         |
+| Path label                 | empty    | Label of the edge query that names the path an edge belongs to, for example a job ID                                                            |
+
 ## Multiple metrics
 
 The cell model holds each query's value for a cell (marked missing where a query returned no series); only the drawing mode changes.
@@ -232,6 +248,8 @@ Everything without Shift works as before: a plain click still opens the drilldow
 
 Selected cells get a ring in the theme's strongest contrast color. A bar appears under the grid with the size of the selection, **Compare**, three copy buttons and **Clear**. The grid keeps its layout when the bar appears: no cell moves, and the grid scrolls if the bar covers its last rows.
 
+On a panel that draws a flow overlay, a selection leaves the arcs as they are; see [With cell selection](#with-cell-selection).
+
 To clear the selection, use **Clear**, or press Escape while the keyboard focus is in the panel. After a selection gesture the focus is on the bar, so Escape works at once. While a drilldown popover or a link menu is open, Escape leaves the selection as it is. Changing the hierarchy levels also clears the selection.
 
 The selection belongs to the viewer and is not saved in the dashboard; like the selected metric, it ends when Grafana re-creates the panel, for example when the panel view opens. It names cells by their hierarchy path, not by their position, so it stays on the same cells when the data refreshes, the panel is resized or the metric is switched.
@@ -242,7 +260,7 @@ Limits: cells cannot be selected with the keyboard or by touch (the grid is a ca
 
 ### Cohort comparison
 
-**Compare** opens a drawer that compares the selected cells with all other cells of the grid, for every query. Each cell counts with the value the grid shows for that query.
+**Compare** opens a drawer that compares the selected cells with all other cells of the grid, for every query that gives the cells a value (the edge query of a [flow overlay](#edges-between-cells-flow-overlay) is not one). Each cell counts with the value the grid shows for that query.
 
 | Column     | Meaning                                                                                                                                                                                                                                 |
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -315,6 +333,93 @@ How the sync behaves:
 - **How a value reaches a query** is decided by Grafana and by the data source of the panel that uses the variable. With Grafana's Prometheus data source, a multi-value variable is exact for every value except one that contains a double quote or a line break, for which the query of the other panel fails with an error.
 - **Panel view and editor.** When Grafana re-creates the panel on the same dashboard (for example when the panel view or the panel editor opens), the selection ends, and the variable gets its previous value back as with **Clear**.
 - **No restore from the variable.** After a page reload, or after leaving the dashboard and coming back with the browser's Back button, the variable still has its value from the URL and the panel has no selection; reset the variable with its own picker.
+
+## Edges between cells (flow overlay)
+
+Cells show the state of one endpoint. Many faults in an AI / HPC cluster are between two endpoints: a lossy link between two hosts, pause frames that spread from one rack to another, or one slow hop in a job's ring. The flow overlay draws such pairwise data as arcs on top of the grid.
+
+![Flow overlay: arcs between host groups, with a numbered ring of six hops](./src/img/fleetgrid-flow-overlay.png)
+
+The example shows two zones of eight hosts with two GPUs each. The edge query names hosts, so the arcs run between host groups: each group that has an edge is outlined, and its arcs meet in a dot at its centre. The numbered arcs are the six hops of one ring. The two arcs between the hosts numbered 6 are the two directions of one pair, and the dashed arc is an edge without a value. The header says which end of the color scale is the worse one and how many rows have no arc; the banner gives an example of an edge row whose destination is not in the grid.
+
+### The edge query
+
+Add one more query that returns **one row (or series) per directed pair**, and enter its refId under **Edge query (refId)**. The row needs a label for the source, a label for the destination and a numeric value:
+
+```promql
+# Query E — packet loss between hosts, one series per (src_host, dst_host)
+max by (src_host, dst_host) (fabric_probe_loss_ratio)
+```
+
+- The overlay is bound to a query by its refId, never by label names. A dashboard whose queries happen to carry labels such as `src_host` does not change until an edge query is named. Spaces around the refId and around the label names of the options are ignored.
+- The edge query is taken out of the cell pipeline. It does not create cells, is not offered in the metric selector, is not part of the drilldown re-query, and has no row in the cohort comparison of a cell selection. Its labels and its refId are not offered by the editors of the cell options either (hierarchy levels, tooltip labels, category label, range overrides).
+- An edge query that returns **no rows** draws nothing and raises no warning; the header says `no edges`. This is the healthy state of a query that filters in the data source (`> 0`). When **no query with that refId ran** (it does not exist, or it is hidden), the banner and the header say so.
+- Time-series frames and table frames are both read, as for cells. A range query is reduced with the panel's **Reduce calculation**. In a table, the first numeric column that is not one of the configured labels is the value.
+- Unit, decimals, color scheme and **Thresholds** of the arcs come from Grafana's standard field config. Use **Overrides → Fields returned by query** for the edge query to give it its own unit and thresholds.
+- Without Min/Max in the field config, the color range of the arcs is automatic, by three rules: it spans every edge that has a value, **before the filter**; it includes the filter's number; and when higher is worse it starts at 0 or below. So a filter does not change the color of an edge, and a query that returns only its degraded pairs does not paint the least degraded one in the color of the healthy end. A Min or a Max that you set, in the standard options or in an override for the edge query, always wins, each end on its own. An automatic range is still relative to the data: for colors with a fixed meaning, set **Thresholds** or Min/Max for the edge query.
+- **Worse values are** does not change colors, because the color scheme is yours to choose. For a metric where lower is worse, choose a color scheme or thresholds whose low end is the alarm color (for example `Red-Yellow-Green`); with `Green-Yellow-Red` a low value is green. The header's scale therefore says in words which end is the bad one: `higher is worse` or `lower is worse`.
+- Frames are selected by their refId, so a transformation that merges the queries into one frame also removes the edge query.
+
+### Matching endpoints to the grid
+
+**Endpoint labels** says which hierarchy label an endpoint label refers to. The value of the endpoint label is compared with the **raw** value of that hierarchy label in the cell queries, before the level's extraction. So `src_host="node-a001"` matches the cells with `host="node-a001"` even when the host level shows only the trailing number.
+
+- An endpoint resolves at the **deepest mapped hierarchy level**. With `zone` → `host` → `gpu` and a mapping for `host` only, an edge runs between two host groups. Each of the two groups is outlined, and the arc ends at the centre of the group under a small dot in the color of the outline (the group's hub), so it is not mistaken for an edge of the cell in the middle of the group. Add a second mapping (`gpu` ← `src_gpu`, `dst_gpu`) to run the edges between GPU cells.
+- Map every label that is needed to name one cell or group. `gpu0` alone exists under every host, so mapping only `gpu` matches more than one cell and the row is left out.
+- Every mapping must be complete and must name a hierarchy label. Otherwise nothing is drawn and the banner says why, because a skipped mapping would move the edges to another level.
+- The two directions of a pair are two edges and two arcs. An arc bulges to the left of its direction of travel and carries an arrowhead at its middle. Where the grid is narrower than the panel, an arc can bulge into a margin beside the grid (up to 160 px, and never more than the grid's own width). An arc never leaves that area: where it has no room on its own side, it bulges to the other side or bulges less, down to a straight line in a very narrow grid.
+- Rows of the same ordered pair are one edge, for example the RNIC pairs of one host pair. Its value is the **worst** of them: the highest when **Worse values are** is `Higher`, the lowest when it is `Lower`. So one degraded row is never hidden by healthy ones. The cells' **Spatial aggregation** is not used for edges; to add rows up (byte rates, for example), aggregate in the query with `sum by (src_host, dst_host)`.
+- An edge whose rows have no finite value is kept and drawn **dashed in a neutral color**. It is never treated as 0. A missing value can mean that the path is the most broken one, so these edges are not the first to go when more edges remain than can be drawn: they get the room that the edges with a value leave free, and at least half of the limit. With a filter they are not drawn, because they cannot be compared. In both cases the header says how many are not drawn.
+
+Rows that cannot be drawn are counted and reported; they are never dropped silently. The warning banner gives the number of rows without an endpoint label, with an endpoint that matches no cell or group (with up to three examples), and with an endpoint that matches more than one. A row whose two ends resolve to the same cell or group (a self-edge) has no arc. The header gives both numbers in its visible text, each with the worst value among those rows, for example `3 rows left out, worst 4.5%` and `2 rows within one host not drawn, worst 1%`. A degraded row that has no arc is therefore still reported, also in a panel that is too narrow for the banner.
+
+### Filter, limits and legend
+
+- **Only draw edges worse than** keeps the edges strictly worse than a number: above it when **Worse values are** is `Higher` (for example loss > 0, or RTT above the objective), below it when `Lower` (for example throughput below the objective).
+- **Arcs at rest** is the most arcs drawn while no cell is hovered: **100** by default, 500 at most. When more edges remain, the worst ones are drawn (ties are broken by the endpoints, so the choice does not depend on the order of the query result), and the header says so in the warning color. The number is low on purpose. A few hundred arcs cover the cells and each other, and the one bad edge is then no easier to find than without the overlay. Do not raise the number to see more: filter instead, with **Only draw edges worse than** or in the query, so that the arcs at rest are the degraded paths only. To read all edges of one host, hover it, or use **Show arcs: On hover**.
+- At most **500 arcs** are drawn for a hovered cell.
+- The arcs are drawn on two canvases of at most twice the size of the cell canvas. A grid so large that the browser cannot paint such a canvas (in Chromium: more than 65,535 device pixels high, for example about 32,000 px of grid at display scaling 2) gets no arcs, and the header says `… edges not drawn: the grid is too large for the overlay`.
+- At most **20,000 rows** of the edge query are turned into edges. Of a larger result the panel reads the value of every row and uses the **worst 20,000 rows**, wherever they are in the result, so the worst edge is not lost. The rows it leaves out are the least bad ones. Reading the values of a very large result still costs time (about 0.25 s for a million rows), and pairwise data grows with the square of the fleet: narrow a large edge query in the data source, for example with `topk` or a `> 0` comparison. The limit is applied **before** the endpoints are matched to the grid. If the edge query also returns pairs of hosts that are not in this panel, those rows count towards the 20,000, and an edge inside the grid can be among the rows that are not read. The header then says how many rows were not read, and the banner asks to restrict the query to the hosts of this panel (for example with the same label matchers as the cell queries).
+- The header shows the edge query's color scale and how many edges are drawn, for example `12 of 240 edges > 0%` or `100 of 4032 edges drawn, worst first`. It also says, in text that wraps in a narrow panel, when the picture is incomplete: `worst 20000 of 25001 rows used`, how many edges without a value are not drawn, and how many rows have no arc. When nothing can be drawn, it gives the reason in a few words, for example `no query "E"` or `endpoint mapping incomplete`.
+- The warning banner is one line and cuts long warnings; hover a warning to read it in full. Everything that says the picture is incomplete is also in the header, which wraps.
+
+### Hover
+
+Hovering a cell emphasises the edges of that cell, or of its group when the edges run between groups, outlines the cells or groups at their other ends, and dims the remaining arcs. The cell tooltip adds the number of outgoing and incoming edges, the number of peers and the worst peer with its value. A hovered cell can show edges that **Arcs at rest** left out of the resting picture; the filter always applies.
+
+While the drilldown popover of a cell is open, its edges stay emphasised when the pointer leaves the grid, is on the popover, or is on a cell that has no edges. Hovering a cell that has edges shows that cell's edges instead. The tooltip always describes the hovered cell.
+
+With **Show arcs: On hover** nothing is drawn until a cell is hovered. Use it with an unfiltered edge query to see all peers of one host at a time.
+
+### With cell selection
+
+[Cell selection](#cell-selection) works on a panel with a flow overlay, and the two do not change each other:
+
+- While Shift and the button are held, the pointer selects and does not hover. The tooltip and the emphasis of the hovered cell's edges end when the button goes down, and a drag over other cells emphasises nothing. The next pointer move after the release hovers again.
+- An open drilldown popover keeps the edges of its cell emphasised for as long as it is open, also during a Shift press. Selecting does not close the popover in Grafana 12.4, so close it first when the arcs are to be at rest while you select. (In Grafana 11.6 any press outside the popover closes it, and the emphasis ends with it.)
+- A selection does not emphasise the edges of the selected cells, and it does not hide or dim any arc. Hover a selected cell to see its edges, as for any other cell.
+- The ring of a selected cell is drawn with the cell, so arcs run over it as they run over the cell's color. The rectangle of a Shift+drag is drawn over the arcs.
+- The cohort comparison lists the cell queries only. The edge query has no value per cell, so it has no row there, and the copy buttons and the variable sync use the labels of the cells, never the source and destination labels of the edge query.
+
+### Ordered paths
+
+To show a communication path such as a ring, give each edge row its position on the path:
+
+| `src_host` | `dst_host` | `job`    | `hop` | value |
+| ---------- | ---------- | -------- | ----- | ----- |
+| `node-a1`  | `node-a2`  | `ring-a` | `1`   | 0     |
+| `node-a2`  | `node-b1`  | `ring-a` | `2`   | 0.4   |
+| `node-b1`  | `node-a1`  | `ring-a` | `3`   | 0     |
+
+Set **Hop number label** (`hop`) and, when several paths are shown together, **Path label** (`job`).
+
+- Every hop is a row with its own source and destination, so the panel does not infer hops from a list of members. A ring is a path whose last hop returns to the first source; an open path simply ends. A tree is a set of hops that share sources: number its hops by depth, or leave the hop number out and set only the path label.
+- The hop number is written beside the arrowhead. Where numbers would overlap, the lowest ones are kept. An arc that carries several hops (the same pair on two paths, or twice on one path) shows the first of them, by path name and then by number, followed by `+`.
+- Hovering a cell on a path emphasises the **whole path**, not only the hops at that cell. The tooltip lists the hops that enter and leave the cell.
+- Hop numbers must be whole numbers from 0. A row with another value keeps its arc, loses its number and is counted in a warning. Gaps in the numbers are shown as they are: a missing number means that hop is absent from the query result, has an endpoint outside the grid, or is hidden by the filter.
+- The same pair on two paths is one arc with one value, the worst of its rows.
+
+The overlay has no animation. The direction of a flow is shown by the arrowhead, so a dashboard with many panels does not run a render loop.
 
 ## Layout notes
 

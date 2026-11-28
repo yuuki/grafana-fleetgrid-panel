@@ -33,6 +33,8 @@ DataFrame[]                         (Grafana query result)
 
 Interactive elements — hover tooltip, drilldown popover, metric selector, split legend, link menu, selection band — are React DOM overlays positioned in the scroll container's content coordinate space. The selection bar is a DOM row under the grid.
 
+The optional flow overlay (§15) is a second, separate pipeline: one query is taken out of the pipeline above and drawn as arcs on canvases of its own, stacked on the cell canvas. The cell pipeline does not know about it.
+
 **Decision: single canvas + DOM overlay, not per-cell DOM.**
 *Alternatives:* one DOM node per cell (the HPE approach), SVG, canvas.
 *Rationale:* target scale is roughly 2,400–15,000 cells. Per-cell DOM nodes at that scale dominate layout/paint cost and GC pressure; SVG has the same node-count problem. A single canvas draws the entire grid in one pass, while the handful of genuinely interactive elements stay in DOM where accessibility and event handling are natural. The panel deliberately avoids claiming benchmark numbers; the design goal is to remove per-cell DOM overhead, not to promise a frame rate.
@@ -180,21 +182,21 @@ Reading the labels from the current data (d) was the first implementation, and i
 Changing the hierarchy levels clears the selection: the paths then name other cells. Like the metric and category selections, it is viewer-local and never saved.
 
 **Decision: the rubber band is one DOM element moved by writing to its style; the selection changes at pointer-up; selected cells get a ring on the same canvas.**
-*Rationale:* a pointer move must not render, lay out or repaint. The band is rendered once, hidden, and `useCellSelection` keeps the gesture in a ref, so a move costs one region query and four style writes. The selection is React state and changes once per gesture, which repaints the canvas once, as a legend-chip highlight does. The ring reuses the band geometry of the category highlight ring (device-pixel aligned, capped so the fill survives) in the theme's maximum-contrast colour, drawn inside `drawCell` so group labels and the pinned label stay on top. It is 1 px without a separator on cells below 14 px: selected cells are selected to be compared, so their fill must stay readable. A second canvas for the selection was rejected: it doubles the backing store, and it breaks the single-canvas assumption that the E2E tests and the pinned-label drawing order rely on. A cell that is both selected and category-highlighted shows the selection ring; the highlight still reads from the dimming of the other cells.
+*Rationale:* a pointer move must not render, lay out or repaint. The band is rendered once, hidden, and `useCellSelection` keeps the gesture in a ref, so a move costs one region query and four style writes. The selection is React state and changes once per gesture, which repaints the canvas once, as a legend-chip highlight does. The ring reuses the band geometry of the category highlight ring (device-pixel aligned, capped so the fill survives) in the theme's maximum-contrast colour, drawn inside `drawCell` so group labels and the pinned label stay on top. It is 1 px without a separator on cells below 14 px: selected cells are selected to be compared, so their fill must stay readable. A second canvas for the selection was rejected: it doubles the backing store, and it breaks the single-canvas assumption that the E2E tests and the pinned-label drawing order rely on. The two layers of the flow overlay (§15) do not change this: they exist only while an edge query is named, and the cells, their rings and the labels are still one canvas, which lies under the arcs. A cell that is both selected and category-highlighted shows the selection ring; the highlight still reads from the dimming of the other cells.
 
 **Decision: the region hit test reads a bucket grid; the point hit test stays a linear scan.**
 *Rationale:* the band shows the number of cells it covers, so `cellsInRect` runs on every pointer move of a drag and returns up to every cell. It buckets the cells once per layout (cached in a `WeakMap`) by their top-left corner and reads only the buckets a matching cell can start in, so its cost follows the rectangle, not the grid. A bucket is one cell wide and high, and the grid never has more than four buckets per cell (64 for a tiny layout): a sparse or very large layout gets larger buckets instead of more of them, and a layout whose extent is not a finite number falls back to the scan. The property tests compare it with the scan on arbitrary cells and on computed layouts. The earlier decision not to index the point hit test stands: one hover is one scan.
 
 **Decision: the selection bar is a row under the grid, and the layout does not know about it.**
 *Alternatives:* (a) in the header, (b) a floating toolbar over the grid.
-*Rationale:* in the header the bar wraps onto a second line unless the panel is wide, the grid re-fits to the smaller body, and every cell moves the moment the first one is selected, so the next Shift+click lands on another cell (seen in Grafana during development). A floating toolbar hides cells that the user may want to select. The row takes its height from the scroll container only: `computeLayout` still gets the height without the bar, so no cell moves, and the container scrolls when the bar covers its last rows. With Auto Grid fit-content the panel grows by the bar instead.
+*Rationale:* in the header the bar wraps onto a second line unless the panel is wide, the grid re-fits to the smaller body, and every cell moves the moment the first one is selected, so the next Shift+click lands on another cell (seen in Grafana during development). A floating toolbar hides cells that the user may want to select. The row takes its height from the scroll container only: `computeLayout` still gets the height without the bar, so no cell moves, and the container scrolls when the bar covers its last rows. With Auto Grid fit-content the panel grows by the bar instead. The cell canvas and the layers of the flow overlay are sized from the same box without the bar (§15), so the three stay one size.
 
 **Decision: Escape clears only with the keyboard focus inside the panel, and uses up the key press.**
 *Rationale:* Escape closes many things in Grafana, and a selection is worth more than a popover, so a window-wide listener would lose it by accident. A pointer gesture moves the focus to the selection bar (a `role="group"` that is focusable by script only), so Escape works right after selecting, and Tab continues to its buttons. While a drilldown popover or link menu is open, the selection leaves Escape alone, so that one key press never clears the selection because an overlay was in the way. The key press is stopped at the panel, because Grafana would otherwise also leave the panel view or kiosk mode.
 
 **Limitation, deliberate: cells cannot be selected with the keyboard or by touch.** The grid is one canvas without a focus model: hover and drilldown are pointer-only as well, and arrow keys scroll the container. Cell navigation with a visible cursor over tens of thousands of cells is its own feature. Touch has no Shift, and a touch drag scrolls. What a selection offers afterwards (compare, copy, clear) is plain buttons in the bar and a Grafana `Drawer`.
 
-**Cohort comparison.** For every query the drawer compares the selected cells with all other cells of the grid. A cell's value is the one the grid shows: reduced over time and aggregated over the series in the cell.
+**Cohort comparison.** For every cell query the drawer compares the selected cells with all other cells of the grid. The edge query of a flow overlay (§15) is not a cell query and has no row. A cell's value is the one the grid shows: reduced over time and aggregated over the series in the cell.
 
 - *Missing values:* a cell without a value for the query is counted under "No value" and is in no statistic. It is not zero. Selected cells that are not in the data are on neither side.
 - *Quantiles:* median and p95 are the value at position `q × (n − 1)` of the sorted values, interpolated linearly between its neighbours (NumPy's default, R type 7, `PERCENTILE.INC`, PromQL `quantile`). One value is every quantile of itself; in a small cohort p95 lies between the two highest values, which the drawer says.
@@ -285,6 +287,10 @@ Cell selection has no option to switch it on: it does nothing until Shift is hel
 **Decision: restrict `reduceCalc` to an allowlist of numeric reducers rather than the full standard Calculation picker.**
 *Rationale:* non-numeric reducers (`allValues`, `uniqueValues`, …) produce values the color pipeline cannot render; offering them would be an invitation to a broken panel. A guarded Select with a numeric allowlist keeps the standard vocabulary while making invalid states unrepresentable.
 
+The flow overlay's options are additions with their own table in §15. Its only switch is `flowRefId`: empty (the default) leaves the panel exactly as it was.
+
+Every option is stored in the dashboard JSON under its path, so a path is never reused or renamed without a migration. The selection options and the flow options have paths of their own (`selection…`, `flow…`), and a test in `src/module.test.ts` lists all stored paths and requires each to occur once.
+
 ## 11. Plugin metadata and toolchain
 
 - id `yuuk1-fleetgrid-panel`, name `FleetGrid`, `grafanaDependency: ">=11.6.0"`.
@@ -299,11 +305,13 @@ Cell selection has no option to switch it on: it does nothing until Shift is hel
 - **Component (React Testing Library):** option editors (including range-rule add/remove/reorder, suggestions, and validation), panel wiring (multi-range legends, actual-range tooltip, selector, scroll coordinates, data-link priority, link menu, popover close paths, requery race with deferred promises).
 - **E2E (`@grafana/plugin-e2e` + Playwright):** a provisioned TestData dashboard (`uid: fleetgrid-e2e`, generic zone/host/gpu data with unpadded host numbers so natural order differs from lexicographic order) exercised against the default Grafana image **and** `GRAFANA_VERSION=11.6.0`. A dedicated two-zone table panel gives equal values different maxima and verifies the legend, each tooltip range, and different canvas fills. Canvas assertions map CSS coordinates to backing-store coordinates and use locally uniform colors rather than screenshot equality, tolerating DPR and cross-version anti-aliasing differences.
 - **Cell selection:** selection state, statistics, formats and variable sync are unit-tested as pure functions; fast-check properties cover the hostlist round trip against the independent expander, the regular expression (matches exactly the values), the list, Cliff's delta against the pair count of its definition, quantile bounds, and the region hit test against a scan. The gestures are tested in jsdom with a minimal `PointerEvent` (jsdom has none) and in E2E on a dedicated panel, which also checks the clipboard, the drawer and the `selected_hosts` variable in the URL. The variable sync is tested at three levels: `VariableSync` against a stand-in for Grafana that a test can make behave like Grafana or like a viewer (reset at a refresh, a write that is not kept, a change by hand); the panel with that stand-in (data refreshes, the self-filtering query, two panels, unmount); and E2E on a second dashboard (`uid: fleetgrid-selection-sync-e2e`) whose panels name a multi-value variable (two of them the same one), a text box, a single-value variable, a query variable whose options are not hosts, and a variable without a selection label, with a text panel that shows what each variable gives to a panel that uses it.
+- **Flow overlay:** the data stage has example tests and a model-based property test (every edge row lands in exactly one edge or one counted reason; values aggregate like a naive reference; ranking, filter and hover index agree with it), the geometry has example and property tests, and the draw pass is checked through the recorded canvas calls. Component tests cover what a hover paints (the focus layer only) and that a panel without an edge query has no overlay. The first E2E dashboard (`uid: fleetgrid-e2e`) has a `Flow Overlay` panel (a six-hop ring over two zones, a pair in both directions, an edge without a value, one row to a host outside the grid, one self-edge). Whether arcs are legible on a dense grid is a judgement that needs eyes: it was checked on screenshots in the light and dark themes, not by an assertion.
+- **Cell selection on a flow overlay:** component tests (`FleetGridPanel.flowSelection.test.tsx`) fix what §15 decides for a panel that has both: a Shift press ends the hover and its focus and hovers nothing until it is released; the focus of an open popover lasts as long as the popover, in a host that lets a pointer-down reach the document and in one that does not; a selection paints no arc and puts none in focus; the cell canvas and the two layers keep one height when the selection bar appears; the stacking order; and that the edge query has no row in the cohort comparison. One E2E test repeats the gestures on the `Flow Overlay` panel in a real Grafana.
 - Checks that genuinely require human eyes or a live Prometheus (visual sparkline quality, in-cell unit suffix at various widths, instant requery against a real datasource, split-region visuals, minimum-cell-size boundary) are explicitly listed as manual follow-ups rather than silently claimed.
 
 ## 13. Out of scope
 
-Deliberately not implemented (YAGNI, confirmed during design): Conditions-style expression or threshold DSL (range matchers select only Min/Max), modifier-click actions other than the Shift selection gestures, a freeform lasso, selecting cells with the keyboard or by touch, saving a selection in the dashboard, pinned/frozen cells, zoom/pan of the grid, custom URL template mechanisms outside standard Data Links, and datasource-specific code paths (the pipeline is frame-shape-based and datasource-agnostic; Prometheus/VictoriaMetrics are the design targets, not a hard dependency).
+Deliberately not implemented (YAGNI, confirmed during design): Conditions-style expression or threshold DSL (range matchers select only Min/Max), modifier-click actions other than the Shift selection gestures, a freeform lasso, selecting cells with the keyboard or by touch, saving a selection in the dashboard, pinned/frozen cells, zoom/pan of the grid, custom URL template mechanisms outside standard Data Links, and datasource-specific code paths (the pipeline is frame-shape-based and datasource-agnostic; Prometheus/VictoriaMetrics are the design targets, not a hard dependency). For the flow overlay: animated flow particles and every other continuous animation, a selection mechanism of its own, emphasising the edges of the selected cells, and paths given as a list of members instead of hops (§15).
 
 ## 14. Known limitations / future work
 
@@ -313,3 +321,219 @@ Deliberately not implemented (YAGNI, confirmed during design): Conditions-style 
 - How a synced value reaches a query is decided by Grafana and by the data source of the panel that uses the variable. With Grafana's Prometheus data source a multi-value variable is exact for every tested value except one with a double quote or a line break, for which the other panel's query fails with an error.
 - A multi-value query variable drops values that are not among its options when it loads its options again. The bar then says how many of the selected values the variable still holds, or that the variable was changed; the sync does not prevent it. When no selected value is among the options, Grafana sets the variable to a value of its own ("All" or an option), and that value stays after Clear.
 - The hover tooltip passes on only a Shift press that is over the cell it shows. In a small panel it can still lie under the pointer and take a plain click, and where it covers other cells, a Shift+click on it selects nothing.
+
+## 15. Flow overlay
+
+Cells show the state of one endpoint. The flow overlay shows relations between two endpoints — pairwise metrics such as packet loss or round-trip time between hosts, and the hops of a job's communication path — as arcs over the grid. It is optional and off by default.
+
+```
+DataFrame[] of the edge query
+  → rows        src/data/normalize.ts       the same normalization as for cells, with a row limit
+  → edges       src/data/edges.ts           rows → edges between hierarchy nodes, filter, rank, hover index
+  → geometry    src/render/flowGeometry.ts  node rectangles from the layout, one arc per edge
+  → draw        src/render/flowRenderer.ts  arcs, arrowheads, hop numbers on the overlay canvases
+```
+
+`src/components/useFlowOverlay.ts` wires the stages into the panel: `useCellQueries` keeps the edge query out of the cell pipeline, `useFlowModel` builds the model and `useFlowOverlay` paints. `FlowLayers` holds the canvases; `FlowLegend` and `FlowTooltipSection` are the two DOM parts. The panel component itself gains no branches for the overlay.
+
+### Data contract
+
+| Subject | Rule |
+|---|---|
+| Edge query | The query named by `flowRefId` (spaces around it are ignored). Its frames and its target leave the cell pipeline: no cells, no selector entry, no drilldown requery, no row in the cohort comparison of a cell selection (§9), and no suggestions in the editors of the cell options (`cellFrames` in `src/options/suggestions.ts`). |
+| No rows | A query that ran and returned no rows draws nothing and is **not** a warning: it is the healthy state of a query that filters in the data source. A refId that no query of the request has (or only a hidden one) is a warning. The request's visible targets tell the two apart (`flowQueryState`); without a request and without a frame the panel says only that there is no data. |
+| Row | One directed pair: a source, a destination, a value. Table frames and time-series frames are read as for cells; a range series is reduced with `reduceCalc`. |
+| Endpoint | `flowEndpoints` maps a hierarchy label to the edge query's source label and destination label. The endpoint's value is compared with the **raw** value of that hierarchy label on the cells (`CellModel.labelSets`). |
+| Level | An endpoint resolves at the deepest mapped hierarchy level: to a cell when that is the leaf level, otherwise to the group. All edges of a panel resolve at the same level. |
+| Edge | One per ordered pair of nodes. Its value is the worst of the rows of the pair (`flowWorst`). A→B and B→A are two edges. |
+| Value | `number`, or `null` when none of the rows has a finite value. `null` is "unknown": drawn dashed in a neutral color, never 0, and left out by a filter (the legend then says how many). |
+| Not drawn | A row without an endpoint label, with an endpoint that matches no node, or with one that matches several nodes; and a self-edge (both ends resolve to one node). All four are counted, and the worst value among the first three and among the self-edges is kept (`excludedWorst`, `selfWorst`). The legend gives both counts with that value in its visible text (`3 rows left out, worst 4.5%`); the first three are also in the warning banner, with examples. |
+
+**Decision: bind the edge query by an explicit refId and explicit label names, never by recognizing label names.**
+*Alternatives:* treat any query that carries `src_*` / `dst_*` labels as an edge query; a per-query custom option in the query editor.
+*Rationale:* a saved dashboard must not change when the plugin is updated. A dashboard whose queries happen to carry such labels keeps drawing them as cells until `flowRefId` is set. An explicit refId is also how the panel already addresses a query (`defaultMetric`, range rules). The query editor belongs to the data source, so a panel cannot add options there.
+
+**Decision: match endpoints on raw label values, at the deepest mapped level, and never pick one of several matches.**
+*Alternatives:* compare extracted level keys; let the user choose the level separately; take the first match.
+*Rationale:* an extracted key such as a trailing number is unique only inside its parent (`node-a1` and `node-b1` both give `1`), while the raw host name is what the edge query reports. The mapped labels already say which level is meant, so a separate level option could only contradict them. Mapping `gpu` alone names a cell under every host; drawing the edge to the first of them would show a relation that does not exist, so such a row is counted as ambiguous instead. Several raw values that the extraction folds into one node (`node-a017`, `node-b017` → `017`) resolve to that node; an edge between them is a self-edge.
+
+**Decision: an edge's value is the worst of its rows, not the cells' spatial aggregation.**
+*Alternatives:* reuse `spatialAggregation` (the first implementation); a separate aggregation option for edges.
+*Rationale:* several rows per pair are the normal case when the data is finer than the level it is drawn at (RNIC pairs drawn between hosts). With the cells' default `max` and a metric where lower is worse, two healthy RNIC pairs hid a degraded one, in the filter and in the choice of the arcs to draw; with `mean`, one lossy row of eight was diluted below the filter. The overlay already knows which direction is worse, so it takes the worst row: a degraded row can then neither be hidden nor diluted, whatever the cells use. A metric that has to be added up over the rows (a byte rate) is summed in the query, where the grouping is explicit.
+
+**Decision: the label columns of the edge query are read as text.**
+*Rationale:* in a table frame a hop number or an ID is often a numeric column. `normalizeFrames` reads labels from string columns only and takes the first numeric column as the value, so a numeric hop column would become the value. Before normalization the columns named by the flow options are converted to strings, and an empty cell becomes "no label" rather than the text `null`.
+
+**Decision: a filter of "strictly worse than a number" with a direction option, not a comparison picker and not Grafana's thresholds.**
+*Alternatives:* an operator select (`>`, `>=`, `<`, …); "draw only edges above the base threshold step".
+*Rationale:* the panel needs to know which end of the value is the bad one anyway, to choose the edges that win the draw bound and to name the worst peer in the tooltip. One option (`flowWorst`) answers that, and the filter follows from it: `Higher` keeps values above the number (loss > 0), `Lower` keeps values below it (throughput below the objective). Strict comparison makes "loss > 0" work with the natural number 0. Reusing the threshold steps would couple what is drawn to how it is colored, and a metric with only a base step could not be filtered.
+
+### Bounds and cost
+
+Pairwise data grows with the square of the fleet: 1,000 hosts can report a million pairs. Two hard bounds keep the panel's work small for such a result:
+
+| Bound | Value | When it binds |
+|---|---|---|
+| Rows resolved (`MAX_FLOW_ROWS`) | 20,000 | The worst 20,000 rows by value are resolved into edges; the others are left out. The legend reads `worst 20000 of N rows used` and the banner asks to narrow the query. Only the value of each row is read for the ranking, which is the one cost that still grows with the result. |
+| Arcs at rest (`flowRestArcs`) | 100 by default, 1–500 | The worst edges that pass the filter are drawn, and the legend reads `100 of N edges drawn, worst first` in the warning color. |
+| Arcs in focus (`MAX_FLOW_ARCS`) | 500 | The arcs of a hovered node, and the most that the resting picture can be set to. |
+
+Edges are ranked by value in the worse direction, ties by source and destination key. The ranking is therefore the same for any order of the query result.
+
+**Decision: the resting picture holds 100 arcs unless the user asks for more.**
+*Alternative:* draw up to the hard bound of 500 (the first implementation).
+*Rationale:* the hard bound was chosen for the paint time, not for the reader. A screenshot of 500 arcs over 1,000 hosts shows a mat of lines: the cells under it cannot be read, and the one red arc among 499 orange ones is not easier to find than in a table. The overlay is there to make the degraded paths stand out, so its default has to leave the grid readable. 100 arcs is still a dense picture but the cells show through, and the legend turns to the warning color and says `100 of N edges drawn, worst first`, which tells the user to filter. The number is an option because the right value depends on the size of the grid; it cannot exceed the hard bound. The focus keeps the hard bound: the edges of one hovered node are what the user asked to see.
+
+**Decision: the rows of an oversized result are ranked by value before they are cut.**
+*Alternative:* read the first 20,000 rows (the first implementation).
+*Rationale:* which rows come first is the data source's order. With 25,001 rows whose only degraded row was the last one, that row was never read, while the legend said `500 of 19999 edges drawn, worst first`. The legend's claim has to be true for the whole result. So when there are more than 20,000 rows, the value of every row is read (`forEachRowValue`: one number per table row, one reduction per series), the 20,000 worst are found with a bounded heap in O(n log 20,000) for any order, and only those rows are turned into label sets and edges. Because an edge takes the worst of its rows, the edges of the worst rows have exactly the values they would have with all rows. Rows without a value share the bound as arcs do; rows that tie with the least bad row that is kept are taken in the order of the result. What remains unbounded is the value scan: the fastest of several runs took 62 ms for 20,000 rows (no scan), 61 ms for 100,000 table rows, 227–306 ms for 1,000,000 table rows and 192 ms for 100,000 single-point series (Node 22, shared container). A cap on the scan was left out: it would bring back "the first N rows" at a larger N, and a result of that size does not reach a browser panel.
+
+**Decision: edges without a value share the arc bound instead of being cut first.**
+*Rationale:* an edge without a value cannot be ranked, and the first implementation put it last. With 600 healthy edges and 20 whose probe returned nothing, none of the 20 was drawn, while the legend's tooltip said they were dashed. A probe that returns nothing may be the most broken path of all. When the edges do not all fit, the edges without a value now get what the valued ones leave free, and at least half of the bound (`shareFlowBound`); the same rule applies to the edges of a hovered node. They cannot take the whole bound either, because the edges that are known to be degraded must stay. The legend's visible text says how many of them are drawn (`250 of 300 edges without a value drawn`), and, with a filter, that none is (`12 edges without a value not drawn`).
+
+| Step | Cost | Runs when |
+|---|---|---|
+| Find and count the edge query's frames | O(frames × fields); no value is read | data or options change |
+| Rank the rows of a result with more than 20,000 rows | O(N log 20,000) for N rows; one value per row, three typed arrays of N | data or options change |
+| Resolve endpoints, take the worst row per pair | O(R), R ≤ 20,000 rows, hash lookups | data or options change |
+| Endpoint index | O(cell label sets × mapped levels) | data or options change |
+| Filter and rank | O(E log E), E ≤ R edges | data or options change |
+| Hover index (node → edges, path → edges) | O(E + hops) to build | data or options change |
+| Node rectangles | O(cells) | layout changes |
+| Paint the resting layer | O(min(E, `flowRestArcs`)) arcs, at most 500 | data, options, layout or theme change |
+| Look up a hovered node | O(its edges + the edges of its paths), at most 500; independent of E | the hovered **node** changes |
+| Paint the focus layer | O(focused arcs), at most 500 | the hovered node changes |
+| Pointer move inside a cell or a group | nothing | — |
+
+The hover lookup is covered by a test that counts the edges it reads on a 10,000-edge model. A timing test builds the model just above the row bound (22,350 rows, 20,000 distinct edges) against a budget that only a quadratic step would exceed. Measured with Node 22 on the container described below, that build took about 60–100 ms at best, and looking up and summarizing a node with 270 edges in it took 0.35 ms.
+
+Paint times were measured in headless Chromium without a GPU (software rasterizer) on a shared 4-core container, on a 1531 × 773 px canvas, by drawing and then forcing the canvas to rasterize. They are an upper bound for one environment, not a promise:
+
+| What is painted | Device pixel ratio 1 | Device pixel ratio 2 |
+|---|---|---|
+| 500 arcs between random points of the canvas | about 30 ms | about 75 ms |
+| 500 arcs of at most 300 px | about 11 ms | about 25 ms |
+| The focus layer for a host with 38 edges, in the panel | 5 ms median, 11 ms worst | 14 ms median, 49 ms worst |
+
+In the panel, with 1,000 hosts and 25,000 edge rows, the resting layer took about 60–100 ms per paint at ratio 1, including the first color lookups. That is the reason for the hard bound of 500 and for keeping this layer out of the hover path. With the default of 100 arcs at rest a paint is a fifth of that.
+
+### Drawing
+
+**Decision: two canvases stacked on the cell canvas — the arcs at rest and the arcs in focus — instead of drawing on the cell canvas.**
+*Alternatives:* (a) draw the arcs at the end of `renderCanvas`; (b) one overlay canvas that is repainted with the other arcs dimmed on every hover.
+*Rationale:* the panel draws when something changes, and hover changes often. With (a) every change of the hovered cell would repaint up to 15,000 cells. With (b) it would repaint up to 500 arcs, which costs tens of milliseconds without a GPU (table above). With two layers a hover paints only the focused arcs, typically a few dozen. The resting layer is dimmed by setting its CSS `opacity`, which the browser composites without painting. Both layers start at the cell canvas's origin, so all three share the content coordinate system and scroll together; pointer events pass through them. A layer is as high as the cell canvas. It is as wide as the cell canvas plus a margin where the panel is wider than the grid: a grid that is narrower than its panel (zones stacked in one column) would otherwise leave an arc no room beside the grid. A layer never makes the panel scroll: it is not wider than the visible width unless the grid is.
+
+The height of the cell canvas is the larger of the grid and the grid's box, and that box loses the height of the selection bar while cells are selected (§9). The layers are given the same box (`gridViewportH` in `FleetGridPanel`), not the panel body. A layer sized from the body would be higher than the cell canvas by the bar's height, and the grid would scroll past its last row.
+
+**Decision: the arcs lie over the cells and their selection rings, and under the rubber band.**
+*Alternative:* draw the selection rings over the arcs.
+*Rationale:* the stack, bottom to top, is the cell canvas (cells with the selection rings of §9, group labels, the pinned label), the resting layer, the focus layer, the rubber band of a Shift+drag, the tooltip, the popover and the link menu. The canvases follow each other in the DOM; the others lie above by `z-index` (5, 10, 20, 30). A ring is a mark of its cell, like the fill, and it is drawn with the cell on the one cell canvas; rings over the arcs would need the separate selection canvas that §9 rejected. So an arc runs over a ring as it runs over a fill, and its halo cuts both. The band is what the viewer is drawing at that moment, so it is over the arcs; it lets pointer events through, as the layers do.
+
+**Decision: the margin beside the grid is bounded, so a layer is never more than twice the cell canvas.**
+*Alternative:* a layer as wide as the panel (the first version of this fix).
+*Rationale:* the height of a layer is the scroll length of the grid, so every pixel of width is paid for over the whole length. For 3,400 hosts in four columns (a grid of 68 × 28,066 px) in a panel 1,550 px wide, a layer of the panel's width held 44 megapixels: 174 MB at device pixel ratio 1 against 8 MB for the cells, 696 MB at ratio 2, and in a wider window more pixels than Chromium paints at all, so nothing was drawn while the legend counted edges. The margin is now `min(panel width − grid width, grid width, 160 px)`: never beyond the panel, never more than the grid's own width, and never more than an arc can use (the apex of the largest arc is 140 px from its chord). With this margin an arc in a narrow grid bulges less than it would like (rule 3 of the arc geometry); that is accepted. Measured in Chromium for the same grid, in megabytes of backing store (width × height × 4):
+
+| Window, pixel ratio | Cell canvas | Resting layer | Focus layer (after the first hover) | Resting layer before the bound |
+|---|---|---|---|---|
+| 1600 px, 1 | 7.6 | 15.3 | 15.3 | 174 |
+| 1600 px, 2 | 30.5 | 61.1 | 61.1 | 696 |
+| 2600 px, 2 | 30.5 | 61.1 | 61.1 | 1,145 (not painted) |
+| 2600 px, 3 | 68.7 (not painted) | no store | no store | 2,576 (not painted) |
+
+So the overlay costs at most two layers of at most twice the cell canvas each, whatever the panel's width; for a grid that fills its panel each layer is exactly the cell canvas.
+
+**Decision: a layer that the browser cannot paint is not allocated, and the legend says so.**
+*Rationale:* Chromium paints nothing on a canvas with a side over 65,535 device px or more than 268,435,456 device px in all, and reports no error. A legend that reads `3 edges` over a picture without arcs is the worst outcome for a panel that exists to show degraded paths. `flowLayerSize` therefore checks the size against these two limits: a layer that does not fit with its margin gets the cell canvas's size, and when that does not fit either (last row of the table: the cell canvas itself is not painted) the layer holds no store and the legend reads `3 edges not drawn: the grid is too large for the overlay`. The limits are Chromium's; a browser with lower limits fails at a smaller grid, for its cell canvas and its layers alike. This extends the "single canvas" decision of §2 rather than breaking it: the number of DOM nodes is still constant, and the layers exist only while an edge query is named.
+*Cost:* memory. Each layer is a backing store of the size given below. The resting layer holds none while it has no arcs (always, in `On hover` mode); the focus layer allocates one at the first hover and keeps it, because allocating a canvas on every hover costs more than clearing it. So the overlay uses up to two extra canvases.
+
+**Decision: static arcs with an arrowhead, no flow particles.**
+*Rationale:* particles need a `requestAnimationFrame` loop that repaints for as long as the panel is mounted. FleetGrid is built to paint only on change, dashboards hold many panels, and a wall display runs for days; an always-running loop per panel is a standing CPU cost for a cue that an arrowhead gives for nothing. Motion also has to be switched off for `prefers-reduced-motion`, so the static encoding has to exist and be sufficient anyway. Animation is therefore left out, not made optional.
+
+**Arc geometry** (`flowArc`): a quadratic Bézier between the centres of the two node rectangles.
+
+- It bulges to the **left of its direction of travel**. A→B and B→A are thus two curves that form a lens, never one line.
+- The distance of the control point from the chord grows strictly with the chord's length and levels off (`0.35·L / (1 + L/500)`, at least 8 px). Arcs of different lengths over one row of cells therefore nest like an arc diagram instead of covering each other.
+- **The whole arc stays on its canvas, and its apex keeps 24 px from the edge**, measured along the line on which the arrowhead and the hop number sit. The bulge is limited per canvas edge in closed form. With `d0` and `d1` the distances of the arc's two ends from an edge and `k` the part of the arc's normal that points at that edge, the apex keeps the margin when `bulge ≤ (d0 + d1)/k − 2·24`, and no point of the arc crosses the edge exactly when `bulge ≤ (√d0 + √d1)² / (2k)`. The second limit is needed because an arc with one end near an edge leaves the canvas near that end, not at its apex. The rules, in order:
+  1. Its own side has room for the bulge: it bulges there.
+  2. Otherwise, if the other side has room for 1.6 times the bulge, it bulges to that side, 1.6 times as far (an arc along the top row). It is then outside the arc of the opposite direction, which is already there, so the two do not coincide.
+  3. Otherwise it stays on its own side and bulges only as far as fits, down to a straight line.
+  4. If rule 3 leaves both directions with a bulge under 8 px (the canvas has no room on either side: a panel as high as one row of cells), each bulges by up to 8 px on its own side, into the margin but not off the canvas, so that the two directions are still two lines. Only in this case can an arrowhead touch the canvas edge; the hop number is then moved back onto the canvas.
+  *Alternative:* share the side that has more room between the two directions when neither has enough (the first version of this fix). *Rationale against:* the separation of the two arcs then shrinks with the room and reaches zero, and a point that is a fraction of a pixel inside or outside the margin changed the result; with the rules above the control points of the two directions are more than 4 px apart on every canvas (a property test checks this, and that every point of an arc is on the canvas).
+- The **arrowhead sits on the middle of the arc**, where a quadratic Bézier runs parallel to its chord. *Alternative:* arrowheads at the destination. *Rationale:* many arcs end on one cell, and their arrowheads would pile up on it and hide it; the middles of the arcs are spread out.
+- **An arc between groups ends at the centre of its group, under a hub, and its groups are outlined on both layers.** A group's anchor is the bounding box of its cells, and an arc ends at the centre of that box, exactly as for a cell. That point alone looks like an edge of the cell in the middle of the group (or of the gap between four cells). So both layers outline every group that is an end of one of their arcs, and close each arc with a hub: a dot at the group's centre in the color of the outline, drawn over the ends of the arcs (resting layer: 1 px outline and hub in the secondary text color; focus layer: 1.5 px, primary text color). A cell has no such mark, and all arcs of a group meet in its hub, so the hub reads as a mark of the outlined group.
+  - *Alternative (tried and removed):* draw only the part of the arc between the two frames, from where the curve leaves the source's box to where it enters the destination's box. It had two defects. With elongated frames (a host drawn as one row of 16 GPUs) the centre-to-centre curve passes through the destination once and comes back, and the part "before it enters the destination for good" was a small loop with both ends on the destination and none on the source: 111 of 8,190 host pairs in one such layout. And groups are 4–8 px apart, so an arc that ends on a frame ends in the seam between two frames, where it cannot be read which of the two it belongs to (64% of the arcs in random grids ended within 8 px of a frame that was not theirs). An end at the centre is as far from every other group as it can be.
+  - *Rule kept from this:* the end of an arc never depends on where a curve crosses a rectangle. A property test builds real layouts with host groups of any shape and checks that every arc starts at the centre of its source and ends at the centre of its destination.
+  - *Alternative:* attach the arc to the middle of a side of each frame. The arc crossed the cells of its own group for groups of different sizes, and its end is in the seam as well.
+
+**Legibility on a dense, colored grid.** Each arc is stroked twice: first 2 px wider in the panel's background color (a halo), then in its own color. The halo keeps the arc readable on any cell color in the light and dark themes, and separates it from the arcs drawn before it. Arcs are drawn best first, so the worst are on top; arrowheads and hop numbers are drawn after all arcs. The width follows the cell size (1.25–2.5 px) so that arcs do not bury 6 px cells; focused arcs are 1.6 times as wide. The color comes from the edge query's standard field config (`getDisplayProcessor`, the same call as for cells), so thresholds, color schemes and overrides by query work unchanged.
+
+**Decision: the automatic color range is taken before the filter and anchored at the healthy end.**
+*Alternative:* the range of the edges that are drawn, as for the cells' displayed values (the first implementation).
+*Rationale:* with a continuous scheme and no Min/Max, a range over the drawn edges made the filter repaint them: with losses 0 and 7 and "worse than 1", the only drawn edge was green, with a legend of `7 – 8`; unfiltered, the same edge was red. In the configuration that shows only degraded paths, the degraded paths got the healthy color. The range now spans every valued edge before the filter and includes the threshold. When higher is worse it also includes 0, because an edge query that filters in the data source (`> 0`) returns only degraded pairs, and the least degraded of them would otherwise sit at the healthy end. Lower-is-worse metrics have no such natural healthy end, so there the threshold is the only anchor. The rule is kept to these three clauses on purpose, so that a user can predict the range: every valued edge before the filter, the threshold, and 0 when higher is worse. Field-config Min/Max still win, each end on its own, whether they come from the standard options or from an override for the edge query (Grafana applies both to the field config before the panel reads it), and thresholds are absolute anyway. What the overlay cannot do is choose the scheme: `flowWorst` does not invert colors, because it cannot know whether the user already picked a scheme whose low end is the alarm color. A silent inversion would make half of those users' panels wrong. Instead the legend's scale says in words which end is the bad one (`higher is worse` / `lower is worse`), so a green arc at the worse end cannot be read as healthy without contradicting the text next to the scale, and the README tells how to choose the scheme.
+
+**Decision: every arc is its own path.**
+*Rationale:* painting all arcs of one color as a single path looked like the cheaper way and was implemented first. Measured in Chromium, one path with 1,000 arcs took 2–3 times as long as 1,000 single strokes at device pixel ratio 1 and was no faster at ratio 2: the strokes of one path overlap everywhere, and the rasterizer has to resolve that. Single strokes also let each halo cut through the arcs below it.
+
+### Hover
+
+Hovering a cell puts the edges of its node in focus: the cell itself, or its group at the endpoint level. The focus also contains the other edges of every path that those edges are on, so pointing at one member of a ring shows the whole ring. The focused arcs are drawn on the focus layer, the resting layer is dimmed, and the tooltip gains the node's outgoing and incoming edge counts, its peer count, its worst peer with the formatted value, and its hops. A node without edges puts nothing in focus and dims nothing.
+
+**Decision: the focus is the hovered cell's node if it has edges, otherwise the node of the open drilldown popover.**
+*Alternative:* the hovered cell first, whatever it has (the first implementation).
+*Rationale:* a popover pins a cell: the user reads its sparklines while its edges stay emphasised. With the first rule, moving the pointer over any cell without edges on the way to the popover dropped the focus, although that cell had nothing to show. A hovered cell that has edges still wins, because the pointer is the more recent intent. The tooltip summary is always the hovered cell's, never the pinned one's: a tooltip that describes another cell than the one it points at would be wrong.
+
+The focus is drawn from the filtered edges, not from the resting arcs, so a hover can show edges that **Arcs at rest** left out. The filter is not lifted by a hover: it defines which edges exist for drawing.
+
+**Decision: the focus is a set of node keys.**
+*Rationale:* `flowFocusEdges(model, nodeKeys)` takes any number of nodes. Today the panel passes one node: the hovered cell's or the pinned cell's. The nodes of the selected cells (§9) could be passed without a change to the data stage or the draw pass; the panel does not pass them (next decision). The overlay builds no selection mechanism of its own.
+
+**Decision: a Shift press has the pointer to itself, and a cell selection does not change the arcs.**
+*Alternatives:* (a) keep the hover alive during a Shift press; (b) put the edges of the selected cells in focus.
+*Rationale:* the overlay and the cell selection read the same pointer on the same container. The overlay follows the hovered cell; the selection takes a press that starts with Shift, from pointer-down to pointer-up (§9). Where both apply, the selection wins: the press ends the hover, so the tooltip and the hover's focus go, the resting layer is at full opacity again unless a popover is open, and the pointer hovers nothing until the button is released. The next pointer move after the release hovers again, on a selected cell as on any other. With (a) the focus layer would be painted for every cell that a drag crosses, and the arcs at rest would be dimmed, during a gesture that is about cells. Without Shift nothing is different: a hover, a click and the popover's pinned focus work on selected cells as before, and none of them changes the selection.
+The focus that an open popover keeps is not the hover's, and the press leaves it alone: it lasts exactly as long as the popover, as before. Whether a press closes the popover depends on the host, because the panel closes its popover on a pointer-down that reaches the document. Grafana 11.6.0 lets the event through: a press outside the popover, with or without Shift, closes it and ends its focus. Grafana 12.4.0 stops the pointer-down above the panel: a plain click on the grid still closes or moves the popover through the click handler, but the click that ends a Shift press is swallowed (§9), so the popover and its focus stay through a selection gesture. Both were seen in a browser on these two versions. The overlay adds no rule of its own here. Closing the popover on a Shift press would change what §9 settled for the two (Escape leaves the selection alone while a popover is open, so they are meant to exist together), and it is not needed for the selection to work.
+(b) is what the set of node keys makes possible, and it is left out on purpose. A selection exists to be compared and exported; it can hold every cell of the grid, while the focus is bounded to 500 arcs and dims the rest, so a large selection would show an arbitrary part of its edges and hide the resting picture until it is cleared. It would also give the focus a third source next to the hover and the popover, with an order to define and to explain. So a selection paints no arc: it repaints the cell canvas for the rings, and neither layer. The one repaint of the layers at the first selected cell is for their size, because the selection bar takes height from the grid's box (see Drawing). Emphasising the edges of a selection is a possible later addition with its own decision.
+
+### Ordered paths
+
+A path is given as its hops: each edge row can carry a hop number (`flowOrderLabel`) and a path name (`flowPathLabel`).
+
+| Case | Behavior |
+|---|---|
+| Ring, open path | Not told apart. A ring is a path whose last hop returns to its first source. |
+| Tree | Supported as a set of hops: numbered by depth, or with a path name and no numbers. The panel does not check that hops form a chain, because a tree does not. |
+| Several paths | Told apart by the path name. Without `flowPathLabel` all numbered hops are one path. |
+| Hop number | A whole number from 0 (at most 9 digits). Any other value keeps the edge, drops the number and is counted in a warning. |
+| Gaps | Shown as they are. A missing number means the hop is absent, has an endpoint outside the grid, or is hidden by the filter. |
+| Same pair on several paths, or twice on one | One edge and one arc; its value is the worst of all its rows. The arc shows its first hop number (by path name, then by number) followed by `+`. |
+| Overlapping numbers | Numbers claim squares of a coarse grid in path and hop order; a number whose squares are taken is not written. |
+
+**Decision: hops, not members.**
+*Alternative:* rows that name one member each (`host`, `rank`), from which the panel derives the hops.
+*Rationale:* with explicit hops there is nothing to guess: no rule for closing a ring, for a missing rank, or for which member's value belongs to a hop, and a tree needs no separate contract. The price is that the data source has to export pairs; a per-rank metric cannot be turned into pairs in PromQL. Deriving hops from members is a possible later addition with its own contract and is not implemented.
+
+### Options
+
+| Option | Values (default) |
+|---|---|
+| `flowRefId` | refId of the edge query (`''` — overlay off) |
+| `flowEndpoints` | `{ level, source, destination }[]` (`[]`) — custom editor with the hierarchy labels and the edge query's labels as suggestions |
+| `flowShow` | `always` (default) / `hover` |
+| `flowRestArcs` | whole number 1–500 (unset — 100); hidden in hover mode |
+| `flowWorst` | `high` (default) / `low` |
+| `flowThreshold` | number (unset — no filter) |
+| `flowOrderLabel` | label name (`''`) |
+| `flowPathLabel` | label name (`''`) |
+
+Unknown or missing values are normalized at runtime (`resolveFlowConfig`), so a dashboard saved before these options existed, or edited by hand, behaves like the defaults. The refId and the label names of the edge query are used without the spaces around them (`"E "` names query E); a hierarchy label is compared as the levels store it. An edge query without endpoint mappings draws nothing and says so in the banner and, in a few words, in the legend. So does one with a mapping that is incomplete or that names no hierarchy label: such a mapping is not skipped, because the mappings together decide the level at which the endpoints resolve, and drawing with the remaining ones would show the edges at a level nobody asked for.
+
+**Decision: everything that makes the picture incomplete, or empty by mistake, is in the legend's visible text.**
+*Alternative:* the warning banner and the legend's tooltip only (the first implementation).
+*Rationale:* the banner is one line of 20 px, shared with the cells' warnings, and it cuts long texts with an ellipsis; a tooltip needs a pointer, and a wall display has none. In a panel a quarter of the dashboard wide, the notice that rows were left out was not readable at all. The legend wraps and breaks long words, so its text is readable at any panel width. It therefore carries, in the warning color: the arcs that the draw bound left out, the rows that the row bound left out, the edges without a value that are not drawn, the rows that match no cell and the rows within one node (each with the worst value among them, so a degraded row without an arc is still seen), and the reason why nothing can be drawn (`no query "E"`, `endpoint mapping incomplete`). The banner keeps the long form with examples, and each of its entries has its full text as its title. That `title` attribute is on every warning of the banner, also on the cells' warnings of a panel without an edge query: it is the one difference in the DOM of a dashboard that does not use the overlay (its pixels, sizes and scroll extents are unchanged).
+
+### Known limits
+
+- The row bound is applied before the endpoints are matched. Of a result with more than 20,000 rows, rows whose endpoints are not in the panel use up the bound like any other row; when the 20,000 worst rows are all of that kind, a degraded edge inside the grid is not read. Matching first would need the label values of every row (the cost that the bound exists to avoid: today only one number per row is read, 0.27–0.41 s and about 47 MB for a million rows), and it would change what the row counts in the legend mean. The panel does not hide the case: the legend reads `worst 20000 of 30000 rows used, 10000 rows not read` and `20000 rows left out, worst 59`, and the banner says that rows that match no cell count towards the limit and asks to restrict the query to the hosts of the panel.
+- Frames are selected by refId. A transformation that merges or renames the queries removes the edge query.
+- All edges resolve at one hierarchy level. Edges between a cell and a group are not supported.
+- A cell selection (§9) does not put the edges of its cells in focus. To read the edges of a selected cell, hover it.
+- The overlay has not been verified against a live Prometheus / VictoriaMetrics, and its paint cost has not been measured with a GPU.

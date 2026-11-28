@@ -1,10 +1,14 @@
 import React from 'react';
 import { StandardEditorProps } from '@grafana/data';
 import { InlineField, Input } from '@grafana/ui';
-import { collectRangeOverrideSuggestions } from './suggestions';
+import { cellFrames, collectRangeOverrideSuggestions } from './suggestions';
 
 export const CategoryLabelEditor: React.FC<StandardEditorProps<string>> = ({ value, onChange, context }) => {
-  const suggestions = React.useMemo(() => collectRangeOverrideSuggestions(context.data ?? []), [context.data]);
+  const edgeRefId = context.options?.flowRefId;
+  const suggestions = React.useMemo(
+    () => collectRangeOverrideSuggestions(cellFrames(context.data, { flowRefId: edgeRefId })),
+    [context.data, edgeRefId]
+  );
   const labels = Object.keys(suggestions.valuesByLabel);
   const listId = `category-labels-${React.useId().replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 

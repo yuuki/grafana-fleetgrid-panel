@@ -93,21 +93,36 @@ async function frameHash(canvas: Locator): Promise<number> {
   });
 }
 
-/** Waits for the initial render to settle and returns a stable frameHash (avoids mistakenly using an unrendered frame as the baseline) */
+/**
+ * Waits for the canvas to settle and returns its frameHash, to use as a baseline. The picture and the
+ * size of the backing store must stay the same over six samples in a row, 100 ms apart. Two samples are
+ * not enough: in the panel view Grafana gives the panel its final height a few hundred milliseconds
+ * after the first paint (the panel then paints again, 30 px higher), and a hash taken between the two
+ * is the baseline of a picture that is gone before the test acts.
+ */
 async function stableHash(canvas: Locator): Promise<number> {
   await expect.poll(() => isPainted(canvas)).toBe(true);
-  let prev = await frameHash(canvas);
+  let previous = '';
+  let unchanged = 0;
+  let hash = 0;
   await expect
-    .poll(async () => {
-      // Insert a time gap before the second sample, to avoid an accidental match from back-to-back reads and confirm genuine stability
-      await canvas.page().waitForTimeout(60);
-      const h = await frameHash(canvas);
-      const same = h === prev;
-      prev = h;
-      return same;
-    })
+    .poll(
+      async () => {
+        await canvas.page().waitForTimeout(100);
+        const size = await canvas.evaluate((el) => {
+          const c = el as HTMLCanvasElement;
+          return `${c.width}x${c.height}`;
+        });
+        hash = await frameHash(canvas);
+        const sample = `${size}:${hash}`;
+        unchanged = sample === previous ? unchanged + 1 : 0;
+        previous = sample;
+        return unchanged >= 5;
+      },
+      { intervals: [1], timeout: 15_000 }
+    )
     .toBe(true);
-  return prev;
+  return hash;
 }
 
 interface CellPath {
@@ -884,4 +899,291 @@ test('writes the selected hosts to the dashboard variable and restores it when t
   await panel.getByTestId('selection-clear').dispatchEvent('click');
   await expect(panel.getByTestId('selection-bar')).toHaveCount(0);
   await expect.poll(variable).toEqual(['$__all']);
+});
+
+// The Flow Overlay panel (id 9): query A fills the zone → host → gpu grid, query E is the edge query.
+// Its rows name hosts, so the arcs run between host groups: a six-hop ring over two zones, a pair in both
+// directions, an edge without a value, one row to a host that is no cell, and one self-edge.
+// The arcs are drawn on two canvases stacked on the cell canvas: the arcs at rest and the arcs in focus.
+async function openFlowPanel(
+  gotoDashboardPage: (args: { uid: string }) => Promise<{ getPanelByTitle(title: string): { locator: Locator } }>,
+  uid: string
+): Promise<{ panel: Locator; cells: Locator; rest: Locator; focus: Locator }> {
+  const dashboardPage = await gotoDashboardPage({ uid });
+  const found = dashboardPage.getPanelByTitle('Flow Overlay');
+  // Open the dedicated panel directly because Grafana does not mount dashboard rows below the viewport.
+  const page = found.locator.page();
+  const panelUrl = new URL(page.url());
+  panelUrl.searchParams.set('viewPanel', '9');
+  await page.goto(panelUrl.toString());
+  const panel = found.locator;
+  await expect(panel).toBeVisible();
+  // The cell canvas comes first in the DOM.
+  const cells = panel.locator('canvas').first();
+  await expect(cells).toBeVisible();
+  await expect.poll(() => isPainted(cells)).toBe(true);
+  return { panel, cells, rest: panel.getByTestId('flow-overlay'), focus: panel.getByTestId('flow-focus') };
+}
+
+/** Whether a flow layer shows arcs. A layer without arcs holds no backing store (0 x 0). */
+async function hasArcs(layer: Locator): Promise<boolean> {
+  const empty = await layer.evaluate((el) => (el as HTMLCanvasElement).width === 0);
+  return empty ? false : isPainted(layer);
+}
+
+/** Scans the cell rows from the first one down and returns a point whose tooltip names the host. */
+async function findHostPoint(cells: Locator, panel: Locator, host: string): Promise<{ x: number; y: number }> {
+  const box = await cells.boundingBox();
+  if (!box) {
+    throw new Error('canvas has no bounding box');
+  }
+  const first = await findCellPoint(cells, panel);
+  for (let y = first.y; y <= box.height; y += 20) {
+    for (let x = 4; x <= box.width; x += 10) {
+      const path = await probePath(cells, panel, x, y);
+      if (path?.host === host) {
+        return { x, y };
+      }
+    }
+  }
+  throw new Error(`no cell found for ${host}`);
+}
+
+test('flow overlay draws the edge query as arcs on its own canvas', async ({
+  gotoDashboardPage,
+  readProvisionedDashboard,
+}) => {
+  const dashboard = await readProvisionedDashboard({ fileName: FILE });
+  const { panel, cells, rest, focus } = await openFlowPanel(gotoDashboardPage, dashboard.uid);
+
+  await expect(rest).toBeVisible();
+  await expect.poll(() => hasArcs(rest)).toBe(true);
+  expect(await hasArcs(focus)).toBe(false);
+  // The arc canvas starts at the cell canvas's origin, so both share one coordinate system. It has a
+  // bounded margin beside a grid that is narrower than the panel: arcs bulge into it.
+  const box = (canvas: Locator) =>
+    canvas.evaluate((el) => {
+      const c = el as HTMLCanvasElement;
+      const r = c.getBoundingClientRect();
+      const container = c.parentElement!;
+      return { left: r.left, top: r.top, width: r.width, height: r.height, visible: container.clientWidth };
+    });
+  const restBox = await box(rest);
+  const cellBox = await box(cells);
+  expect([restBox.left, restBox.top]).toEqual([cellBox.left, cellBox.top]);
+  expect(restBox.height).toBe(cellBox.height);
+  // The margin is bounded: at most 160 px, at most the grid's own width, and never beyond the panel.
+  const margin = Math.max(0, Math.min(restBox.visible - cellBox.width, cellBox.width, 160));
+  expect(restBox.width).toBeCloseTo(cellBox.width + margin, 0);
+  // It never makes the panel scroll sideways.
+  expect(await rest.evaluate((el) => el.parentElement!.scrollWidth <= el.parentElement!.clientWidth)).toBe(true);
+
+  // 13 rows: 10 edges (two rows of one pair are aggregated), 1 row to a host that is no cell, 1 self-edge.
+  await expect(panel.getByTestId('flow-legend-count')).toHaveText('10 edges');
+  await expect(panel.getByRole('alert')).toContainText('1/13 edge rows were left out');
+  await expect(panel.getByRole('alert')).toContainText('dst_host=node-x9');
+  // What has no arc is also in the legend's visible text, with the worst value among it: the banner is
+  // one line and is cut in a narrow panel.
+  await expect(panel.getByTestId('flow-legend-note')).toHaveText([
+    /^1 row left out, worst 0\.30*\s*%$/,
+    /^1 row within one host not drawn, worst 0\s*%$/,
+  ]);
+  // The scale says in words which of its ends is the bad one.
+  await expect(panel.getByTestId('flow-legend-worse')).toHaveText('higher is worse');
+  // The edge query is drawn as arcs, not as a cell metric: there is one cell metric and so no selector.
+  await expect(panel.getByRole('radio')).toHaveCount(0);
+});
+
+test('hovering a cell emphasises the flows of its host and lists its peers', async ({
+  gotoDashboardPage,
+  readProvisionedDashboard,
+}) => {
+  test.setTimeout(90_000);
+  const dashboard = await readProvisionedDashboard({ fileName: FILE });
+  const { panel, cells, rest, focus } = await openFlowPanel(gotoDashboardPage, dashboard.uid);
+  await expect.poll(() => hasArcs(rest)).toBe(true);
+  const restAtRest = await stableHash(rest);
+  const cellsAtRest = await stableHash(cells);
+  await expect(rest).toHaveCSS('opacity', '1');
+
+  // node-b1 is hop 5's destination and hop 6's source on the ring; the cells are its GPUs.
+  const onRing = await findHostPoint(cells, panel, 'node-b1');
+  await hoverCanvas(cells, onRing);
+  const tooltip = panel.getByRole('tooltip');
+  await expect(tooltip).toContainText('Flows of host node-b1: 1 out, 1 in, 2 peers');
+  await expect(tooltip).toContainText('Worst: from node-b3');
+  await expect(tooltip).toContainText(/2\.50?\s*%/);
+  await expect(tooltip).toContainText('ring-a hop 5 in');
+  await expect(tooltip).toContainText('ring-a hop 6 out');
+  // The hover draws the focused arcs on their own layer and dims the arcs at rest with CSS: neither the
+  // cells nor the arcs at rest are painted again.
+  await expect.poll(() => hasArcs(focus)).toBe(true);
+  await expect(rest).toHaveCSS('opacity', '0.22');
+  expect(await frameHash(rest)).toBe(restAtRest);
+  expect(await frameHash(cells)).toBe(cellsAtRest);
+
+  // A host without edges emphasises nothing: the overlay returns to its resting picture.
+  const noEdges = await findHostPoint(cells, panel, 'node-b4');
+  await hoverCanvas(cells, noEdges);
+  await expect(panel.getByRole('tooltip')).toContainText('host: node-b4');
+  await expect(panel.getByRole('tooltip')).not.toContainText('Flows');
+  await expect.poll(() => hasArcs(focus)).toBe(false);
+  await expect(rest).toHaveCSS('opacity', '1');
+
+  // While the drilldown popover of node-b1 is open, its edges stay emphasised when the pointer is on a
+  // cell that has no edges of its own. The tooltip is that cell's and says nothing about flows.
+  const farCell = await findHostPoint(cells, panel, 'node-a4');
+  await cells.click({ position: onRing });
+  await expect(panel.getByRole('button', { name: 'Close' })).toBeVisible();
+  await expect.poll(() => hasArcs(focus)).toBe(true);
+  const focusOfPopover = await stableHash(focus);
+  await hoverCanvas(cells, farCell);
+  await expect(panel.getByRole('tooltip')).toContainText('host: node-a4');
+  await expect(panel.getByRole('tooltip')).not.toContainText('Flows');
+  await expect(panel.getByRole('button', { name: 'Close' })).toBeVisible();
+  await expect(rest).toHaveCSS('opacity', '0.22');
+  expect(await frameHash(focus)).toBe(focusOfPopover);
+});
+
+test('flow overlay options switch to drawing on hover and filter the edges', async ({
+  gotoPanelEditPage,
+  readProvisionedDashboard,
+  page,
+}) => {
+  const dashboard = await readProvisionedDashboard({ fileName: FILE });
+  const panelEditPage = await gotoPanelEditPage({ dashboard: { uid: dashboard.uid }, id: '9' });
+  const count = page.getByTestId('flow-legend-count');
+  const rest = page.getByTestId('flow-overlay');
+  await expect(count).toHaveText('10 edges');
+  await expect.poll(() => hasArcs(rest)).toBe(true);
+  const options = panelEditPage.getCustomOptions('Flow overlay');
+
+  // On hover: nothing is drawn until a cell is hovered.
+  await options.getRadioGroup('Show arcs').check('On hover');
+  await expect(count).toHaveText('10 edges, shown on hover');
+  await expect.poll(() => hasArcs(rest)).toBe(false);
+  await options.getRadioGroup('Show arcs').check('Always');
+  await expect(count).toHaveText('10 edges');
+  await expect.poll(() => hasArcs(rest)).toBe(true);
+
+  // Lower is worse, so "worse than 0.3" keeps the six edges with a loss below 0.3 % and leaves out the
+  // edge without a value. The number input is changed last: Grafana commits it again after a delay,
+  // which would undo an option that is changed right after it.
+  await options.getRadioGroup('Worse values are').check('Lower');
+  const threshold = options.getNumberInput('Only draw edges worse than');
+  await threshold.fill('0.3');
+  await threshold.blur();
+  await expect(count).toHaveText(/^6 of 10 edges < 0\.30*\s*%$/);
+});
+
+test('flow overlay draws as many arcs at rest as its option says', async ({
+  gotoPanelEditPage,
+  readProvisionedDashboard,
+  page,
+}) => {
+  const dashboard = await readProvisionedDashboard({ fileName: FILE });
+  const panelEditPage = await gotoPanelEditPage({ dashboard: { uid: dashboard.uid }, id: '9' });
+  const count = page.getByTestId('flow-legend-count');
+  await expect(count).toHaveText('10 edges');
+  const arcs = panelEditPage.getCustomOptions('Flow overlay').getNumberInput('Arcs at rest');
+  // A stored panel without the option draws up to 100 arcs at rest.
+  await expect(arcs).toHaveValue('100');
+  await arcs.fill('3');
+  await arcs.blur();
+  await expect(count).toHaveText('3 of 10 edges drawn, worst first');
+  // A number over the limit is stored as the limit: the field shows what is stored.
+  await arcs.fill('1000');
+  await arcs.blur();
+  await expect(arcs).toHaveValue('500');
+  await expect(count).toHaveText('10 edges');
+});
+
+test('a panel without an edge query has no overlay canvas', async ({ gotoDashboardPage, readProvisionedDashboard }) => {
+  const dashboard = await readProvisionedDashboard({ fileName: FILE });
+  const dashboardPage = await gotoDashboardPage({ uid: dashboard.uid });
+  const panel = await dashboardPage.getPanelByTitle('FleetGrid');
+  await expect(panel.locator.locator('canvas').first()).toBeVisible();
+  await expect(panel.locator.locator('canvas')).toHaveCount(1);
+  await expect(panel.locator.getByTestId('flow-legend')).toHaveCount(0);
+});
+
+// Cell selection on the Flow Overlay panel: both features read the pointer. A Shift press selects and
+// hovers nothing while it lasts; a selection leaves the arcs as they are; the selection bar takes its
+// height from the grid's box, and the cell canvas and the two arc layers stay one size.
+test('Shift selects cells on a panel with a flow overlay and leaves the arcs as they are', async ({
+  gotoDashboardPage,
+  readProvisionedDashboard,
+}) => {
+  test.setTimeout(120_000);
+  const dashboard = await readProvisionedDashboard({ fileName: FILE });
+  const { panel, cells, rest, focus } = await openFlowPanel(gotoDashboardPage, dashboard.uid);
+  await expect.poll(() => hasArcs(rest)).toBe(true);
+  const page = cells.page();
+  const box = await cells.boundingBox();
+  if (!box) {
+    throw new Error('canvas has no bounding box');
+  }
+  const heights = () =>
+    Promise.all([cells, rest, focus].map((canvas) => canvas.evaluate((el) => el.getBoundingClientRect().height)));
+  const [cellsBefore, restBefore, focusBefore] = await heights();
+  expect([restBefore, focusBefore]).toEqual([cellsBefore, cellsBefore]);
+
+  // node-b1 is on the ring and node-b2 is its neighbour in the row; the points are in their first GPU cells.
+  const onRing = await findHostPoint(cells, panel, 'node-b1');
+  const neighbour = await findHostPoint(cells, panel, 'node-b2');
+  await hoverCanvas(cells, onRing);
+  await expect.poll(() => hasArcs(focus)).toBe(true);
+  await expect(rest).toHaveCSS('opacity', '0.22');
+
+  // The Shift press takes the pointer from the overlay: the tooltip and the focus end with the hover,
+  // and the arcs at rest are back at full opacity, for as long as the button is down.
+  await page.keyboard.down('Shift');
+  await page.mouse.move(box.x + onRing.x, box.y + onRing.y);
+  await page.mouse.down();
+  await expect(panel.getByRole('tooltip')).toHaveCount(0);
+  await expect.poll(() => hasArcs(focus)).toBe(false);
+  await expect(rest).toHaveCSS('opacity', '1');
+  await page.mouse.up();
+  await page.keyboard.up('Shift');
+  await expect(panel.getByTestId('selection-count')).toHaveText('1 cell selected');
+  await expect(panel.getByRole('button', { name: 'Close', exact: true })).toHaveCount(0);
+
+  // The bar took height from the grid's box. The three canvases lost it together, and the arcs are there.
+  const [cellsSelected, restSelected, focusSelected] = await heights();
+  expect(cellsSelected).toBeLessThan(cellsBefore);
+  expect([restSelected, focusSelected]).toEqual([cellsSelected, cellsSelected]);
+  await expect.poll(() => hasArcs(rest)).toBe(true);
+  await expect(panel.getByTestId('flow-legend-count')).toHaveText('10 edges');
+
+  // The selected cell is hovered like any other: its host's edges are in focus again.
+  await hoverCanvas(cells, onRing);
+  await expect(panel.getByRole('tooltip')).toContainText('Flows of host node-b1: 1 out, 1 in, 2 peers');
+  await expect.poll(() => hasArcs(focus)).toBe(true);
+  await hoverCanvas(cells, { x: 1, y: 1 });
+  await expect.poll(() => hasArcs(focus)).toBe(false);
+
+  // A Shift+drag over the arcs adds the cells under its rectangle. No arc is painted for it: the
+  // selection is drawn on the cell canvas.
+  const restPicture = await stableHash(rest);
+  await shiftDrag(cells, onRing, neighbour);
+  await expect(panel.getByTestId('selection-count')).toHaveText('3 cells selected');
+  await expect(panel.getByTestId('selection-label')).toHaveText('2 host values:');
+  await expect(panel.getByTestId('selection-band')).toBeHidden();
+  expect(await frameHash(rest)).toBe(restPicture);
+  await expect(rest).toHaveCSS('opacity', '1');
+
+  // The cohort comparison has a row for the cell query and none for the edge query.
+  await panel.getByTestId('selection-compare').click();
+  const comparison = page.getByTestId('cohort-comparison');
+  await expect(comparison).toBeVisible();
+  await expect(comparison.getByTestId('cohort-selected-A')).toHaveCount(1);
+  await expect(comparison.getByTestId('cohort-selected-E')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(comparison).toHaveCount(0);
+
+  // Clearing the selection gives the height back to all three canvases and leaves the arcs.
+  await panel.getByTestId('selection-clear').dispatchEvent('click');
+  await expect(panel.getByTestId('selection-bar')).toHaveCount(0);
+  await expect.poll(heights).toEqual([cellsBefore, cellsBefore, cellsBefore]);
+  await expect.poll(() => hasArcs(rest)).toBe(true);
 });
