@@ -24,7 +24,7 @@ const digits = fc.oneof(
 const hostName = fc
   .array(fc.tuple(text, digits), { minLength: 1, maxLength: 3 })
   .chain((fields) => text.map((tail) => fields.map(([t, d]) => t + d).join('') + tail));
-// Any text the notation can carry: no comma, no bracket, not empty.
+// Any text the notation can carry: no comma, no bracket, no white space, not empty.
 const anyName = fc.string({ minLength: 1, maxLength: 12 }).filter(isHostlistName);
 const names = fc.array(fc.oneof({ weight: 4, arbitrary: hostName }, { weight: 1, arbitrary: anyName }), {
   maxLength: 60,
@@ -72,6 +72,8 @@ describe('compactHostlist (properties)', () => {
           return;
         }
         expect(hostlist).not.toBeNull();
+        // White space would split the list where Slurm, pdsh or a shell reads it.
+        expect(hostlist).not.toMatch(/\s/);
         // A bracket never holds a comma-separated top-level item, so counting top-level commas counts items.
         const items = hostlist === '' ? 0 : hostlist!.replace(/\[[^\]]*\]/g, '').split(',').length;
         expect(items).toBeLessThanOrEqual(new Set(input).size);

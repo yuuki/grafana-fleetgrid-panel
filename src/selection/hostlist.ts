@@ -8,8 +8,10 @@
 
 // A longer run of digits stays text: its value would not be exact as a JavaScript number.
 const MAX_DIGITS = 15;
-// The notation has no escape for its own punctuation, and a list item cannot be empty.
-const UNSUPPORTED = /[,[\]]/;
+// The notation has no escape for its own punctuation, and a list item cannot be empty. White space
+// separates the arguments of the commands that read a hostlist, and pdsh also reads it as a separator
+// inside one.
+const UNSUPPORTED = /[,[\]\s]/;
 
 const collator = new Intl.Collator('en', { numeric: true });
 
@@ -155,7 +157,11 @@ function familyItems(family: ParsedName[]): string[] {
  * as it is. One numeric field per name is compacted; names that differ in another field or in their
  * text are listed separately.
  *
- * Returns `null` when a name is empty or contains `,`, `[` or `]`: the notation cannot express it.
+ * Returns `null` when a name is empty or contains `,`, `[`, `]` or white space: the notation cannot
+ * express it.
+ *
+ * Text after the bracket (`node-a[01-03].example.com`, `node[01-03]-ib`) is read by pdsh and by
+ * Slurm 23.11 and later; Slurm 23.02 and earlier reject it.
  */
 export function compactHostlist(names: Iterable<string>): string | null {
   const unique = [...new Set(names)].sort(compareNatural);

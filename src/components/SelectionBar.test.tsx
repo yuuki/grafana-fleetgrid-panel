@@ -53,6 +53,12 @@ describe('SelectionBar', () => {
     expect(isDisabled(screen.getByTestId('selection-copy-list'))).toBe(false);
   });
 
+  it('disables the hostlist copy for a value with white space: Slurm and pdsh would split it', () => {
+    render(<SelectionBar {...props({ values: ['node-a001', 'node a002'] })} />);
+    expect(isDisabled(screen.getByTestId('selection-copy-hostlist'))).toBe(true);
+    expect(isDisabled(screen.getByTestId('selection-copy-list'))).toBe(false);
+  });
+
   it('disables every copy when the selected cells have no value for the label', () => {
     render(<SelectionBar {...props({ values: [] })} />);
     expect(screen.getByTestId('selection-label')).toHaveTextContent('0 host values:');

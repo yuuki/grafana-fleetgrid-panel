@@ -155,7 +155,7 @@ export const SelectionBar: React.FC<SelectionBarProps> = ({
             aria-label={`Copy the ${label ?? 'label'} values as ${describe}`}
             tooltip={
               id === 'hostlist' && !hostlistPossible
-                ? 'Hostlist notation cannot express an empty value or one that contains , [ or ]'
+                ? 'Hostlist notation cannot express an empty value or one that contains , [ ] or white space'
                 : `Copy the ${label ?? 'label'} values as ${describe}`
             }
             onClick={() => {

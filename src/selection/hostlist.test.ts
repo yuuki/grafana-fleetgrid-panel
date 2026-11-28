@@ -31,9 +31,12 @@ describe('compactHostlist', () => {
     expect(compactHostlist(names)).toBe(hostlist);
   });
 
-  it.each([[['']], [['node-a1', 'a,b']], [['node[1]']], [['a]']]])('returns null for %j', (names) => {
-    expect(compactHostlist(names)).toBeNull();
-  });
+  it.each([[['']], [['node-a1', 'a,b']], [['node[1]']], [['a]']], [['node a1']], [['node-a1\t']], [['a\nb']]])(
+    'returns null for %j',
+    (names) => {
+      expect(compactHostlist(names)).toBeNull();
+    }
+  );
 
   it('accepts any iterable', () => {
     expect(compactHostlist(new Set(['node-a2', 'node-a1']))).toBe('node-a[1-2]');
@@ -44,6 +47,14 @@ describe('isHostlistName', () => {
   it('rejects the empty name and the notation punctuation', () => {
     expect(isHostlistName('node-a1.example')).toBe(true);
     expect(['', 'a,b', 'a[', 'a]'].map(isHostlistName)).toEqual([false, false, false, false]);
+  });
+
+  // Slurm and pdsh split a hostlist at white space as they do at a comma, and a shell splits the
+  // argument that carries it.
+  it('rejects white space, which the readers of a hostlist take for a separator', () => {
+    expect(['node a1', ' node-a1', 'node-a1 ', 'a\tb', 'a\nb', 'a\u00a0b'].map(isHostlistName)).toEqual(
+      Array(6).fill(false)
+    );
   });
 });
 
