@@ -2,6 +2,21 @@ import { PanelOptionsEditorBuilder, standardEditorsRegistry } from '@grafana/dat
 import { declareFitContentSupport, plugin } from './module';
 import { FleetGridOptions } from './types';
 
+// Grafana registers its standard option editors at start-up; the option builder only looks them up by
+// id. The registry takes its initializer once, before its first use, so the list is set here for the
+// whole file and names the editors of every option.
+beforeAll(() => {
+  standardEditorsRegistry.setInit(() =>
+    ['text', 'number', 'radio', 'boolean', 'color', 'select'].map((id) => ({ id, name: id, editor: () => null }))
+  );
+});
+
+const optionItems = () => {
+  const builder = new PanelOptionsEditorBuilder<FleetGridOptions>();
+  plugin.getPanelOptionsSupplier()(builder, { data: [] });
+  return builder.getItems();
+};
+
 // The migration handler and its gate are stored on the plugin by setMigrationHandler.
 const migrate = (options: Record<string, unknown>): FleetGridOptions =>
   plugin.onPanelMigration!({ options } as never) as FleetGridOptions;
@@ -31,19 +46,42 @@ describe('categoryStyle migration', () => {
   });
 });
 
-describe('flow overlay options', () => {
-  // Grafana registers its standard option editors at start-up; the option builder only looks them up by id.
-  beforeAll(() => {
-    standardEditorsRegistry.setInit(() =>
-      ['text', 'number', 'radio', 'boolean', 'color', 'select'].map((id) => ({ id, name: id, editor: () => null }))
-    );
+describe('stored option paths', () => {
+  // The paths are keys of the dashboard JSON. Two options with one path would write over each other.
+  it('are the same as before, each used once', () => {
+    const paths = optionItems().map((item) => item.path);
+    expect(paths).toEqual([
+      'levels',
+      'displayMode',
+      'defaultMetric',
+      'showValues',
+      'tooltipLabels',
+      'categoryLabel',
+      'categoryStyle',
+      'showCategoryLegend',
+      'missingColor',
+      'spatialAggregation',
+      'reduceCalc',
+      'rangeOverrides',
+      'selectionLabel',
+      'selectionVariable',
+      'flowRefId',
+      'flowEndpoints',
+      'flowShow',
+      'flowRestArcs',
+      'flowWorst',
+      'flowThreshold',
+      'flowOrderLabel',
+      'flowPathLabel',
+    ]);
+    expect(new Set(paths).size).toBe(paths.length);
+    const ids = optionItems().map((item) => item.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
+});
 
-  const items = () => {
-    const builder = new PanelOptionsEditorBuilder<FleetGridOptions>();
-    plugin.getPanelOptionsSupplier()(builder, { data: [] });
-    return builder.getItems().filter((item) => item.path.startsWith('flow'));
-  };
+describe('flow overlay options', () => {
+  const items = () => optionItems().filter((item) => item.path.startsWith('flow'));
 
   it('defaults to an overlay that is off', () => {
     expect(plugin.defaults).toMatchObject({
@@ -91,6 +129,24 @@ describe('flow overlay options', () => {
   it('carries the flow options through the categoryStyle migration', () => {
     const stored = { flowRefId: 'E', flowEndpoints: [{ level: 'host', source: 'src_host', destination: 'dst_host' }] };
     expect(migrate({ categoryStyle: 'topBar', ...stored })).toMatchObject(stored);
+  });
+});
+
+describe('selection options', () => {
+  it('default to an automatic label and no variable, so a new or existing panel writes nothing', () => {
+    expect(plugin.defaults).toMatchObject({ selectionLabel: '', selectionVariable: '' });
+  });
+
+  it('are carried through the migration untouched', () => {
+    const out = migrate({ categoryStyle: 'topBar', selectionLabel: 'host', selectionVariable: 'hosts' });
+    expect(out).toMatchObject({ selectionLabel: 'host', selectionVariable: 'hosts' });
+    // A dashboard saved before the options existed gains no keys.
+    expect(migrate({ categoryStyle: 'strip' })).toEqual({ categoryStyle: 'strip' });
+  });
+
+  it('are stored beside the flow options without touching them', () => {
+    const stored = { selectionLabel: 'host', selectionVariable: 'hosts', flowRefId: 'E', flowShow: 'hover' };
+    expect(migrate({ categoryStyle: 'border', ...stored })).toEqual({ categoryStyle: 'border', ...stored });
   });
 });
 

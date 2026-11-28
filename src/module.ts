@@ -7,6 +7,7 @@ import { FlowRestArcsEditor } from './options/FlowRestArcsEditor';
 import { LevelsEditor } from './options/LevelsEditor';
 import { ReduceCalcEditor } from './options/ReduceCalcEditor';
 import { RangeOverridesEditor } from './options/RangeOverridesEditor';
+import { SelectionLabelEditor } from './options/SelectionLabelEditor';
 import { TooltipLabelsEditor } from './options/TooltipLabelsEditor';
 import { CategoryLabelEditor } from './options/CategoryLabelEditor';
 
@@ -123,6 +124,27 @@ export const plugin = new PanelPlugin<FleetGridOptions>(FleetGridPanel).useField
       category: ['Color scale overrides'],
       editor: RangeOverridesEditor,
       defaultValue: [],
+    })
+    // Cell selection itself (Shift+click, Shift+drag) has no switch: it changes nothing until Shift is
+    // held. These two options only say what a selection is exported as; both defaults write nothing,
+    // and the sync needs both.
+    .addCustomEditor({
+      id: 'selectionLabel',
+      path: 'selectionLabel',
+      name: 'Selection label',
+      description:
+        'Hierarchy label whose values are copied and synced for the selected cells. Empty: the copy buttons choose a label when a selection begins, and nothing is synced to a variable',
+      category: ['Selection'],
+      editor: SelectionLabelEditor,
+      defaultValue: '',
+    })
+    .addTextInput({
+      path: 'selectionVariable',
+      name: 'Sync selection to variable',
+      description:
+        'Name of a multi-value or text box variable that is kept equal to the selected values of the selection label, so other panels can filter by it. Empty disables the sync',
+      category: ['Selection'],
+      defaultValue: '',
     })
     .addTextInput({
       path: 'flowRefId',

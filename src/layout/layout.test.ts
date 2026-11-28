@@ -1,5 +1,5 @@
 import { DEFAULT_LEVEL, LevelDef, HierarchyNode, CellModel } from '../types';
-import { computeLayout, S_MIN, S_MAX, CELL_GAP, GROUP_GAP, BORDER_PAD, LABEL_H } from './layout';
+import { computeLayout, pinnedTopLabel, S_MIN, S_MAX, CELL_GAP, GROUP_GAP, BORDER_PAD, LABEL_H } from './layout';
 
 const cell = (path: string[]): CellModel => ({ path, labels: {}, values: new Map([['A', 1]]) });
 
@@ -64,6 +64,35 @@ describe('computeLayout', () => {
   it('emits group labels for levels with showLabel', () => {
     const r = computeLayout(tree([['zone-a'], ['zone-b']], ['0']), levels, 800, 800);
     expect(r.labels.map((l) => l.text)).toEqual(['zone-a', 'zone-b']);
+  });
+
+  it('gives every group label the hierarchy path of its group', () => {
+    const nested: LevelDef[] = [
+      { ...DEFAULT_LEVEL, label: 'pod', layout: 'vertical', showLabel: true },
+      { ...DEFAULT_LEVEL, label: 'host', layout: 'grid', gridColumns: 2, showLabel: true },
+      { ...DEFAULT_LEVEL, label: 'gpu', layout: 'grid', gridColumns: 2, showLabel: false },
+    ];
+    const r = computeLayout(nestedGridTree(2, 2, 1), nested, 800, 800);
+    expect(r.labels.map((l) => [l.depth, l.path])).toEqual([
+      [2, ['pod1', '01']],
+      [2, ['pod1', '02']],
+      [1, ['pod1']],
+      [2, ['pod2', '01']],
+      [2, ['pod2', '02']],
+      [1, ['pod2']],
+    ]);
+  });
+
+  it('pins the last top-level label the viewport has scrolled past', () => {
+    const r = computeLayout(tree([['zone-a'], ['zone-b']], ['0']), levels, 800, 800);
+    const zoneB = r.labels[1];
+    expect(pinnedTopLabel(r.labels, 0)).toBeUndefined();
+    expect(pinnedTopLabel(r.labels, 1)?.text).toBe('zone-a');
+    expect(pinnedTopLabel(r.labels, zoneB.y - 1)?.text).toBe('zone-a');
+    expect(pinnedTopLabel(r.labels, zoneB.y)?.text).toBe('zone-b');
+    expect(pinnedTopLabel(r.labels, zoneB.y + 500)?.text).toBe('zone-b');
+    // Only top-level labels are pinned.
+    expect(pinnedTopLabel([{ ...zoneB, depth: 2 }], 1000)).toBeUndefined();
   });
 
   it('finds intermediate cell size by descending scan', () => {

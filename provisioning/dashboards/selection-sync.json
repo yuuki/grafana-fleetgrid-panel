@@ -1,0 +1,590 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "panels": [
+    {
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 10,
+      "options": {
+        "mode": "html",
+        "content": "<pre>hosts=${hosts:csv}\none_host=${one_host}\nhost_regex=${host_regex}\nlisted=${listed:csv}\nunlabelled=${unlabelled:csv}</pre>"
+      },
+      "title": "Variables",
+      "description": "What each variable gives to a panel that uses it.",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "type": "grafana-testdata-datasource",
+        "uid": "trlxrdZVk"
+      },
+      "description": "Syncs its selection to $hosts, by host.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 5
+      },
+      "id": 1,
+      "options": {
+        "levels": [
+          {
+            "label": "host",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "grid",
+            "gridColumns": 3,
+            "showBorder": false,
+            "showLabel": true
+          }
+        ],
+        "displayMode": "single",
+        "defaultMetric": "",
+        "showValues": true,
+        "missingColor": "rgb(70,70,70)",
+        "spatialAggregation": "max",
+        "reduceCalc": "lastNotNull",
+        "selectionLabel": "host",
+        "selectionVariable": "hosts"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "trlxrdZVk"
+          },
+          "refId": "A",
+          "scenarioId": "csv_content",
+          "csvContent": "host,power\nnode-a001,100\nnode-a002,120\nnode-a003,140\nnode-b001,160\nnode-b002,180\nnode-b003,200"
+        }
+      ],
+      "title": "Sync A",
+      "type": "yuuk1-fleetgrid-panel"
+    },
+    {
+      "datasource": {
+        "type": "grafana-testdata-datasource",
+        "uid": "trlxrdZVk"
+      },
+      "description": "Syncs its selection to $hosts too: the variable holds the selections of both panels.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 5
+      },
+      "id": 2,
+      "options": {
+        "levels": [
+          {
+            "label": "host",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "grid",
+            "gridColumns": 3,
+            "showBorder": false,
+            "showLabel": true
+          }
+        ],
+        "displayMode": "single",
+        "defaultMetric": "",
+        "showValues": true,
+        "missingColor": "rgb(70,70,70)",
+        "spatialAggregation": "max",
+        "reduceCalc": "lastNotNull",
+        "selectionLabel": "host",
+        "selectionVariable": "hosts"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "trlxrdZVk"
+          },
+          "refId": "A",
+          "scenarioId": "csv_content",
+          "csvContent": "host,power\nnode-a001,100\nnode-a002,120\nnode-a003,140\nnode-b001,160\nnode-b002,180\nnode-b003,200"
+        }
+      ],
+      "title": "Sync B",
+      "type": "yuuk1-fleetgrid-panel"
+    },
+    {
+      "datasource": {
+        "type": "grafana-testdata-datasource",
+        "uid": "trlxrdZVk"
+      },
+      "description": "Names $one_host, which takes one value: refused.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 5
+      },
+      "id": 3,
+      "options": {
+        "levels": [
+          {
+            "label": "host",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "grid",
+            "gridColumns": 3,
+            "showBorder": false,
+            "showLabel": true
+          }
+        ],
+        "displayMode": "single",
+        "defaultMetric": "",
+        "showValues": true,
+        "missingColor": "rgb(70,70,70)",
+        "spatialAggregation": "max",
+        "reduceCalc": "lastNotNull",
+        "selectionLabel": "host",
+        "selectionVariable": "one_host"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "trlxrdZVk"
+          },
+          "refId": "A",
+          "scenarioId": "csv_content",
+          "csvContent": "host,power\nnode-a001,100\nnode-a002,120\nnode-a003,140\nnode-b001,160\nnode-b002,180\nnode-b003,200"
+        }
+      ],
+      "title": "Single value",
+      "type": "yuuk1-fleetgrid-panel"
+    },
+    {
+      "datasource": {
+        "type": "grafana-testdata-datasource",
+        "uid": "trlxrdZVk"
+      },
+      "description": "Syncs its selection to the text box $host_regex as one regular expression.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 11
+      },
+      "id": 4,
+      "options": {
+        "levels": [
+          {
+            "label": "host",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "grid",
+            "gridColumns": 3,
+            "showBorder": false,
+            "showLabel": true
+          }
+        ],
+        "displayMode": "single",
+        "defaultMetric": "",
+        "showValues": true,
+        "missingColor": "rgb(70,70,70)",
+        "spatialAggregation": "max",
+        "reduceCalc": "lastNotNull",
+        "selectionLabel": "host",
+        "selectionVariable": "host_regex"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "trlxrdZVk"
+          },
+          "refId": "A",
+          "scenarioId": "csv_content",
+          "csvContent": "host,power\nnode-a001,100\nnode-a002,120\nnode-a003,140\nnode-b001,160\nnode-b002,180\nnode-b003,200"
+        }
+      ],
+      "title": "Text box",
+      "type": "yuuk1-fleetgrid-panel"
+    },
+    {
+      "datasource": {
+        "type": "grafana-testdata-datasource",
+        "uid": "trlxrdZVk"
+      },
+      "description": "Syncs to $listed, whose options are not hosts.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 11
+      },
+      "id": 5,
+      "options": {
+        "levels": [
+          {
+            "label": "host",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "grid",
+            "gridColumns": 3,
+            "showBorder": false,
+            "showLabel": true
+          }
+        ],
+        "displayMode": "single",
+        "defaultMetric": "",
+        "showValues": true,
+        "missingColor": "rgb(70,70,70)",
+        "spatialAggregation": "max",
+        "reduceCalc": "lastNotNull",
+        "selectionLabel": "host",
+        "selectionVariable": "listed"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "trlxrdZVk"
+          },
+          "refId": "A",
+          "scenarioId": "csv_content",
+          "csvContent": "host,power\nnode-a001,100\nnode-a002,120\nnode-a003,140\nnode-b001,160\nnode-b002,180\nnode-b003,200"
+        }
+      ],
+      "title": "Query options",
+      "type": "yuuk1-fleetgrid-panel"
+    },
+    {
+      "datasource": {
+        "type": "grafana-testdata-datasource",
+        "uid": "trlxrdZVk"
+      },
+      "description": "Names $unlabelled but no selection label: nothing is written.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 11
+      },
+      "id": 6,
+      "options": {
+        "levels": [
+          {
+            "label": "host",
+            "extract": "raw",
+            "sort": "natural",
+            "layout": "grid",
+            "gridColumns": 3,
+            "showBorder": false,
+            "showLabel": true
+          }
+        ],
+        "displayMode": "single",
+        "defaultMetric": "",
+        "showValues": true,
+        "missingColor": "rgb(70,70,70)",
+        "spatialAggregation": "max",
+        "reduceCalc": "lastNotNull",
+        "selectionLabel": "",
+        "selectionVariable": "unlabelled"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "trlxrdZVk"
+          },
+          "refId": "A",
+          "scenarioId": "csv_content",
+          "csvContent": "host,power\nnode-a001,100\nnode-a002,120\nnode-a003,140\nnode-b001,160\nnode-b002,180\nnode-b003,200"
+        }
+      ],
+      "title": "No label",
+      "type": "yuuk1-fleetgrid-panel"
+    }
+  ],
+  "preload": false,
+  "refresh": "",
+  "schemaVersion": 39,
+  "tags": ["fleetgrid", "e2e"],
+  "templating": {
+    "list": [
+      {
+        "name": "hosts",
+        "label": "hosts",
+        "description": "Multi-value: holds the hosts selected in Sync A and Sync B. All while nothing is selected.",
+        "type": "custom",
+        "multi": true,
+        "includeAll": true,
+        "query": "node-a001,node-a002,node-a003,node-b001,node-b002,node-b003",
+        "options": [
+          {
+            "selected": true,
+            "text": "All",
+            "value": "$__all"
+          },
+          {
+            "selected": false,
+            "text": "node-a001",
+            "value": "node-a001"
+          },
+          {
+            "selected": false,
+            "text": "node-a002",
+            "value": "node-a002"
+          },
+          {
+            "selected": false,
+            "text": "node-a003",
+            "value": "node-a003"
+          },
+          {
+            "selected": false,
+            "text": "node-b001",
+            "value": "node-b001"
+          },
+          {
+            "selected": false,
+            "text": "node-b002",
+            "value": "node-b002"
+          },
+          {
+            "selected": false,
+            "text": "node-b003",
+            "value": "node-b003"
+          }
+        ],
+        "current": {
+          "selected": true,
+          "text": ["All"],
+          "value": ["$__all"]
+        },
+        "hide": 0,
+        "skipUrlSync": false
+      },
+      {
+        "name": "one_host",
+        "label": "one_host",
+        "description": "Takes one value: the Single value panel must not write to it.",
+        "type": "custom",
+        "multi": false,
+        "includeAll": false,
+        "query": "node-a001,node-a002,node-a003,node-b001,node-b002,node-b003",
+        "options": [
+          {
+            "selected": true,
+            "text": "node-a001",
+            "value": "node-a001"
+          },
+          {
+            "selected": false,
+            "text": "node-a002",
+            "value": "node-a002"
+          },
+          {
+            "selected": false,
+            "text": "node-a003",
+            "value": "node-a003"
+          },
+          {
+            "selected": false,
+            "text": "node-b001",
+            "value": "node-b001"
+          },
+          {
+            "selected": false,
+            "text": "node-b002",
+            "value": "node-b002"
+          },
+          {
+            "selected": false,
+            "text": "node-b003",
+            "value": "node-b003"
+          }
+        ],
+        "current": {
+          "selected": true,
+          "text": "node-a001",
+          "value": "node-a001"
+        },
+        "hide": 0,
+        "skipUrlSync": false
+      },
+      {
+        "name": "host_regex",
+        "label": "host_regex",
+        "description": "Text box: holds one regular expression for the hosts selected in the Text box panel.",
+        "type": "textbox",
+        "query": ".*",
+        "options": [
+          {
+            "selected": true,
+            "text": ".*",
+            "value": ".*"
+          }
+        ],
+        "current": {
+          "selected": true,
+          "text": ".*",
+          "value": ".*"
+        },
+        "hide": 0,
+        "skipUrlSync": false
+      },
+      {
+        "name": "listed",
+        "label": "listed",
+        "description": "Multi-value query variable whose options (A, B, C) are not hosts: Grafana takes a selection out of it when it refreshes its options.",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-testdata-datasource",
+          "uid": "trlxrdZVk"
+        },
+        "definition": "*",
+        "query": {
+          "query": "*",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "options": [],
+        "current": {
+          "selected": true,
+          "text": ["All"],
+          "value": ["$__all"]
+        },
+        "hide": 0,
+        "skipUrlSync": false
+      },
+      {
+        "name": "unlabelled",
+        "label": "unlabelled",
+        "description": "Multi-value: the No label panel names it, but has no selection label, so nothing is written.",
+        "type": "custom",
+        "multi": true,
+        "includeAll": true,
+        "query": "node-a001,node-a002,node-a003,node-b001,node-b002,node-b003",
+        "options": [
+          {
+            "selected": true,
+            "text": "All",
+            "value": "$__all"
+          },
+          {
+            "selected": false,
+            "text": "node-a001",
+            "value": "node-a001"
+          },
+          {
+            "selected": false,
+            "text": "node-a002",
+            "value": "node-a002"
+          },
+          {
+            "selected": false,
+            "text": "node-a003",
+            "value": "node-a003"
+          },
+          {
+            "selected": false,
+            "text": "node-b001",
+            "value": "node-b001"
+          },
+          {
+            "selected": false,
+            "text": "node-b002",
+            "value": "node-b002"
+          },
+          {
+            "selected": false,
+            "text": "node-b003",
+            "value": "node-b003"
+          }
+        ],
+        "current": {
+          "selected": true,
+          "text": ["All"],
+          "value": ["$__all"]
+        },
+        "hide": 0,
+        "skipUrlSync": false
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "FleetGrid selection sync E2E",
+  "uid": "fleetgrid-selection-sync-e2e",
+  "version": 1,
+  "weekStart": ""
+}

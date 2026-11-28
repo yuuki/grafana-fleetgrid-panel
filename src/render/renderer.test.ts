@@ -576,6 +576,124 @@ describe('renderCanvas', () => {
     expect(fillRects(canvas)).toContainEqual({ x: 2, y: 2, width: 36, height: 1 });
   });
 
+  it('rings the selected cells in the maximum-contrast color without dimming the others', () => {
+    const canvas = document.createElement('canvas');
+    const layout = twoCategoryLayout();
+    renderCanvas(
+      canvas,
+      baseCtx({
+        metricInfos: [makeInfo('A', flatProcessor)],
+        layout,
+        selectedCells: new Set([layout.cells[1].cell]),
+      })
+    );
+    // The same band as the category ring (2px ring + 1px separator), on the second cell (x = 41) only.
+    expect(fillStyles(canvas)).toContain(theme.colors.text.maxContrast);
+    const rects = fillRects(canvas);
+    expect(rects).toContainEqual({ x: 41, y: 0, width: 40, height: 2 });
+    expect(rects).toContainEqual({ x: 43, y: 2, width: 36, height: 1 });
+    expect(rects).not.toContainEqual({ x: 0, y: 0, width: 40, height: 2 });
+    const alphas = canvasEvents(canvas)
+      .filter((event) => event.type === 'globalAlpha')
+      .map((event) => event.props.value);
+    expect(alphas).not.toContain(0.22);
+  });
+
+  it('thins the selection ring to 1px without a separator on cells below 14px, leaving their fill readable', () => {
+    const canvas = document.createElement('canvas');
+    const layout = makeLayout([['A', 1]]);
+    layout.cells[0] = { ...layout.cells[0], w: 6, h: 6 };
+    renderCanvas(
+      canvas,
+      baseCtx({
+        metricInfos: [makeInfo('A', flatProcessor)],
+        layout,
+        selectedCells: new Set([layout.cells[0].cell]),
+      })
+    );
+    const rects = fillRects(canvas);
+    // Fill, then the four 1px bars of the ring: a 4px square of fill stays visible.
+    expect(rects).toEqual([
+      { x: 0, y: 0, width: 6, height: 6 },
+      { x: 0, y: 0, width: 6, height: 1 },
+      { x: 0, y: 5, width: 6, height: 1 },
+      { x: 0, y: 1, width: 1, height: 4 },
+      { x: 5, y: 1, width: 1, height: 4 },
+    ]);
+  });
+
+  it('draws no selection ring for an empty selection or for cells of another model', () => {
+    const ringed = (selectedCells: RenderContext['selectedCells']) => {
+      const canvas = document.createElement('canvas');
+      renderCanvas(
+        canvas,
+        baseCtx({ metricInfos: [makeInfo('A', flatProcessor)], layout: twoCategoryLayout(), selectedCells })
+      );
+      return fillStyles(canvas).includes(theme.colors.text.maxContrast);
+    };
+    expect(ringed(undefined)).toBe(false);
+    expect(ringed(new Set())).toBe(false);
+    // A cell object from an earlier model is not one of this layout's cells.
+    expect(ringed(new Set([twoCategoryLayout().cells[0].cell]))).toBe(false);
+  });
+
+  it('shows the selection ring, not the category ring, on a cell that is selected and highlighted', () => {
+    const canvas = document.createElement('canvas');
+    const layout = twoCategoryLayout();
+    renderCanvas(
+      canvas,
+      baseCtx({
+        metricInfos: [makeInfo('A', flatProcessor)],
+        layout,
+        category: twoColorCategory,
+        categoryStyle: 'border',
+        hoverCategoryValue: 'a',
+        selectedCells: new Set(layout.cells.map((c) => c.cell)),
+      })
+    );
+    const events = canvasEvents(canvas);
+    // The color of every 2px top bar drawn on the first cell: the fillStyle in force when it is filled.
+    let fillStyle: unknown;
+    const topBarColors: unknown[] = [];
+    for (const e of events) {
+      if (e.type === 'fillStyle') {
+        fillStyle = e.props.value;
+      } else if (e.type === 'fillRect' && e.props.x === 0 && e.props.y === 0 && e.props.height === 2) {
+        topBarColors.push(fillStyle);
+      }
+    }
+    // The outline decoration draws its frame in the category color; the ring on top of it is the selection's.
+    expect(topBarColors[topBarColors.length - 1]).toBe(theme.colors.text.maxContrast);
+    expect(topBarColors.filter((color) => color === '#ff0000')).toHaveLength(1);
+    // The cell that does not match the highlight is still dimmed, and still ringed as selected.
+    expect(events.filter((e) => e.type === 'globalAlpha').map((e) => e.props.value)).toContain(0.22);
+    expect(fillRects(canvas)).toContainEqual({ x: 41, y: 0, width: 40, height: 2 });
+  });
+
+  it('keeps the value text inside the selection ring', () => {
+    const texts = (selected: boolean) => {
+      const canvas = document.createElement('canvas');
+      const layout = makeLayout([['A', 1]]);
+      // A 14px cell: the value fits the full cell but not the cell minus a 3px ring on every side.
+      layout.cells[0] = { ...layout.cells[0], w: 14, h: 14 };
+      const spy = jest.fn((v: number): DisplayValue => ({ numeric: v, text: '1234567', color: '#000000' }));
+      const context = canvas.getContext('2d')!;
+      (context.measureText as jest.Mock).mockImplementation((text: string) => ({ width: text.length }));
+      renderCanvas(
+        canvas,
+        baseCtx({
+          metricInfos: [makeInfo('A', spy)],
+          layout,
+          showValues: true,
+          selectedCells: selected ? new Set([layout.cells[0].cell]) : undefined,
+        })
+      );
+      return canvasEvents(canvas).filter((e) => e.type === 'fillText').length;
+    };
+    expect(texts(false)).toBe(1);
+    expect(texts(true)).toBe(0);
+  });
+
   it('thickens the outline frame from 1px to 2px as cells grow', () => {
     const category: CategoryModel = { label: 'partition', values: ['a'], colorByValue: new Map([['a', '#ff0000']]) };
     const small = document.createElement('canvas');

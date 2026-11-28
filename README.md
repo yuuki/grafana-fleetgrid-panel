@@ -23,6 +23,7 @@ The example shows two zones and 200 nodes (100 per zone), with four GPU cells pe
 - **Auto-fitted cells** — Cell size is computed from the panel dimensions. Numbers are drawn only when the formatted text fits; the exact value is always available on hover.
 - **Natural sort** — Numeric segments inside labels are compared as numbers (`node-a2 < node-a10`), ascending by default (descending and "data order" are also selectable).
 - **Multiple metrics** — Show one metric at a time with an in-panel selector (default), or opt in to split each cell into sub-regions to compare its metrics side by side. The tooltip and popover list every metric that returned data.
+- **Cell selection and cohort comparison** — Shift+click cells or group labels, or Shift+drag a rectangle, to select any set of cells. Compare the selected cells with the rest of the grid for every query, copy their hosts as a regular expression, a list or a hostlist (`node-a[001-012]`), and optionally keep a multi-value or text box dashboard variable equal to them so that other panels filter by them.
 - **Flow overlay** — Optionally draw the rows of one more query as arcs between cells or groups: pairwise metrics such as packet loss or round-trip time between hosts, or the ordered hops of a job's ring. Arcs take their color from Grafana's thresholds, can be limited to the degraded pairs, and are emphasised for the hovered cell.
 - **Drilldown** — Click a cell to open a popover with the current value per metric, plus a sparkline whenever time-series data is available for that metric. If the field has Data Links, navigation takes priority over the popover.
 
@@ -150,20 +151,20 @@ The following panel-options fragment gives GPU power query `A` a zone-specific m
   "rangeOverrides": [
     {
       "refId": "A",
-      "matchers": [{ "label": "zone", "operator": "exact", "value": "isk-sec-c" }],
+      "matchers": [{ "label": "zone", "operator": "exact", "value": "zone-a" }],
       "min": 0,
       "max": 700
     },
     {
       "refId": "A",
-      "matchers": [{ "label": "zone", "operator": "exact", "value": "isk-sec-d" }],
+      "matchers": [{ "label": "zone", "operator": "exact", "value": "zone-b" }],
       "min": 0,
       "max": 650
     },
     {
       "refId": "B",
       "matchers": [
-        { "label": "zone", "operator": "exact", "value": "isk-sec-c" },
+        { "label": "zone", "operator": "exact", "value": "zone-a" },
         { "label": "bw_type", "operator": "regex", "value": "^NVLink " }
       ],
       "min": 0,
@@ -172,7 +173,7 @@ The following panel-options fragment gives GPU power query `A` a zone-specific m
     {
       "refId": "B",
       "matchers": [
-        { "label": "zone", "operator": "exact", "value": "isk-sec-c" },
+        { "label": "zone", "operator": "exact", "value": "zone-a" },
         { "label": "bw_type", "operator": "regex", "value": "^(PCIe|NIC|Lustre|SONiC) " }
       ],
       "min": 0,
@@ -185,6 +186,15 @@ The following panel-options fragment gives GPU power query `A` a zone-specific m
 Add more ordered rules when another zone, pod, or bandwidth class needs a different maximum. Metrics such as GPU temperature, ECN marked packets, and PFC pause frames should have no matching rule when they need automatic scaling.
 
 If a hierarchy extraction regex collapses several source label sets into one cell, all contributing labels must resolve to the same rule. A mix of rules, or of matched and unmatched labels, produces a warning and uses the standard field-config/automatic range for that cell; FleetGrid never chooses according to input order. Leaving `rangeOverrides` empty preserves the previous behavior exactly.
+
+### Selection
+
+| Option                     | Default   | Description                                                                                                                                                                                  |
+| -------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Selection label            | automatic | Hierarchy label whose values are copied and synced for the selected cells. Empty: the copy buttons choose a label when a selection begins (see [Copy the selected hosts](#copy-the-selected-hosts)), and nothing is synced to a variable |
+| Sync selection to variable | empty     | Name of a dashboard variable that receives the selected values. Needs **Selection label**. Empty disables the sync. See [Sync to a dashboard variable](#sync-to-a-dashboard-variable) for the variable types and limits |
+
+Selecting cells needs no option: see [Cell selection](#cell-selection).
 
 ### Flow overlay
 
@@ -221,6 +231,109 @@ Clicking a cell resolves in this order:
 
 **Instant query note** — When **any** of the panel's queries is instant (no time series in the received frames), clicking re-runs **all** of the panel's queries as range over the dashboard time range via the data source — a query configured as `format: table` is re-issued as `time_series` to request a time series, though whether a matching series actually comes back depends on the query and data source — capped at ~100 data points, then extracts the series matching the clicked cell. The result is cached per panel, so opening additional cells does not trigger another fetch. A failed re-query shows a short message in the popover; that error state is cleared only when the panel's query `requestId` changes (for example on the next dashboard refresh), which is what allows a retry. When the panel already runs range queries, no re-query happens. If re-querying feels slow at your scale, switch to range queries to remove it entirely. This instant-query drilldown path has not yet been verified against a live Prometheus / VictoriaMetrics data source.
 
+## Cell selection
+
+Select the cells that look wrong together, then compare them with the rest of the grid or act on their hosts. A selection is made with the Shift key and the primary button of a mouse or pen:
+
+![Eight selected cells, the selection bar, and another panel that shows only the four selected hosts](./src/img/fleetgrid-cell-selection.png)
+
+| Gesture                   | Effect                                                                                                                        |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Shift+click a cell        | Selects the cell, or takes it out of the selection when it is selected                                                        |
+| Shift+click a group label | Selects every cell of the group (a zone, a host). When all of them are selected already, takes them all out                   |
+| Shift+drag                | Draws a rectangle and adds every cell it overlaps. The rectangle shows how many cells it covers. Drags only add, never remove |
+| Escape while dragging     | Abandons the drag; the selection stays as it was                                                                              |
+
+Everything without Shift works as before: a plain click still opens the drilldown popover or follows Data Links, also on a selected cell, and never changes the selection. Shift is read when the button goes down, so releasing Shift before the button does not change the gesture. A drag may leave the panel; it ends where the button is released.
+
+Selected cells get a ring in the theme's strongest contrast color. A bar appears under the grid with the size of the selection, **Compare**, three copy buttons and **Clear**. The grid keeps its layout when the bar appears: no cell moves, and the grid scrolls if the bar covers its last rows.
+
+On a panel that draws a flow overlay, a selection leaves the arcs as they are; see [With cell selection](#with-cell-selection).
+
+To clear the selection, use **Clear**, or press Escape while the keyboard focus is in the panel. After a selection gesture the focus is on the bar, so Escape works at once. While a drilldown popover or a link menu is open, Escape leaves the selection as it is. Changing the hierarchy levels also clears the selection.
+
+The selection belongs to the viewer and is not saved in the dashboard; like the selected metric, it ends when Grafana re-creates the panel, for example when the panel view opens. It names cells by their hierarchy path, not by their position, so it stays on the same cells when the data refreshes, the panel is resized or the metric is switched.
+
+What a selection means does not change while it exists. Each cell is remembered with the label values it had when it was selected. A selected cell that disappears from the query results stays selected: the bar counts it as "not in the current data" and it takes no part in the comparison, because it has no value now. Its label values stay in the copies and in the synced variable, and the bar says how many values come from such cells ("2 host values (1 from cells not in the current data)"). The cell is ringed again when it comes back.
+
+Limits: cells cannot be selected with the keyboard or by touch (the grid is a canvas without keyboard navigation, and touch has no Shift key); the bar and the comparison are ordinary buttons and work with the keyboard. There is no freeform lasso: build other shapes from rectangles and Shift+clicks. A drag does not scroll the grid; scroll, then drag again.
+
+### Cohort comparison
+
+**Compare** opens a drawer that compares the selected cells with all other cells of the grid, for every query that gives the cells a value (the edge query of a [flow overlay](#edges-between-cells-flow-overlay) is not one). Each cell counts with the value the grid shows for that query.
+
+| Column     | Meaning                                                                                                                                                                                                                                 |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| With value | Cells that have a value for the query                                                                                                                                                                                                   |
+| No value   | Cells that have none. They are not counted as zero and are left out of the statistics                                                                                                                                                   |
+| Min, Max   | Lowest and highest value                                                                                                                                                                                                                |
+| Median     | The middle value. With an even number of values, the mean of the two middle values                                                                                                                                                      |
+| p95        | The value at position `0.95 × (n − 1)` of the sorted values, interpolated between its two neighbours (the definition of PromQL `quantile`, NumPy and spreadsheets). In a group of up to 21 cells it lies between the two highest values |
+| δ          | Cliff's delta, a measure of how far the two groups overlap                                                                                                                                                                              |
+
+δ compares every selected cell with every other cell: the share of pairs in which the selected cell is higher, minus the share in which it is lower.
+
+- `+1.00`: every selected cell is higher than every other cell. The two groups do not overlap.
+- `−1.00`: every selected cell is lower.
+- `0.00`: a selected cell is as often higher as lower, as it is when the two groups have the same distribution.
+
+The further δ is from 0, the more that query tells the selection apart from the rest. δ uses only the order of the values, so one extreme cell cannot dominate it. It compares levels, not spread: a selection that holds both the highest and the lowest cells has a δ near 0, and Min and Max show the difference. δ is empty when either group has no value.
+
+### Copy the selected hosts
+
+The copy buttons copy the distinct values that the selected cells have for one label, in natural order. The bar names the label and the number of values ("3 host values:").
+
+That label is the **Selection label** option. When the option is empty, FleetGrid chooses a label at the moment a selection begins: the deepest hierarchy level whose values are unique in the grid at that moment. For `zone` → `host` → `gpu` that is `host`, because `gpu0` exists under every host. The choice depends on the data on screen (with one host on screen, `gpu` is unique), so set the option when the label matters. The chosen label stays the same until the selection is cleared, whatever the data does.
+
+| Button   | Example                         | Notes                                                                                                                                                                                               |
+| -------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Regex    | `^(node-a001\|node-a002)$`      | Matches exactly the selected values. See below for pasting it into a quoted string                                                                                                                  |
+| List     | `node-a001,node-a002`           | A value that contains a comma or a double quote is quoted as in CSV                                                                                                                                 |
+| Hostlist | `node-a[001-003,007],node-b012` | The notation of Slurm and pdsh. Zero padding is kept (`node-a[001-012]` is not `node-a[1-12]`). Names that differ in more than one number are listed separately. See below for what it cannot write |
+
+**Regex.** The text is a correct regular expression for RE2 (PromQL, LogQL), PCRE and JavaScript, and for `grep -E` unless a value contains a line break. Regular expression characters in a value are written as one-character classes (`node-a001[.]example`, `[[]fd00::1]:9100`) and a line break as `\n`, so for most values the text has no backslash and can stand between the double quotes of a PromQL or LogQL matcher as it is: `host=~"…"`. Three characters have no such form: a backslash, `^` and a double quote. When a selected value contains one of them, the bar shows a warning. The copied text is still a correct regular expression, but inside a quoted string it needs the escaping of that string; pasted as it is, the query fails, or, for a backslash, matches other values.
+
+**Hostlist.** The button is disabled when a value is empty or contains `,`, `[`, `]` or white space: the notation has no way to write these, and Slurm and pdsh read white space as a separator. Text after the bracket, as in `node-a[01-03].example.com` or `node[01-03]-ib`, is read by pdsh and by Slurm 23.11 and later. Slurm 23.02 and earlier reject it; for those versions, list such hosts with the **List** button.
+
+If the browser does not allow access to the clipboard, the bar shows the text in a field so that it can be selected and copied by hand. The field goes away when the selection changes.
+
+### Sync to a dashboard variable
+
+Set **Sync selection to variable** to the name of a dashboard variable, set **Selection label** to the label whose values the variable is to hold, and use the variable in the queries of other panels. FleetGrid then keeps the variable equal to the values that the selected cells have for that label. Without a selection label nothing is written, and the bar says so: a label that FleetGrid chooses from the data on screen is good enough for a copy, but not for filtering other panels.
+
+| Variable                                                        | Synced | What it receives, or why it is refused                                                                                                                                                                                         |
+| --------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Custom or query variable with **Multi-value**                   | Yes    | The values themselves. Grafana formats and escapes them for each query: `host=~"$selected_hosts"`                                                                                                                              |
+| Text box                                                        | Yes    | One regular expression, `^(node-a001\|node-a002)$`: `host=~"$selected_hosts"`                                                                                                                                                  |
+| Custom or query variable without **Multi-value**                | No     | It holds one of its options. A regular expression is not one of them: Grafana puts a query variable back to an option at the next refresh, and with **Include All option** the data source escapes the expression so that it matches nothing |
+| Constant, interval, data source, ad hoc filters, any other type | No     | It holds something else than label values                                                                                                                                                                                      |
+
+The bar shows the state of the sync after **Clear**:
+
+| Bar                                                   | Meaning                                                                                                                                              |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Writing $name…`                                      | The values were written and Grafana does not show them in the variable yet                                                                           |
+| `→ $name`                                             | FleetGrid read the variable back, and it holds the selection. `(with 1 other panel)` is added when other FleetGrid panels have a selection in it too |
+| `$name holds only 1 of the 2 selected values`         | A multi-value variable lost a part of the selection and holds nothing else: Grafana dropped values that are not among its options, or a viewer unticked them |
+| `$name was changed and no longer holds the selection` | The variable held the selection and now holds a value that FleetGrid did not write: a viewer chose it, or Grafana replaced the selection with it     |
+| `Grafana did not keep the selection in $name`         | Grafana never showed the written values, and the variable holds something else. FleetGrid leaves that value alone                                    |
+| Any other text                                        | The reason why nothing was written, for example `Variable "name" takes one value: sync to a multi-value variable or a text box`                      |
+
+How the sync behaves:
+
+- **Read back.** FleetGrid shows `→ $name` only after it has read the variable and found the selection in it. It reads the variable again every second and whenever the URL changes, so the bar follows what Grafana and viewers do with the variable.
+- **When it writes.** The variable is written 0.4 s after the selection last changed, and only when the selected values changed. A data refresh writes nothing. This also holds when the panel's own query uses the variable: the grid then shows only the selected hosts, and the selection and the variable stay as they are.
+- **Hosts that leave the data** stay in the variable. The variable holds the label values that the cells had when they were selected, so a host that stops reporting is still filtered for in the other panels.
+- **Values, not cells.** The variable holds the values of one label. If the same value exists in two groups, for example the same host name in two zones, a query that filters by the variable matches both.
+- **Clear.** When the selection is cleared, the variable gets back the value it had before the first write, for example **All**. This happens only while the variable still holds the selection or a part of it. FleetGrid never writes over a value that it did not put into the variable, except with a new selection: after `$name was changed…` or `Grafana did not keep…` it does not write the selection again and does not put an older value back. The next change of the selection writes again, and Clear then puts back the value that the variable had at that moment.
+- **Several panels.** Several FleetGrid panels, and the copies of a repeated panel, can sync to one variable. The variable holds the selections of all of them together. Clearing one panel leaves the values of the others; clearing the last one puts back the original value.
+- **Options of a query variable.** Grafana accepts values that are not among the options of a multi-value variable. A query variable loses them when it loads its options again (with **Refresh: On time range change**, at every dashboard refresh). When some selected values are among the options, the variable keeps those, the bar says `$name holds only … of the … selected values`, and **Clear** puts the previous value back. When none is, Grafana sets the variable to a value of its own, the bar says `$name was changed…`, and that value stays after **Clear**. Sync to a variable whose options contain every host of the grid, to a custom variable or to a text box.
+- **Values that are not written.** A selected value that is equal to `$__all` is not synced to a multi-value variable, because Grafana reads it as **All**. A value with a backslash, `^` or a double quote is not synced to a text box, because whether its regular expression reaches a query unchanged depends on the data source. A multi-value variable that has no value at all is not written, because its state could not be put back. The bar says which of these applies.
+- **URL length.** The values are written to the dashboard URL (`var-<name>=…`). A selection that would add more than 6,000 characters to the URL is not synced: the bar says so and the variable gets its previous value back. Select fewer cells, or use the copy buttons.
+- **How a value reaches a query** is decided by Grafana and by the data source of the panel that uses the variable. With Grafana's Prometheus data source, a multi-value variable is exact for every value except one that contains a double quote or a line break, for which the query of the other panel fails with an error.
+- **Panel view and editor.** When Grafana re-creates the panel on the same dashboard (for example when the panel view or the panel editor opens), the selection ends, and the variable gets its previous value back as with **Clear**.
+- **No restore from the variable.** After a page reload, or after leaving the dashboard and coming back with the browser's Back button, the variable still has its value from the URL and the panel has no selection; reset the variable with its own picker.
+
 ## Edges between cells (flow overlay)
 
 Cells show the state of one endpoint. Many faults in an AI / HPC cluster are between two endpoints: a lossy link between two hosts, pause frames that spread from one rack to another, or one slow hop in a job's ring. The flow overlay draws such pairwise data as arcs on top of the grid.
@@ -239,7 +352,7 @@ max by (src_host, dst_host) (fabric_probe_loss_ratio)
 ```
 
 - The overlay is bound to a query by its refId, never by label names. A dashboard whose queries happen to carry labels such as `src_host` does not change until an edge query is named. Spaces around the refId and around the label names of the options are ignored.
-- The edge query is taken out of the cell pipeline. It does not create cells, is not offered in the metric selector, and is not part of the drilldown re-query. Its labels and its refId are not offered by the editors of the cell options either (hierarchy levels, tooltip labels, category label, range overrides).
+- The edge query is taken out of the cell pipeline. It does not create cells, is not offered in the metric selector, is not part of the drilldown re-query, and has no row in the cohort comparison of a cell selection. Its labels and its refId are not offered by the editors of the cell options either (hierarchy levels, tooltip labels, category label, range overrides).
 - An edge query that returns **no rows** draws nothing and raises no warning; the header says `no edges`. This is the healthy state of a query that filters in the data source (`> 0`). When **no query with that refId ran** (it does not exist, or it is hidden), the banner and the header say so.
 - Time-series frames and table frames are both read, as for cells. A range query is reduced with the panel's **Reduce calculation**. In a table, the first numeric column that is not one of the configured labels is the value.
 - Unit, decimals, color scheme and **Thresholds** of the arcs come from Grafana's standard field config. Use **Overrides → Fields returned by query** for the edge query to give it its own unit and thresholds.
@@ -277,6 +390,16 @@ Hovering a cell emphasises the edges of that cell, or of its group when the edge
 While the drilldown popover of a cell is open, its edges stay emphasised when the pointer leaves the grid, is on the popover, or is on a cell that has no edges. Hovering a cell that has edges shows that cell's edges instead. The tooltip always describes the hovered cell.
 
 With **Show arcs: On hover** nothing is drawn until a cell is hovered. Use it with an unfiltered edge query to see all peers of one host at a time.
+
+### With cell selection
+
+[Cell selection](#cell-selection) works on a panel with a flow overlay, and the two do not change each other:
+
+- While Shift and the button are held, the pointer selects and does not hover. The tooltip and the emphasis of the hovered cell's edges end when the button goes down, and a drag over other cells emphasises nothing. The next pointer move after the release hovers again.
+- An open drilldown popover keeps the edges of its cell emphasised for as long as it is open, also during a Shift press. Selecting does not close the popover in Grafana 12.4, so close it first when the arcs are to be at rest while you select. (In Grafana 11.6 any press outside the popover closes it, and the emphasis ends with it.)
+- A selection does not emphasise the edges of the selected cells, and it does not hide or dim any arc. Hover a selected cell to see its edges, as for any other cell.
+- The ring of a selected cell is drawn with the cell, so arcs run over it as they run over the cell's color. The rectangle of a Shift+drag is drawn over the arcs.
+- The cohort comparison lists the cell queries only. The edge query has no value per cell, so it has no row there, and the copy buttons and the variable sync use the labels of the cells, never the source and destination labels of the edge query.
 
 ### Ordered paths
 

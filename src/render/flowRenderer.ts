@@ -9,7 +9,7 @@ import { FlowArc, FlowPoint, FlowRect, flowArc, flowArrowHead, flowBadgePoint } 
 
 export interface FlowRenderContext {
   layout: LayoutResult;
-  /** Width and height of the visible area of the panel body. */
+  /** Width and height of the box that shows the grid: the panel body without the selection bar. */
   viewportW: number;
   viewportH: number;
   /** Rectangle of each hierarchy node that can be an endpoint (see flowAnchors). */

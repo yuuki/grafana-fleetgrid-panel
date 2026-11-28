@@ -29,7 +29,10 @@ export interface FlowOverlayInput {
   restRef: React.RefObject<HTMLCanvasElement>;
   focusRef: React.RefObject<HTMLCanvasElement>;
   layout: LayoutResult;
-  /** Width and height of the visible area of the panel body. */
+  /**
+   * Width and height of the box that shows the grid: the panel body without the selection bar. The
+   * height must be the one the cell canvas is sized with, so that the layers are as high as it.
+   */
   viewportW: number;
   viewportH: number;
   theme: GrafanaTheme2;

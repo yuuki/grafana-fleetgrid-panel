@@ -21,6 +21,11 @@ export interface CellTooltipProps {
   minY?: number;
   maxX?: number;
   maxY?: number;
+  /**
+   * Whether a Shift press at this point of the page selects the cell that the tooltip shows. Such a
+   * press goes on to the grid; every other press stays with the tooltip.
+   */
+  selectsCellAt?: (clientX: number, clientY: number) => boolean;
 }
 
 const MAX_W = 320;
@@ -34,6 +39,7 @@ export const CellTooltip: React.FC<CellTooltipProps> = ({
   extraRows = 0,
   x,
   y,
+  selectsCellAt,
   ...bounds
 }) => {
   const theme = useTheme2();
@@ -83,7 +89,15 @@ export const CellTooltip: React.FC<CellTooltipProps> = ({
       tabIndex={0}
       onMouseMove={(event) => event.stopPropagation()}
       onPointerMove={(event) => event.stopPropagation()}
-      onPointerDown={(event) => event.stopPropagation()}
+      // A Shift press is a selection gesture on the grid. In a small panel the tooltip is placed over
+      // the pointer, so the press of a Shift+click on a cell lands on the tooltip of that cell and must
+      // go on to the grid. Where the tooltip covers another cell or a group label, the viewer sees the
+      // tooltip and not what is under it, so the press selects nothing.
+      onPointerDown={(event) => {
+        if (!(event.shiftKey && selectsCellAt?.(event.clientX, event.clientY))) {
+          event.stopPropagation();
+        }
+      }}
       onClick={(event) => event.stopPropagation()}
       onWheel={(event) => event.stopPropagation()}
       style={{
